@@ -1,0 +1,297 @@
+//! The "TIME" Engine - Augmented State Extended Kalman Filter
+//!
+//! Solves the Out-of-Sequence Measurement (OOSM) problem by maintaining
+//! a history of past states and their correlations, enabling retrodiction
+//! without rewinding the entire simulation.
+
+use nalgebra::{DMatrix, DVector};
+use serde::{Deserialize, Serialize};
+
+/// Augmented State Extended Kalman Filter
+///
+/// Maintains a rolling window of past states to handle measurements
+/// that arrive with variable latency (100ms - 500ms).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AugmentedStateFilter {
+    /// The Augmented State Vector: [x_k, x_{k-1}, ..., x_{k-N}]^T
+    /// Size: state_dim * (max_lag_depth + 1)
+    pub state_vector: DVector<f64>,
+    
+    /// The Augmented Covariance Matrix
+    /// Tracks correlations between current state and past states
+    /// Size: (state_dim * (max_lag_depth + 1))^2
+    pub covariance: DMatrix<f64>,
+    
+    /// Ring buffer of timestamps for each state block
+    /// Index 0 = current time t_k, Index 1 = t_{k-1}, etc.
+    pub history_timestamps: Vec<f64>,
+    
+    /// Dimensionality of a single state (e.g., 9 for Pos/Vel/Acc in 3D)
+    pub state_dim: usize,
+    
+    /// Maximum number of past states to maintain
+    pub max_lag_depth: usize,
+    
+    /// Process noise covariance (Q matrix)
+    pub process_noise: DMatrix<f64>,
+    
+    /// Measurement noise covariance (R matrix)
+    pub measurement_noise: DMatrix<f64>,
+}
+
+impl AugmentedStateFilter {
+    /// Create a new Augmented State Filter
+    ///
+    /// # Arguments
+    /// * `initial_state` - Initial state estimate (size: state_dim)
+    /// * `initial_cov` - Initial covariance (size: state_dim x state_dim)
+    /// * `process_noise` - Process noise Q (size: state_dim x state_dim)
+    /// * `measurement_noise` - Measurement noise R (size: meas_dim x meas_dim)
+    /// * `lag_depth` - Number of past states to maintain (e.g., 20 for 600ms at 30Hz)
+    pub fn new(
+        initial_state: DVector<f64>,
+        initial_cov: DMatrix<f64>,
+        process_noise: DMatrix<f64>,
+        measurement_noise: DMatrix<f64>,
+        lag_depth: usize,
+    ) -> Self {
+        let state_dim = initial_state.len();
+        let aug_size = state_dim * (lag_depth + 1);
+        
+        // Initialize augmented state vector (current + history)
+        let mut state_vector = DVector::zeros(aug_size);
+        state_vector.rows_mut(0, state_dim).copy_from(&initial_state);
+        
+        // Initialize augmented covariance (block diagonal initially)
+        let mut covariance = DMatrix::zeros(aug_size, aug_size);
+        covariance
+            .view_mut((0, 0), (state_dim, state_dim))
+            .copy_from(&initial_cov);
+        
+        // Initialize timestamps (all zeros initially)
+        let history_timestamps = vec![0.0; lag_depth + 1];
+        
+        Self {
+            state_vector,
+            covariance,
+            history_timestamps,
+            state_dim,
+            max_lag_depth: lag_depth,
+            process_noise,
+            measurement_noise,
+        }
+    }
+    
+    /// Prediction Step: Advance state forward by dt
+    ///
+    /// This performs two operations:
+    /// 1. Shift current state into history (augmentation)
+    /// 2. Propagate current state forward using motion model
+    ///
+    /// # Arguments
+    /// * `dt` - Time step in seconds
+    /// * `current_time` - Current timestamp
+    pub fn predict(&mut self, dt: f64, current_time: f64) {
+        // Step 1: Augmentation - Shift states into history
+        self.augment_state(current_time);
+        
+        // Step 2: Apply motion model to current state block
+        // Using constant velocity model: x_{k+1} = F * x_k
+        let F = self.create_motion_model(dt);
+        
+        // Extract current state (first block)
+        let x_current = self.state_vector.rows(0, self.state_dim).clone_owned();
+        
+        // Predict new state
+        let x_predicted = &F * &x_current;
+        
+        // Update current state block
+        self.state_vector.rows_mut(0, self.state_dim).copy_from(&x_predicted);
+        
+        // Step 3: Update covariance
+        // P_{k+1|k} = F * P_{k|k} * F^T + Q
+        let aug_size = self.state_dim * (self.max_lag_depth + 1);
+        let mut F_aug = DMatrix::identity(aug_size, aug_size);
+        
+        // Apply F only to the current state block
+        F_aug.view_mut((0, 0), (self.state_dim, self.state_dim)).copy_from(&F);
+        
+        // Propagate covariance
+        let P_predicted = &F_aug * &self.covariance * F_aug.transpose();
+        
+        // Add process noise to current block
+        let mut P_new = P_predicted;
+        let mut Q_aug = DMatrix::zeros(aug_size, aug_size);
+        Q_aug.view_mut((0, 0), (self.state_dim, self.state_dim))
+            .copy_from(&self.process_noise);
+        
+        P_new += Q_aug;
+        self.covariance = P_new;
+    }
+    
+    /// Update Step: Handle Out-of-Sequence Measurement
+    ///
+    /// This is the core innovation - it processes delayed measurements
+    /// by correlating them with the appropriate past state.
+    ///
+    /// # Arguments
+    /// * `measurement` - The delayed measurement vector
+    /// * `t_meas` - Timestamp when measurement was actually captured
+    pub fn update_oosm(&mut self, measurement: DVector<f64>, t_meas: f64) {
+        // Step 1: Find the lag index closest to t_meas
+        let lag_idx = self.find_lag_index(t_meas);
+        
+        // Step 2: Construct sparse measurement matrix H
+        // H maps measurement to the past state at lag_idx
+        let H_aug = self.build_measurement_matrix(lag_idx, measurement.len());
+        
+        // Step 3: Calculate innovation (residual)
+        // y = z - H * x_{k-lag}
+        let z_predicted = &H_aug * &self.state_vector;
+        let innovation = measurement - z_predicted;
+        
+        // Step 4: Calculate Kalman Gain
+        // K = P * H^T * (H * P * H^T + R)^{-1}
+        let S = &H_aug * &self.covariance * H_aug.transpose() + &self.measurement_noise;
+        
+        // Solve for K using Cholesky decomposition (more stable than inverse)
+        let S_chol = S.cholesky().expect("Covariance not positive definite");
+        let K = &self.covariance * H_aug.transpose() * S_chol.inverse();
+        
+        // Step 5: Update state
+        // x_new = x_old + K * innovation
+        self.state_vector += &K * innovation;
+        
+        // Step 6: Update covariance (Joseph form for numerical stability)
+        // P = (I - K*H) * P * (I - K*H)^T + K*R*K^T
+        let aug_size = self.state_vector.len();
+        let I = DMatrix::identity(aug_size, aug_size);
+        let IKH = &I - &K * &H_aug;
+        
+        self.covariance = &IKH * &self.covariance * IKH.transpose()
+            + &K * &self.measurement_noise * K.transpose();
+    }
+    
+    /// Get current state estimate (most recent block)
+    pub fn get_current_state(&self) -> DVector<f64> {
+        self.state_vector.rows(0, self.state_dim).clone_owned()
+    }
+    
+    /// Get current covariance estimate
+    pub fn get_current_covariance(&self) -> DMatrix<f64> {
+        self.covariance
+            .view((0, 0), (self.state_dim, self.state_dim))
+            .clone_owned()
+    }
+    
+    // ========== Private Helper Methods ==========
+    
+    /// Shift current state into history buffer
+    fn augment_state(&mut self, current_time: f64) {
+        // Shift state blocks to the right
+        for i in (1..=self.max_lag_depth).rev() {
+            let src_start = (i - 1) * self.state_dim;
+            let dst_start = i * self.state_dim;
+            
+            // Copy state block
+            let block = self.state_vector.rows(src_start, self.state_dim).clone_owned();
+            self.state_vector.rows_mut(dst_start, self.state_dim).copy_from(&block);
+        }
+        
+        // Shift timestamps
+        for i in (1..=self.max_lag_depth).rev() {
+            self.history_timestamps[i] = self.history_timestamps[i - 1];
+        }
+        self.history_timestamps[0] = current_time;
+    }
+    
+    /// Find the history index closest to the measurement timestamp
+    fn find_lag_index(&self, t_meas: f64) -> usize {
+        let mut best_idx = 0;
+        let mut min_diff = (self.history_timestamps[0] - t_meas).abs();
+        
+        for i in 1..=self.max_lag_depth {
+            let diff = (self.history_timestamps[i] - t_meas).abs();
+            if diff < min_diff {
+                min_diff = diff;
+                best_idx = i;
+            }
+        }
+        
+        best_idx
+    }
+    
+    /// Build sparse measurement matrix targeting specific lag index
+    fn build_measurement_matrix(&self, lag_idx: usize, meas_dim: usize) -> DMatrix<f64> {
+        let aug_size = self.state_vector.len();
+        let mut H_aug = DMatrix::zeros(meas_dim, aug_size);
+        
+        // Measurement observes position (first 3 components of state)
+        // H = [I_3x3, 0, 0, ...] at the lag_idx block
+        let block_start = lag_idx * self.state_dim;
+        
+        for i in 0..meas_dim.min(self.state_dim) {
+            H_aug[(i, block_start + i)] = 1.0;
+        }
+        
+        H_aug
+    }
+    
+    /// Create motion model matrix (constant velocity)
+    fn create_motion_model(&self, dt: f64) -> DMatrix<f64> {
+        // Assuming state is [px, py, pz, vx, vy, vz, ax, ay, az]
+        // Constant velocity model: p_new = p + v*dt
+        let mut F = DMatrix::identity(self.state_dim, self.state_dim);
+        
+        if self.state_dim >= 6 {
+            // Position updates from velocity
+            F[(0, 3)] = dt; // px += vx * dt
+            F[(1, 4)] = dt; // py += vy * dt
+            F[(2, 5)] = dt; // pz += vz * dt
+        }
+        
+        if self.state_dim >= 9 {
+            // Velocity updates from acceleration
+            F[(3, 6)] = dt; // vx += ax * dt
+            F[(4, 7)] = dt; // vy += ay * dt
+            F[(5, 8)] = dt; // vz += az * dt
+        }
+        
+        F
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_relative_eq;
+    
+    #[test]
+    fn test_filter_initialization() {
+        let state = DVector::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let cov = DMatrix::identity(6, 6);
+        let Q = DMatrix::identity(6, 6) * 0.01;
+        let R = DMatrix::identity(3, 3) * 0.1;
+        
+        let filter = AugmentedStateFilter::new(state, cov, Q, R, 10);
+        
+        assert_eq!(filter.state_dim, 6);
+        assert_eq!(filter.max_lag_depth, 10);
+        assert_eq!(filter.state_vector.len(), 6 * 11);
+    }
+    
+    #[test]
+    fn test_prediction_step() {
+        let state = DVector::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let cov = DMatrix::identity(6, 6);
+        let Q = DMatrix::identity(6, 6) * 0.01;
+        let R = DMatrix::identity(3, 3) * 0.1;
+        
+        let mut filter = AugmentedStateFilter::new(state, cov, Q, R, 5);
+        
+        filter.predict(0.1, 0.1);
+        
+        let current = filter.get_current_state();
+        assert_relative_eq!(current[0], 0.1, epsilon = 1e-6); // px = 0 + 1.0 * 0.1
+    }
+}

@@ -1,6 +1,6 @@
 [package]
 name = "godview_agent"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
@@ -10,3 +10,11 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
+
+# GodView Core v3 Integration
+godview_core = { path = "../godview_core" }
+nalgebra = "0.33"
+h3o = "0.9"
+ed25519-dalek = "2.1"
+rand = "0.8"
+uuid = { version = "1.7", features = ["v4", "serde"] }

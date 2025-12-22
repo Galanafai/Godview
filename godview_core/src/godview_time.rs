@@ -187,15 +187,77 @@ impl AugmentedStateFilter {
     // ========== Private Helper Methods ==========
     
     /// Shift current state into history buffer
+    /// 
+    /// This performs block-shifting on both the state vector AND the covariance matrix
+    /// to maintain proper correlations between current and historical states.
     fn augment_state(&mut self, current_time: f64) {
-        // Shift state blocks to the right
+        let s = self.state_dim;
+        
+        // Shift state blocks to the right (from index max_lag down to 1)
         for i in (1..=self.max_lag_depth).rev() {
-            let src_start = (i - 1) * self.state_dim;
-            let dst_start = i * self.state_dim;
+            let src_start = (i - 1) * s;
+            let dst_start = i * s;
             
             // Copy state block
-            let block = self.state_vector.rows(src_start, self.state_dim).clone_owned();
-            self.state_vector.rows_mut(dst_start, self.state_dim).copy_from(&block);
+            let block = self.state_vector.rows(src_start, s).clone_owned();
+            self.state_vector.rows_mut(dst_start, s).copy_from(&block);
+        }
+        
+        // CRITICAL FIX: Also shift covariance matrix blocks
+        // The covariance matrix is organized as:
+        // [ P_00  P_01  P_02  ... ]
+        // [ P_10  P_11  P_12  ... ]
+        // [ P_20  P_21  P_22  ... ]
+        // [ ...                   ]
+        //
+        // When we shift states, we need to shift both row and column blocks.
+        // Block (i,j) moves to block (i+1, j+1)
+        
+        // Shift from bottom-right to top-left to avoid overwriting
+        for i in (1..=self.max_lag_depth).rev() {
+            for j in (1..=self.max_lag_depth).rev() {
+                let src_row = (i - 1) * s;
+                let src_col = (j - 1) * s;
+                let dst_row = i * s;
+                let dst_col = j * s;
+                
+                // Copy covariance block P_{i-1, j-1} to P_{i, j}
+                let block = self.covariance
+                    .view((src_row, src_col), (s, s))
+                    .clone_owned();
+                self.covariance
+                    .view_mut((dst_row, dst_col), (s, s))
+                    .copy_from(&block);
+            }
+        }
+        
+        // Also shift cross-correlation blocks for the first row and column
+        // P_0j moves to P_1j (for j > 0) - first row
+        for j in (1..=self.max_lag_depth).rev() {
+            let src_col = (j - 1) * s;
+            let dst_col = j * s;
+            
+            // Row 0 → Row 1 for column j
+            let block = self.covariance
+                .view((0, src_col), (s, s))
+                .clone_owned();
+            self.covariance
+                .view_mut((s, dst_col), (s, s))
+                .copy_from(&block);
+        }
+        
+        // P_i0 moves to P_i1 (for i > 0) - first column
+        for i in (1..=self.max_lag_depth).rev() {
+            let src_row = (i - 1) * s;
+            let dst_row = i * s;
+            
+            // Column 0 → Column 1 for row i
+            let block = self.covariance
+                .view((src_row, 0), (s, s))
+                .clone_owned();
+            self.covariance
+                .view_mut((dst_row, s), (s, s))
+                .copy_from(&block);
         }
         
         // Shift timestamps

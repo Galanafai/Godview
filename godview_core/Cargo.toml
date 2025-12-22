@@ -12,8 +12,8 @@ nalgebra = { version = "0.33", features = ["serde-serialize"] }
 simba = "0.9"
 
 # Spatial Indexing (The "Space" Engine)
-h3o = { version = "0.9", features = ["geo"] }
-oktree = "0.5"
+h3o = { version = "0.9", features = ["geo", "serde"] }
+# oktree = "0.5"  # Temporarily disabled - requires Position trait implementation (see BUGS.md)
 geo = "0.28"
 
 # Security (The "Trust" Engine)

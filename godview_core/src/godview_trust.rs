@@ -5,9 +5,10 @@
 //! - Using Ed25519 signatures for cryptographic provenance
 //! - Preventing Sybil attacks and data spoofing
 
-use biscuit_auth::{Biscuit, Authorizer, KeyPair, PublicKey};
+use biscuit_auth::{Biscuit, KeyPair, PublicKey, macros::*};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use thiserror::Error;
 
 /// Authentication and authorization errors
@@ -109,8 +110,9 @@ pub struct SecurityContext {
     /// Root public key for verifying Biscuit tokens
     pub root_public_key: PublicKey,
     
-    /// Optional: Cache of revoked public keys
-    pub revoked_keys: Vec<VerifyingKey>,
+    /// Cache of revoked public keys (stored as bytes for O(1) lookup)
+    /// VerifyingKey doesn't implement Hash, so we store [u8; 32] instead
+    revoked_keys: HashSet<[u8; 32]>,
 }
 
 impl SecurityContext {
@@ -121,7 +123,7 @@ impl SecurityContext {
     pub fn new(root_public_key: PublicKey) -> Self {
         Self {
             root_public_key,
-            revoked_keys: Vec::new(),
+            revoked_keys: HashSet::new(),
         }
     }
     
@@ -151,13 +153,13 @@ impl SecurityContext {
             .authorizer()
             .map_err(|e| AuthError::BiscuitError(format!("{:?}", e)))?;
         
-        // Step 3: Add facts about the current request
+        // Step 3: Add facts about the current request using macros
         authorizer
-            .add_fact(format!("resource(\"{}\")", resource))
+            .add_fact(fact!("resource({resource})"))
             .map_err(|e| AuthError::BiscuitError(format!("{:?}", e)))?;
         
         authorizer
-            .add_fact(format!("operation(\"{}\")", operation))
+            .add_fact(fact!("operation({operation})"))
             .map_err(|e| AuthError::BiscuitError(format!("{:?}", e)))?;
         
         // Step 4: Add authorization policies
@@ -200,8 +202,8 @@ impl SecurityContext {
         // Step 1: Verify cryptographic signature
         packet.verify_integrity()?;
         
-        // Step 2: Check if key is revoked
-        if self.revoked_keys.contains(&packet.public_key) {
+        // Step 2: Check if key is revoked (O(1) lookup with HashSet)
+        if self.revoked_keys.contains(&packet.public_key.to_bytes()) {
             return Err(AuthError::Unauthorized("Public key revoked".to_string()));
         }
         
@@ -212,10 +214,22 @@ impl SecurityContext {
     }
     
     /// Revoke a public key (for compromised agents)
+    /// 
+    /// Complexity: O(1) insertion
     pub fn revoke_key(&mut self, key: VerifyingKey) {
-        if !self.revoked_keys.contains(&key) {
-            self.revoked_keys.push(key);
-        }
+        self.revoked_keys.insert(key.to_bytes());
+    }
+    
+    /// Check if a key is revoked
+    /// 
+    /// Complexity: O(1) lookup
+    pub fn is_revoked(&self, key: &VerifyingKey) -> bool {
+        self.revoked_keys.contains(&key.to_bytes())
+    }
+    
+    /// Get the number of revoked keys
+    pub fn revoked_count(&self) -> usize {
+        self.revoked_keys.len()
     }
 }
 
@@ -232,38 +246,44 @@ impl TokenFactory {
     
     /// Create a token with admin rights
     pub fn create_admin_token(&self) -> Result<Vec<u8>, AuthError> {
-        let biscuit = Biscuit::builder()
-            .right("admin")
+        let biscuit = biscuit!(r#"
+            right("admin");
+        "#)
             .build(&self.root_keypair)
             .map_err(|e| AuthError::BiscuitError(format!("{:?}", e)))?;
         
-        Ok(biscuit.to_vec())
+        Ok(biscuit.to_vec()
+            .map_err(|e| AuthError::BiscuitError(format!("{:?}", e)))?)
     }
     
     /// Create a token with write access to a specific resource prefix
     pub fn create_write_token(&self, resource_prefix: &str) -> Result<Vec<u8>, AuthError> {
-        let biscuit = Biscuit::builder()
-            .right("write")
-            .check(format!("check if resource($res), $res.starts_with(\"{}\")", resource_prefix))
+        let biscuit = biscuit!(r#"
+            right("write");
+            check if resource($res), $res.starts_with({resource_prefix});
+        "#)
             .build(&self.root_keypair)
             .map_err(|e| AuthError::BiscuitError(format!("{:?}", e)))?;
         
-        Ok(biscuit.to_vec())
+        Ok(biscuit.to_vec()
+            .map_err(|e| AuthError::BiscuitError(format!("{:?}", e)))?)
     }
     
     /// Create a token with publish rights
     pub fn create_publish_token(&self, sector: &str) -> Result<Vec<u8>, AuthError> {
-        let biscuit = Biscuit::builder()
-            .right("publish")
-            .check(format!("check if resource($res), $res.starts_with(\"godview/{}\")", sector))
+        let prefix = format!("godview/{}", sector);
+        let biscuit = biscuit!(r#"
+            right("publish");
+            check if resource($res), $res.starts_with({prefix});
+        "#)
             .build(&self.root_keypair)
             .map_err(|e| AuthError::BiscuitError(format!("{:?}", e)))?;
         
-        Ok(biscuit.to_vec())
+        Ok(biscuit.to_vec()
+            .map_err(|e| AuthError::BiscuitError(format!("{:?}", e)))?)
     }
 }
 
-// Serde helpers for Ed25519 types
 mod signature_serde {
     use ed25519_dalek::Signature;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -279,8 +299,11 @@ mod signature_serde {
     where
         D: Deserializer<'de>,
     {
-        let bytes: [u8; 64] = Deserialize::deserialize(deserializer)?;
-        Signature::from_bytes(&bytes).map_err(serde::de::Error::custom)
+        // Deserialize as a Vec<u8> first, then convert to array
+        let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
+        let bytes_array: [u8; 64] = bytes.try_into()
+            .map_err(|_| serde::de::Error::custom("Expected 64 bytes for signature"))?;
+        Ok(Signature::from_bytes(&bytes_array))
     }
 }
 
@@ -336,11 +359,12 @@ mod tests {
     #[test]
     fn test_biscuit_authorization() {
         let root_keypair = KeyPair::new();
-        let factory = TokenFactory::new(root_keypair.clone());
+        let public_key = root_keypair.public();  // Get public key before moving
+        let factory = TokenFactory::new(root_keypair);
         
         let admin_token = factory.create_admin_token().unwrap();
         
-        let context = SecurityContext::new(root_keypair.public());
+        let context = SecurityContext::new(public_key);
         
         let result = context.verify_access(
             &admin_token,
@@ -354,12 +378,13 @@ mod tests {
     #[test]
     fn test_unauthorized_access_denied() {
         let root_keypair = KeyPair::new();
-        let factory = TokenFactory::new(root_keypair.clone());
+        let public_key = root_keypair.public();  // Get public key before moving
+        let factory = TokenFactory::new(root_keypair);
         
         // Create token for NYC only
         let nyc_token = factory.create_write_token("godview/nyc").unwrap();
         
-        let context = SecurityContext::new(root_keypair.public());
+        let context = SecurityContext::new(public_key);
         
         // Try to access SF resource with NYC token
         let result = context.verify_access(

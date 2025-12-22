@@ -565,11 +565,13 @@ impl TrackManager {
     /// 
     /// If the canonical_id changes (when the incoming packet has a smaller UUID),
     /// the track will be rekeyed in the HashMap.
+    /// 
+    /// Returns the new canonical_id (which may have changed due to Highlander merge).
     fn fuse_track(
         &mut self,
         track_id: Uuid,
         packet: &GlobalHazardPacket,
-    ) -> Result<(), TrackingError> {
+    ) -> Result<Uuid, TrackingError> {
         // Get the track
         let track = self.tracks.get(&track_id)
             .ok_or(TrackingError::TrackNotFound(track_id))?;
@@ -625,7 +627,7 @@ impl TrackManager {
         // and update the spatial index to point to the new key
         if new_canonical_id != old_canonical_id {
             // Remove track from HashMap, update its key, and reinsert
-            if let Some(mut track) = self.tracks.remove(&track_id) {
+            if let Some(track) = self.tracks.remove(&track_id) {
                 // Update spatial index with new key
                 self.spatial_index_remove(track.h3_cell, track_id);
                 self.spatial_index_insert(track.h3_cell, new_canonical_id);
@@ -635,7 +637,8 @@ impl TrackManager {
             }
         }
         
-        Ok(())
+        // Return the new canonical_id (may have changed due to Highlander merge)
+        Ok(new_canonical_id)
     }
     
     /// Process an incoming GlobalHazardPacket through the full 4-stage pipeline.
@@ -651,11 +654,9 @@ impl TrackManager {
         match self.find_association(packet)? {
             Some(track_id) => {
                 // Stages 3 & 4: Fuse with existing track
-                self.fuse_track(track_id, packet)?;
-                
-                // Return the (possibly updated) canonical ID
-                let track = self.tracks.get(&track_id).unwrap();
-                Ok(track.canonical_id)
+                // fuse_track returns the (possibly updated) canonical_id
+                let canonical_id = self.fuse_track(track_id, packet)?;
+                Ok(canonical_id)
             }
             None => {
                 // No match: Create new track

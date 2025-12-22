@@ -412,4 +412,112 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].entity_type, "vehicle");
     }
+    
+    #[test]
+    fn test_edge_length_resolution_aware() {
+        // Verify the edge length lookup table works correctly
+        assert!((edge_length_meters(Resolution::Ten) - 65.907).abs() < 0.01);
+        assert!((edge_length_meters(Resolution::Nine) - 174.375).abs() < 0.01);
+        assert!((edge_length_meters(Resolution::Eleven) - 24.910).abs() < 0.01);
+        
+        // Verify different resolutions give different lengths
+        assert!(edge_length_meters(Resolution::Nine) > edge_length_meters(Resolution::Ten));
+        assert!(edge_length_meters(Resolution::Ten) > edge_length_meters(Resolution::Eleven));
+    }
+    
+    #[test]
+    fn test_3d_grid_cell_hashing() {
+        // Test the 3D grid cell structure
+        let coords1 = [15.0f32, 25.0, 35.0];
+        let coords2 = [15.5f32, 25.5, 35.5]; // Same cell (10m cell size)
+        let coords3 = [25.0f32, 25.0, 35.0]; // Different cell
+        
+        let cell1 = GridCell::from_local_coords(coords1, 10.0);
+        let cell2 = GridCell::from_local_coords(coords2, 10.0);
+        let cell3 = GridCell::from_local_coords(coords3, 10.0);
+        
+        // Same cell for nearby coordinates
+        assert_eq!(cell1, cell2);
+        
+        // Different cell for far coordinates
+        assert_ne!(cell1, cell3);
+        
+        // Check expected values
+        assert_eq!(cell1.x, 1);  // 15 / 10 = 1.5 -> floor = 1
+        assert_eq!(cell1.y, 2);  // 25 / 10 = 2.5 -> floor = 2
+        assert_eq!(cell1.z, 3);  // 35 / 10 = 3.5 -> floor = 3
+    }
+    
+    #[test]
+    fn test_3d_grid_neighbors() {
+        let center = GridCell { x: 0, y: 0, z: 0 };
+        
+        // Radius 1 should give 27 cells (3x3x3 cube)
+        let neighbors = center.neighbors(1);
+        assert_eq!(neighbors.len(), 27);
+        
+        // All neighbors should be within range
+        for cell in &neighbors {
+            assert!(cell.x >= -1 && cell.x <= 1);
+            assert!(cell.y >= -1 && cell.y <= 1);
+            assert!(cell.z >= -1 && cell.z <= 1);
+        }
+    }
+    
+    #[test]
+    fn test_multi_shard_query() {
+        let mut engine = SpatialEngine::new(Resolution::Ten);
+        
+        // Insert entities in different H3 cells (different locations)
+        let sf = Entity {
+            id: Uuid::new_v4(),
+            position: [37.7749, -122.4194, 10.0], // San Francisco
+            velocity: [0.0, 0.0, 0.0],
+            entity_type: "vehicle".to_string(),
+            timestamp: 1702934400000,
+            confidence: 0.95,
+        };
+        
+        let nearby = Entity {
+            id: Uuid::new_v4(),
+            position: [37.7750, -122.4195, 10.0], // Very close (same shard likely)
+            velocity: [0.0, 0.0, 0.0],
+            entity_type: "pedestrian".to_string(),
+            timestamp: 1702934400000,
+            confidence: 0.95,
+        };
+        
+        engine.update_entity(sf).unwrap();
+        engine.update_entity(nearby).unwrap();
+        
+        // Query with radius that should cover both
+        let results = engine.query_radius([37.7749, -122.4194, 10.0], 100.0);
+        
+        // Should find both entities
+        assert_eq!(results.len(), 2);
+    }
+    
+    #[test]
+    fn test_query_all_altitudes() {
+        let mut engine = SpatialEngine::new(Resolution::Ten);
+        
+        // Insert entities at different altitudes
+        for alt in [0.0, 50.0, 100.0, 150.0] {
+            let entity = Entity {
+                id: Uuid::new_v4(),
+                position: [37.7749, -122.4194, alt],
+                velocity: [0.0, 0.0, 0.0],
+                entity_type: "drone".to_string(),
+                timestamp: 1702934400000,
+                confidence: 0.95,
+            };
+            engine.update_entity(entity).unwrap();
+        }
+        
+        // Query with large radius centered at 75m altitude - should get middle entities
+        let results = engine.query_radius([37.7749, -122.4194, 75.0], 50.0);
+        
+        // Should get 50m and 100m entities (within 50m radius of 75m center)
+        assert_eq!(results.len(), 2);
+    }
 }

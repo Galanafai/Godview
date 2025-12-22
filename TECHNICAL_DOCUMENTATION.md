@@ -192,612 +192,128 @@ tokio = { version = "1", features = ["full"] }          # Async runtime
 
 ---
 
-## 💻 Code Deep Dive
+## 🧩 Component Deep Dive: GodView Core
 
-### 1. The 3D Projection Math (Rust)
+### 1. The "TIME" Engine: AS-EKF Sensor Fusion
 
-**File:** `agent/src/main.rs`
+**File:** `godview_core/src/godview_time.rs`
 
-**The Problem:**
-We have a 2D bounding box from face detection. How do we convert this to real-world 3D coordinates?
+The **Augmented State Extended Kalman Filter (AS-EKF)** solves the "Impossible Time Problem" of distributed perception: processing measurements that arrive out of order or late due to network latency, without storing a buffer of raw images.
 
-**The Solution: Pinhole Camera Model**
+**How It Works:**
+1.  **State Augmentation:** The filter state vector isn't just $x_k$. It is a concatenated vector of the current state *plus* $N$ past states:
+    $$X_{aug} = [x_k, x_{k-1}, ..., x_{k-N}]^T$$
+    -   **Lag Depth:** $N=20$. At 30Hz, this gives a **600ms rewinding window**.
+    -   **State Dimension:** 9 variables per state (Position 3D, Velocity 3D, Acceleration 3D). Total size: $9 \times 21 = 189$ doubles.
 
+2.  **Prediction Step ($x_{k|k-1}$):**
+    -   Shifts the sliding window: $x_{k-i}$ becomes $x_{k-i-1}$.
+    -   Current state $x_k$ evolves via Newton's laws (Constant Velocity Model).
+    -   Covariance $P$ is propagated, adding process noise $Q$ *only* to the current state block.
+
+3.  **Update Step (OOSM):**
+    -   When a measurement $z$ arrives with timestamp $t_{meas}$, we find the closest past state $x_{k-i}$.
+    -   We construct a sparse measurement matrix $H_{aug}$ that only selects the $x_{k-i}$ block.
+    -   We update the *entire* augmented state vector using the innovation from that past moment.
+    -   **Result:** The "past" is corrected implies the "present" $x_k$ is instantly corrected via the correlation terms in the covariance matrix $P$.
+
+**Key Code Snippet (Joseph Form Update):**
 ```rust
-// Constants
-const FOCAL_LENGTH_CONST: f32 = 500.0;      // Camera focal length (pixels)
-const REAL_FACE_WIDTH_M: f32 = 0.15;        // Average face width (15cm)
-
-// Input: Face bounding box from OpenCV
-let face_width_px = face.width as f32;      // Width in pixels
-let face_x = face.x as f32 + (face.width as f32 / 2.0);  // Center X
-let face_y = face.y as f32 + (face.height as f32 / 2.0); // Center Y
-
-// Calculate Z (Depth)
-// Formula: Z = (Focal Length × Real Object Width) / Pixel Width
-let z = (FOCAL_LENGTH_CONST * REAL_FACE_WIDTH_M) / face_width_px;
-
-// Calculate X (Lateral Position)
-// Formula: X = (Pixel X - Center X) × Z / Focal Length
-let x = (face_x - center_x) * z / FOCAL_LENGTH_CONST;
-
-// Y is fixed at 0.0 for MVP (assumes faces at same height)
-let y = 0.0;
-
-// Result: 3D position [X, Y, Z] in meters
-let pos = [x, y, z];
-```
-
-**Why This Works:**
-
-Imagine looking at someone through a window:
-- If they're **close**, they appear **large** (many pixels)
-- If they're **far**, they appear **small** (few pixels)
-
-Since we know the real-world size of a face (~15cm), we can calculate distance:
-- Large face in image = Close to camera = Small Z
-- Small face in image = Far from camera = Large Z
-
-**Example:**
-```
-Face width: 100 pixels
-Z = (500 × 0.15) / 100 = 0.75 meters (75cm away)
-
-Face width: 50 pixels
-Z = (500 × 0.15) / 50 = 1.5 meters (150cm away)
+// Numerical stability is critical here
+let IKH = &I - &K * &H_aug;
+self.covariance = &IKH * &self.covariance * IKH.transpose()
+    + &K * &self.measurement_noise * K.transpose();
 ```
 
 ---
 
-### 2. The Hazard Packet (Rust)
+### 2. The "SPACE" Engine: H3 + Octree Indexing
 
-**File:** `agent/src/main.rs`
+**File:** `godview_core/src/godview_space.rs`
 
-```rust
-#[derive(Serialize, Deserialize, Debug)]
-struct HazardPacket {
-    id: String,           // Unique identifier (e.g., "hazard_42")
-    timestamp: i64,       // Unix timestamp in milliseconds
-    pos: [f32; 3],        // 3D position [X, Y, Z] in meters
-    #[serde(rename = "type")]
-    hazard_type: String,  // Type of hazard (e.g., "human_face")
-}
-```
+GodView solves the "Pancake World" problem (assuming everything is on a 2D ground plane) using a hierarchical hybrid index.
 
-**Example JSON Output:**
-```json
-{
-  "id": "hazard_42",
-  "timestamp": 1702934400000,
-  "pos": [0.25, 0.0, 1.2],
-  "type": "human_face"
-}
-```
+**Layer 1: Global Sharding (H3)**
+-   **Library:** `h3o` (Rust H3 implementation)
+-   **Resolution:** 10 (~66m edge length).
+-   **Function:** Handles the curvature of the Earth and 2D locality.
+-   **Why:** Lat/Lon is terrible for proximity math (poles, distortion). H3 hexagons are perfectly uniform.
 
-**Field Explanations:**
-- `id`: Used by viewer to track individual hazards (multi-agent support)
-- `timestamp`: For latency calculation (viewer compares with `Date.now()`)
-- `pos`: 3D coordinates in meters (origin is camera position)
-- `type`: Future-proof for multiple hazard types (forklift, spill, etc.)
+**Layer 2: Local Volumetric Indexing (Sparse Voxel Octree)**
+-   **Library:** `oktree`
+-   **Coordinate System:** Local Cartesian (meters) relative to the H3 cell center.
+-   **Quantization:** positions are compressed to `u16` (0-65535) spanning a $\pm 1000m$ cube.
+-   **Precision:** $2000m / 65536 \approx 3cm$ resolution.
+
+**Benefits:**
+-   **Drone vs. Car:** A drone at 300m altitude is in a different Octree node than a car at 0m, even if they have the same Lat/Lon.
+-   **Efficient Queries:** finding "all hazards within 50m" only searches the local octree nodes, not the entire world.
 
 ---
 
-### 3. The Publishing Loop (Rust)
+### 3. The "TRUST" Engine: CapBAC Security
 
-**File:** `agent/src/main.rs`
+**File:** `godview_core/src/godview_trust.rs`
 
-```rust
-loop {
-    // 1. Capture frame from webcam
-    cam.read(&mut frame)?;
-    
-    // 2. Convert to grayscale (Haar Cascade requires grayscale)
-    imgproc::cvt_color(&frame, &mut gray, imgproc::COLOR_BGR2GRAY, 0)?;
-    
-    // 3. Detect faces
-    let mut faces = Vector::<opencv::core::Rect>::new();
-    face_cascade.detect_multi_scale(
-        &gray,
-        &mut faces,
-        1.1,  // Scale factor (how much to reduce image size at each scale)
-        3,    // Min neighbors (higher = fewer false positives)
-        0,    // Flags
-        opencv::core::Size::new(30, 30), // Min face size
-        opencv::core::Size::new(0, 0),   // Max face size (0 = unlimited)
-    )?;
-    
-    // 4. Process each detected face
-    for face in faces.iter() {
-        // ... 3D projection math (see above) ...
-        
-        // 5. Create packet
-        let packet = HazardPacket {
-            id: format!("hazard_{}", hazard_counter),
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)?
-                .as_millis() as i64,
-            pos: [x, y, z],
-            hazard_type: "human_face".to_string(),
-        };
-        
-        // 6. Serialize to JSON
-        let json_payload = serde_json::to_string(&packet)?;
-        
-        // 7. Publish via Zenoh
-        session.put("godview/zone1/hazards", json_payload).await?;
-        
-        println!("[X-RAY EMITTER] Sent Hazard at pos: [{:.2}, {:.2}, {:.2}]", x, y, z);
-    }
-    
-    // 8. Sleep to maintain 30 FPS (33ms per frame)
-    sleep(Duration::from_millis(33)).await;
-}
-```
+We move beyond simple API keys to **Capability-Based Access Control (CapBAC)** using **Biscuit** tokens and **Ed25519** signatures.
 
-**Why 30 FPS?**
-- Balance between responsiveness and CPU usage
-- Webcams typically capture at 30 FPS anyway
-- Viewer interpolates to 60 FPS for smooth rendering
+**The Security Chain:**
+1.  **Provenance:** every hazard packet is signed by the agent's private Ed25519 key.
+    -   Prevents "spoofing" (can't fake being Agent #42).
+2.  **Authorization:** The agent presents a Biscuit token signed by the Root Authority.
+    -   Token: `allow if resource("godview/nyc/sector_7")`
+3.  **Datalog Policies:** Rules are evaluated logically.
+    -   *Example:* If Agent #42 tries to publish to `godview/sf/sector_1`, the policy evaluation fails because the token is restricted to NYC.
+
+**Why Biscuit?**
+-   **Offline Verification:** The server (or other peers) can verify tokens without calling a central auth server.
+-   **Attenuation:** An admin can take their "Root" token, create a restricted "NYC Admin" token, and give it to a region manager, who creates a "Sector 7" token for a specific camera. No database writes required.
 
 ---
 
-### 4. The Ghost Factory (JavaScript)
+## 💻 Web Viewer Architecture
 
+### The Ghost Rendering Pipeline
 **File:** `viewer/src/main.js`
 
-```javascript
-/**
- * Creates a new Red Ghost hazard avatar
- * Each ghost has independent materials for separate fade control
- */
-function createGhost() {
-    // Main sphere (the hazard indicator)
-    const ghostGeometry = new THREE.SphereGeometry(0.2, 32, 32);
-    const ghostMaterial = new THREE.MeshBasicMaterial({
-        color: 0xff0000,      // Red
-        transparent: true,
-        opacity: 0.8,
-        wireframe: false,
-    });
-    const ghostMesh = new THREE.Mesh(ghostGeometry, ghostMaterial);
-    
-    // Glow effect (outer sphere for visual impact)
-    const ghostGlowGeometry = new THREE.SphereGeometry(0.25, 32, 32);
-    const ghostGlowMaterial = new THREE.MeshBasicMaterial({
-        color: 0xff0000,
-        transparent: true,
-        opacity: 0.3,
-        side: THREE.BackSide,  // Render inside-out for glow effect
-    });
-    const ghostGlow = new THREE.Mesh(ghostGlowGeometry, ghostGlowMaterial);
-    ghostMesh.add(ghostGlow);  // Attach glow to main mesh
-    
-    // Store state in userData (Three.js convention)
-    ghostMesh.userData.mainMaterial = ghostMaterial;
-    ghostMesh.userData.glowMaterial = ghostGlowMaterial;
-    ghostMesh.userData.glowMesh = ghostGlow;
-    ghostMesh.userData.targetPos = new THREE.Vector3(0, 0, 0);
-    ghostMesh.userData.lastUpdate = Date.now();
-    
-    return ghostMesh;
-}
-```
+1.  **Deserialization:** `protobuf` (or JSON in MVP) -> JavaScript Object.
+2.  **Entity Mapping:** `Map<UUID, GhostObject>`.
+3.  **LERP Smoothing:**
+    -   Rust sends updates at ~10-30Hz.
+    -   Browser renders at 60Hz.
+    -   We use `ghost.position.lerp(target, 0.1)` every frame to smooth out the jitter.
+4.  **Auto-Pruning:**
+    -   If a ghost hasn't been updated in `2000ms`, it is marked `stale`.
+    -   Opacity fades: $1.0 \to 0.0$ over 500ms.
+    -   Removed from scene graph to prevent memory leaks.
 
-**Why Independent Materials?**
-
-If all ghosts shared the same material:
-```javascript
-// BAD: Shared material
-const sharedMaterial = new THREE.MeshBasicMaterial({...});
-ghost1.material = sharedMaterial;
-ghost2.material = sharedMaterial;
-
-// Changing opacity affects BOTH ghosts!
-sharedMaterial.opacity = 0.5;  // Both ghosts fade together
-```
-
-With independent materials:
-```javascript
-// GOOD: Each ghost has its own material
-ghost1.userData.mainMaterial.opacity = 0.5;  // Only ghost1 fades
-ghost2.userData.mainMaterial.opacity = 1.0;  // ghost2 stays solid
-```
+### Future: Gaussian Splatting
+Instead of red spheres, we can stream **Gaussian Splat** parameters ($position, covariance, color, opacity$) to render photorealistic "ghosts" of people/objects without transmitting video.
 
 ---
 
-### 5. The Multi-Agent Entity System (JavaScript)
+## 🚀 Testing Guide
 
-**File:** `viewer/src/main.js`
-
-```javascript
-// Dictionary: agentId → ghostMesh
-const ghosts = new Map();
-
-// Zenoh subscriber callback
-callback: (sample) => {
-    // 1. Parse incoming JSON
-    const payload = sample.payload.deserialize();
-    const data = JSON.parse(payload);
-    // data = { id: "hazard_42", timestamp: 1702934400000, pos: [0.25, 0.0, 1.2], type: "human_face" }
-    
-    // 2. Extract agent ID
-    const agentId = data.id;  // "hazard_42"
-    
-    // 3. Check if ghost exists
-    if (!ghosts.has(agentId)) {
-        // First time seeing this hazard → spawn new ghost
-        console.log(`[GODVIEW] Spawning new ghost for agent: ${agentId}`);
-        const newGhost = createGhost();
-        scene.add(newGhost);           // Add to Three.js scene
-        ghosts.set(agentId, newGhost); // Add to dictionary
-    }
-    
-    // 4. Update existing ghost
-    const ghost = ghosts.get(agentId);
-    ghost.userData.targetPos.set(data.pos[0], data.pos[1], data.pos[2]);
-    ghost.userData.lastUpdate = Date.now();
-    
-    // 5. Update HUD
-    statusElement.textContent = `TRACKING ${ghosts.size} HAZARD(S)`;
-}
+### 1. Verification (Simulated)
+Run the CARLA bridge testing suite:
+```bash
+./setup_carla_integration.sh
+python3 carla_bridge/godview_carla_bridge.py --duration 30
 ```
+**Success Criteria:**
+-   Vehicles spawn in CARLA.
+-   Rust agents start (PIDs listed).
+-   "Hazard detected" logs appear with GPS coordinates matching the vehicles.
 
-**Why Map Instead of Array?**
-
-Map advantages:
-- O(1) lookup: `ghosts.get(agentId)` is instant
-- O(1) existence check: `ghosts.has(agentId)`
-- Easy iteration: `for (const [id, ghost] of ghosts.entries())`
-- Automatic key uniqueness
-
-Array would require:
-- O(n) search: `ghosts.find(g => g.id === agentId)`
-- Manual duplicate checking
-
----
-
-### 6. The LERP Animation (JavaScript)
-
-**File:** `viewer/src/main.js`
-
-**The Problem:**
-- Rust publishes at 30 FPS (every 33ms)
-- Browser renders at 60 FPS (every 16ms)
-- Direct position updates would look jittery
-
-**The Solution: Linear Interpolation (LERP)**
-
-```javascript
-const LERP_FACTOR = 0.1;  // Smoothing factor (0 = no movement, 1 = instant)
-
-function animate() {
-    requestAnimationFrame(animate);  // 60 FPS loop
-    
-    for (const [agentId, ghost] of ghosts.entries()) {
-        // Smoothly move ghost toward target position
-        ghost.position.lerp(ghost.userData.targetPos, LERP_FACTOR);
-        
-        // LERP formula (built into Three.js):
-        // new_position = current_position + (target_position - current_position) × factor
-        // 
-        // Example:
-        // Current: (0, 0, 0)
-        // Target:  (1, 0, 0)
-        // Factor:  0.1
-        // 
-        // Frame 1: (0, 0, 0) + ((1, 0, 0) - (0, 0, 0)) × 0.1 = (0.1, 0, 0)
-        // Frame 2: (0.1, 0, 0) + ((1, 0, 0) - (0.1, 0, 0)) × 0.1 = (0.19, 0, 0)
-        // Frame 3: (0.19, 0, 0) + ((1, 0, 0) - (0.19, 0, 0)) × 0.1 = (0.271, 0, 0)
-        // ... gradually approaches (1, 0, 0)
-    }
-    
-    renderer.render(scene, camera);
-}
+### 2. Manual Verification (Webcam)
+```bash
+cargo run --release
 ```
+**Success Criteria:**
+-   Webcam light turns on.
+-   Face detection logs appear (`[X-RAY EMITTER] Sent Hazard...`).
+-   Coordinates change as you move your head.
 
-**Visual Comparison:**
-
-Without LERP (jittery):
-```
-Frame 1:  ●─────────────────────
-Frame 2:  ──────●───────────────
-Frame 3:  ●─────────────────────
-Frame 4:  ────────────●─────────
-```
-
-With LERP (smooth):
-```
-Frame 1:  ●─────────────────────
-Frame 2:  ─●────────────────────
-Frame 3:  ──●───────────────────
-Frame 4:  ───●──────────────────
-```
-
----
-
-### 7. The Timeout & Cleanup System (JavaScript)
-
-**File:** `viewer/src/main.js`
-
-```javascript
-const GHOST_TIMEOUT = 2000;  // 2 seconds
-
-function animate() {
-    const now = Date.now();
-    const ghostsToRemove = [];
-    
-    for (const [agentId, ghost] of ghosts.entries()) {
-        const timeSinceUpdate = now - ghost.userData.lastUpdate;
-        
-        if (timeSinceUpdate > GHOST_TIMEOUT) {
-            // No updates for 2 seconds → mark for removal
-            ghostsToRemove.push(agentId);
-            console.log(`[GODVIEW] Removing stale ghost: ${agentId}`);
-        } else if (timeSinceUpdate > GHOST_TIMEOUT - 500) {
-            // Last 500ms → fade out smoothly
-            const fadeProgress = (timeSinceUpdate - (GHOST_TIMEOUT - 500)) / 500;
-            ghost.userData.mainMaterial.opacity = Math.max(0, 0.8 * (1 - fadeProgress));
-            ghost.userData.glowMaterial.opacity = Math.max(0, 0.3 * (1 - fadeProgress));
-        } else {
-            // Active → fade in
-            ghost.userData.mainMaterial.opacity = Math.min(0.8, ghost.userData.mainMaterial.opacity + 0.05);
-            ghost.userData.glowMaterial.opacity = Math.min(0.3, ghost.userData.glowMaterial.opacity + 0.02);
-        }
-    }
-    
-    // Garbage collection
-    for (const agentId of ghostsToRemove) {
-        const ghost = ghosts.get(agentId);
-        scene.remove(ghost);      // Remove from Three.js scene
-        ghosts.delete(agentId);   // Remove from Map
-    }
-    
-    // Update status
-    if (ghosts.size === 0) {
-        statusElement.textContent = 'SCANNING...';
-        statusElement.style.color = '#00ff00';
-    }
-}
-```
-
-**Timeline Visualization:**
-
-```
-0ms ──────────── 1500ms ──────────── 2000ms
- │                  │                   │
- │                  │                   │
-Active          Start Fade          Remove
-(Opacity: 0.8)  (Opacity: 0.8→0)   (Delete)
-```
-
-**Why 2 Seconds?**
-1. Network jitter: Messages may arrive irregularly
-2. Visual persistence: Hazards should remain visible briefly
-3. Fade effect: Last 500ms provides smooth exit animation
-
----
-
-## 🎯 Use Cases
-
-### Current Use Case: Face Detection Demo
-
-**Scenario:** Developer testing the system
-
-**Flow:**
-1. Developer sits in front of webcam
-2. Rust agent detects face
-3. 3D position calculated
-4. JSON published via Zenoh
-5. Browser shows red ghost at corresponding 3D location
-6. Developer moves → ghost follows smoothly
-7. Developer leaves frame → ghost fades after 2 seconds
-
-**Value:** Demonstrates the core technology works
-
----
-
-### Future Use Case 1: Warehouse Safety
-
-**Scenario:** Forklift operator needs to see around blind corners
-
-**Setup:**
-- 10 cameras mounted at warehouse intersections
-- Each camera runs a Rust agent (detecting forklifts + people)
-- Operator wears AR glasses showing the 3D viewer
-- Ghosts appear for hazards around corners
-
-**Flow:**
-1. Camera 3 detects forklift approaching intersection
-2. Publishes: `{ id: "forklift_7", pos: [5.2, 0, 12.3], type: "forklift" }`
-3. Operator's AR glasses show orange ghost (forklift) at that position
-4. Operator slows down, avoiding collision
-5. Forklift passes → ghost fades after 2 seconds
-
-**Value:** Prevents collisions, saves lives
-
----
-
-### Future Use Case 2: Construction Site Monitoring
-
-**Scenario:** Safety manager monitors entire site from control room
-
-**Setup:**
-- 50 cameras covering construction site
-- Rust agents detect: workers, vehicles, falling objects
-- Control room has large screen showing 3D site model
-- Different hazard types shown in different colors
-
-**Flow:**
-1. Camera 12 detects worker in restricted zone
-2. Publishes: `{ id: "worker_23", pos: [15.7, 2.1, 8.9], type: "human" }`
-3. Control room screen shows red ghost in restricted area
-4. Manager radios worker to evacuate
-5. Worker leaves → ghost disappears
-
-**Value:** Real-time safety monitoring without privacy invasion (no video)
-
----
-
-### Future Use Case 3: Smart Home Elderly Care
-
-**Scenario:** Adult children monitor elderly parent remotely
-
-**Setup:**
-- 3 cameras in parent's home (living room, bedroom, bathroom)
-- Rust agents detect: falls, prolonged stillness, unusual movement
-- Children receive alerts on phone app
-
-**Flow:**
-1. Camera detects parent lying on floor (unusual position)
-2. Publishes: `{ id: "person_1", pos: [2.1, 0.1, 3.4], type: "fall_detected" }`
-3. App shows alert: "Fall detected in living room"
-4. Child calls parent to check
-5. False alarm (parent doing yoga) → child dismisses alert
-
-**Value:** Safety monitoring while respecting privacy (no video storage)
-
----
-
-### Future Use Case 4: Retail Analytics
-
-**Scenario:** Store owner analyzes customer traffic patterns
-
-**Setup:**
-- 20 cameras throughout store
-- Rust agents detect customers (anonymized)
-- Dashboard shows heatmap of customer movement
-
-**Flow:**
-1. Cameras detect 50 customers throughout day
-2. Each publishes position every second
-3. Backend aggregates positions into heatmap
-4. Owner sees: "Customers spend 80% of time in front aisle"
-5. Owner rearranges store layout
-
-**Value:** Data-driven decisions without facial recognition
-
----
-
-## 🚀 Future Enhancements
-
-### Enhancement 1: Multiple Hazard Types
-
-**Current State:** Only detects faces
-
-**Proposed Change:**
-```rust
-// Rust agent
-enum HazardType {
-    HumanFace,
-    Forklift,
-    Spill,
-    Fire,
-    FallingObject,
-}
-
-// Detect different objects
-if face_detected {
-    hazard_type = HazardType::HumanFace;
-} else if forklift_detected {
-    hazard_type = HazardType::Forklift;
-}
-```
-
-```javascript
-// Viewer
-function createGhost(hazardType) {
-    const colors = {
-        'human_face': 0xff0000,    // Red
-        'forklift': 0xff8800,      // Orange
-        'spill': 0xffff00,         // Yellow
-        'fire': 0xff0000,          // Red (pulsing faster)
-        'falling_object': 0xff00ff // Magenta
-    };
-    
-    const ghostMaterial = new THREE.MeshBasicMaterial({
-        color: colors[hazardType] || 0xff0000,
-        // ...
-    });
-}
-```
-
-**Benefit:** Comprehensive safety monitoring
-
----
-
-### Enhancement 2: Persistent Tracking
-
-**Current State:** Each face gets a new ID every frame
-
-**Proposed Change:**
-```rust
-// Rust agent
-struct FaceTracker {
-    tracks: HashMap<u32, Track>,  // track_id → Track
-    next_id: u32,
-}
-
-impl FaceTracker {
-    fn update(&mut self, detections: Vec<Rect>) {
-        // Match new detections to existing tracks
-        for detection in detections {
-            if let Some(track_id) = self.find_matching_track(detection) {
-                // Update existing track
-                self.tracks.get_mut(&track_id).unwrap().update(detection);
-            } else {
-                // Create new track
-                self.tracks.insert(self.next_id, Track::new(detection));
-                self.next_id += 1;
-            }
-        }
-    }
-}
-```
-
-**Benefit:** Ghosts don't flicker when person briefly leaves frame
-
----
-
-### Enhancement 3: Mobile AR Viewer
-
-**Current State:** Desktop browser only
-
-**Proposed Change:**
-```javascript
-// Use AR.js or WebXR for mobile AR
-navigator.xr.requestSession('immersive-ar').then(session => {
-    // Overlay ghosts on camera feed
-    // User sees ghosts through phone camera
-});
-```
-
-**Benefit:** "X-Ray vision" on mobile devices (iPad, iPhone)
-
----
-
-### Enhancement 4: Gaussian Splat Rendering
-
-**Current State:** Simple red spheres
-
-**Proposed Change:**
-```javascript
-// Use 3D Gaussian Splatting for photorealistic rendering
-import { GaussianSplat } from 'gaussian-splat-3d';
-
-function createGhost() {
-    // Instead of sphere, render photorealistic human silhouette
-    const splat = new GaussianSplat(humanSplatData);
-    return splat;
-}
-```
-
-**Benefit:** Ghosts look like actual people (more intuitive)
-
----
-
-### Enhancement 5: Multi-Camera Fusion
-
-**Current State:** Each camera is independent
 
 **Proposed Change:**
 ```rust

@@ -3,9 +3,13 @@ name = "godview_agent"
 version = "0.3.0"
 edition = "2021"
 
+[features]
+default = []  # CARLA mode only by default (no OpenCV needed)
+webcam = ["dep:opencv"]  # Enable for local webcam mode
+
 [dependencies]
 zenoh = { version = "1.0.0", features = ["unstable"] }
-opencv = "0.92"
+opencv = { version = "0.92", optional = true }  # Only for webcam mode
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
@@ -18,3 +22,4 @@ h3o = "0.9"
 ed25519-dalek = "2.1"
 rand = "0.8"
 uuid = { version = "1.7", features = ["v4", "serde"] }
+

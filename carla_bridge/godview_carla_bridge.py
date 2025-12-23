@@ -187,6 +187,7 @@ class GodViewCARLABridge:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     env={
+                        **os.environ,  # Inherit from parent (preserves PATH, PYTHONPATH, etc.)
                         'AGENT_ID': vehicle_data['id'],
                         'CARLA_MODE': 'true',
                         'RUST_BACKTRACE': '1'

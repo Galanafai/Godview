@@ -5,14 +5,17 @@
 //! feed into the GodView Core v3 engines.
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::io::{self, BufRead};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::time::{sleep, Duration};
-use zenoh::prelude::*;
+// use tokio::time::{sleep, Duration};  // Not needed for CARLA mode
+// use zenoh::prelude::*;  // Removed in Zenoh 1.0
 
 // GodView Core v3 imports
-use godview_core::{Entity, AugmentedStateFilter, SpatialEngine, SignedPacket};
+use godview_core::{
+    Entity, AugmentedStateFilter, SpatialEngine, SignedPacket,
+    TrackManager, TrackingConfig, GlobalHazardPacket as CoreHazardPacket,
+};
 use ed25519_dalek::SigningKey;
 use h3o::Resolution;
 use nalgebra::{DVector, DMatrix};
@@ -62,15 +65,14 @@ pub async fn run_carla_mode() -> Result<()> {
     
     println!("🔧 Initializing GodView Core v3 engines...");
     
-    // Initialize AS-EKF with placeholder state (will update with first GPS)
+    // Initialize AS-EKF with 6D state [x, y, z, vx, vy, vz] to match godview_core
     let initial_state = DVector::from_vec(vec![
-        0.0, 0.0, 0.0,  // Position (will be updated)
+        0.0, 0.0, 0.0,  // Position (will be updated with first GPS)
         0.0, 0.0, 0.0,  // Velocity
-        0.0, 0.0, 0.0,  // Acceleration
     ]);
-    let initial_cov = DMatrix::identity(9, 9) * 10.0;
-    let Q = DMatrix::identity(9, 9) * 0.01;  // Process noise
-    let R = DMatrix::identity(3, 3) * 0.1;   // Measurement noise
+    let initial_cov = DMatrix::identity(6, 6) * 10.0;
+    let Q = DMatrix::identity(6, 6) * 0.01;  // Process noise
+    let R = DMatrix::identity(3, 3) * 0.1;   // Measurement noise (position only)
     
     let mut ekf = AugmentedStateFilter::new(initial_state, initial_cov, Q, R, 20);
     println!("   ✅ AS-EKF initialized (lag depth: 20 states)");
@@ -78,6 +80,10 @@ pub async fn run_carla_mode() -> Result<()> {
     // Initialize Spatial Engine
     let mut spatial_engine = SpatialEngine::new(Resolution::Ten);
     println!("   ✅ Spatial Engine initialized (H3 Resolution 10)");
+    
+    // Initialize Track Manager for distributed data association
+    let mut track_manager = TrackManager::new(TrackingConfig::default());
+    println!("   ✅ Track Manager initialized (GNN + CI + Highlander)");
     
     // Initialize Security
     let signing_key = SigningKey::generate(&mut OsRng);
@@ -87,7 +93,8 @@ pub async fn run_carla_mode() -> Result<()> {
     // ========== INITIALIZE ZENOH ==========
     
     let config = zenoh::Config::default();
-    let session = zenoh::open(config).await?;
+    let session = zenoh::open(config).await
+        .map_err(|e| anyhow::anyhow!("Zenoh error: {}", e))?;
     println!("🌐 Zenoh session established");
 
     let key = "godview/carla/hazards";  // CARLA-specific topic
@@ -157,7 +164,7 @@ pub async fn run_carla_mode() -> Result<()> {
             velocity: [0.0, 0.0, 0.0],  // TODO: Calculate from tracking
             entity_type: detection.class_name.clone(),
             timestamp,
-            confidence: detection.confidence as f64,
+            confidence: detection.confidence,  // Entity uses f32
         };
 
         // ========== UPDATE SPATIAL ENGINE ==========
@@ -172,6 +179,34 @@ pub async fn run_carla_mode() -> Result<()> {
             global_pos[2]
         ]);
         ekf.update_oosm(measurement, current_time);
+        
+        // ========== PROCESS THROUGH TRACK MANAGER ==========
+        // Convert detection class to class_id (0=person, 1=car, 2=truck, etc.)
+        let class_id = match detection.class_name.as_str() {
+            "person" => 0u8,
+            "car" => 1,
+            "truck" | "bus" => 2,
+            "bicycle" | "motorcycle" => 3,
+            _ => 255,  // Unknown
+        };
+        
+        let core_packet = CoreHazardPacket {
+            entity_id: entity.id,
+            position: global_pos,
+            velocity: [0.0, 0.0, 0.0],  // TODO: velocity estimation
+            class_id,
+            timestamp: current_time,
+            confidence_score: detection.confidence as f64,
+        };
+        
+        // Run through GNN + Covariance Intersection + Highlander pipeline
+        let canonical_id = match track_manager.process_packet(&core_packet) {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("⚠️  Track manager error: {}", e);
+                entity.id  // Fallback to original ID
+            }
+        };
 
         // ========== CREATE SIGNED PACKET ==========
         let packet = GlobalHazardPacket {
@@ -185,7 +220,8 @@ pub async fn run_carla_mode() -> Result<()> {
         
         // ========== PUBLISH VIA ZENOH ==========
         let signed_payload = serde_json::to_vec(&signed_packet)?;
-        session.put(key, signed_payload).await?;
+        session.put(key, signed_payload).await
+            .map_err(|e| anyhow::anyhow!("Zenoh put error: {}", e))?;
 
         // Print status every 10 detections
         if detection_count % 10 == 0 {

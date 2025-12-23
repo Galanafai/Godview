@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GodView - Distributed Gaussian Fusion Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            color: #fff;
+            overflow: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            text-align: center;
+            padding: 20px 0;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(90deg, #00d4ff, #00ff88, #ff00ff);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 1.1rem;
+        }
+
+        .demo-area {
+            flex: 1;
+            display: flex;
+            gap: 40px;
+            padding: 20px;
+        }
+
+        .visualization {
+            flex: 2;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .visualization svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .stats-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stat-card h3 {
+            font-size: 0.9rem;
+            color: #888;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+
+        .agent-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .agent-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            opacity: 0;
+            transform: translateX(-20px);
+            transition: all 0.5s ease;
+        }
+
+        .agent-item.visible {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .agent-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .agent-info {
+            flex: 1;
+        }
+
+        .agent-id {
+            font-size: 0.8rem;
+            color: #666;
+            font-family: monospace;
+        }
+
+        .uncertainty {
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+
+        .reduction-badge {
+            background: linear-gradient(135deg, #00ff88, #00d4ff);
+            color: #000;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+
+        .phase-indicator {
+            text-align: center;
+            padding: 15px;
+            font-size: 1.2rem;
+            color: #00d4ff;
+            min-height: 60px;
+        }
+
+        .controls {
+            text-align: center;
+            padding: 20px;
+        }
+
+        button {
+            background: linear-gradient(135deg, #00d4ff, #00ff88);
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border-radius: 30px;
+            cursor: pointer;
+            color: #000;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+        }
+
+        /* Ellipse styles */
+        .gaussian-ellipse {
+            fill-opacity: 0.3;
+            stroke-width: 2;
+            transition: all 1s ease;
+        }
+
+        .agent1 {
+            fill: #ff4444;
+            stroke: #ff6666;
+        }
+
+        .agent2 {
+            fill: #44ff44;
+            stroke: #66ff66;
+        }
+
+        .agent3 {
+            fill: #4444ff;
+            stroke: #6666ff;
+        }
+
+        .fused {
+            fill: #ffffff;
+            stroke: #00ff88;
+            stroke-width: 3;
+        }
+
+        .label {
+            font-size: 14px;
+            font-weight: bold;
+            fill: white;
+            text-anchor: middle;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.05);
+            }
+        }
+
+        .pulsing {
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        .hidden {
+            opacity: 0;
+        }
+
+        .fadeIn {
+            animation: fadeIn 0.5s forwards;
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🌐 GodView Distributed Fusion</h1>
+            <p class="subtitle">Gaussian Splat Fusion Demo • No Video, Just Math</p>
+        </header>
+
+        <div class="demo-area">
+            <div class="visualization">
+                <svg viewBox="0 0 600 400" id="canvas">
+                    <!-- Grid background -->
+                    <defs>
+                        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1" />
+                        </pattern>
+                    </defs>
+                    <rect width="100%" height="100%" fill="url(#grid)" />
+
+                    <!-- Agent ellipses (uncertainty) -->
+                    <g id="ellipses">
+                        <ellipse id="e1" class="gaussian-ellipse agent1 hidden" cx="200" cy="180" rx="80" ry="50" />
+                        <ellipse id="e2" class="gaussian-ellipse agent2 hidden" cx="350" cy="150" rx="50" ry="35" />
+                        <ellipse id="e3" class="gaussian-ellipse agent3 hidden" cx="280" cy="280" rx="100" ry="70" />
+                        <ellipse id="fused" class="gaussian-ellipse fused hidden" cx="280" cy="195" rx="30" ry="22" />
+                    </g>
+
+                    <!-- Labels -->
+                    <g id="labels">
+                        <text id="l1" class="label hidden" x="200" y="185">Agent 1</text>
+                        <text id="l2" class="label hidden" x="350" y="155">Agent 2</text>
+                        <text id="l3" class="label hidden" x="280" y="285">Agent 3</text>
+                        <text id="lf" class="label hidden" x="280" y="200"
+                            style="fill: #00ff88; font-size: 16px;">FUSED</text>
+                    </g>
+
+                    <!-- Center crosshair -->
+                    <g id="crosshair" class="hidden">
+                        <line x1="270" y1="195" x2="290" y2="195" stroke="#00ff88" stroke-width="2" />
+                        <line x1="280" y1="185" x2="280" y2="205" stroke="#00ff88" stroke-width="2" />
+                    </g>
+                </svg>
+            </div>
+
+            <div class="stats-panel">
+                <div class="stat-card">
+                    <h3>Phase</h3>
+                    <div class="phase-indicator" id="phase">Ready to start</div>
+                </div>
+
+                <div class="stat-card">
+                    <h3>Agent Detections</h3>
+                    <div class="agent-list" id="agent-list">
+                        <div class="agent-item" id="a1">
+                            <div class="agent-dot" style="background: #ff4444;"></div>
+                            <div class="agent-info">
+                                <div class="agent-id">Agent 1 • 7f3a...</div>
+                                <div class="uncertainty" style="color: #ff4444;">± 5.2m</div>
+                            </div>
+                        </div>
+                        <div class="agent-item" id="a2">
+                            <div class="agent-dot" style="background: #44ff44;"></div>
+                            <div class="agent-info">
+                                <div class="agent-id">Agent 2 • 2b1c...</div>
+                                <div class="uncertainty" style="color: #44ff44;">± 3.1m</div>
+                            </div>
+                        </div>
+                        <div class="agent-item" id="a3">
+                            <div class="agent-dot" style="background: #4444ff;"></div>
+                            <div class="agent-info">
+                                <div class="agent-id">Agent 3 • a9e4...</div>
+                                <div class="uncertainty" style="color: #4444ff;">± 8.7m</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <h3>Fusion Result</h3>
+                    <div id="fusion-result">
+                        <div class="stat-value" id="result-uncertainty">—</div>
+                        <div id="reduction" style="margin-top: 10px;"></div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <h3>Highlander CRDT</h3>
+                    <div id="highlander" style="font-family: monospace; font-size: 0.9rem; color: #666;">
+                        Waiting...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" onclick="runDemo()">▶ Run Fusion Demo</button>
+        </div>
+    </div>
+
+    <script>
+        // GodView Demo Simulation
+        const agents = [
+            { id: '7f3a8b2c', pos: [37.77490, -122.41940], uncertainty: 5.2, color: '#ff4444' },
+            { id: '2b1c4d5e', pos: [37.77510, -122.41920], uncertainty: 3.1, color: '#44ff44' },
+            { id: 'a9e4f6g7', pos: [37.77480, -122.41950], uncertainty: 8.7, color: '#4444ff' }
+        ];
+
+        const fusedResult = {
+            pos: [37.77493, -122.41937],
+            uncertainty: 1.8,
+            canonicalId: '2b1c4d5e'  // Min UUID wins
+        };
+
+        let isRunning = false;
+
+        async function runDemo() {
+            if (isRunning) return;
+            isRunning = true;
+            document.getElementById('startBtn').disabled = true;
+
+            // Reset
+            reset();
+            await sleep(500);
+
+            // Phase 1: Show detections
+            updatePhase('📡 Receiving agent detections...');
+            for (let i = 0; i < 3; i++) {
+                await sleep(600);
+                showAgent(i + 1);
+            }
+
+            await sleep(1000);
+
+            // Phase 2: Highlander
+            updatePhase('🏆 Highlander CRDT: Finding canonical ID...');
+            await animateHighlander();
+
+            await sleep(1000);
+
+            // Phase 3: Covariance Intersection
+            updatePhase('⚡ Covariance Intersection: Fusing Gaussians...');
+            await animateFusion();
+
+            await sleep(500);
+
+            // Phase 4: Result
+            updatePhase('✅ Fusion complete!');
+            showResult();
+
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').textContent = '🔄 Run Again';
+            isRunning = false;
+        }
+
+        function reset() {
+            ['e1', 'e2', 'e3', 'fused', 'l1', 'l2', 'l3', 'lf', 'crosshair'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+                document.getElementById(id).classList.remove('fadeIn');
+            });
+            ['a1', 'a2', 'a3'].forEach(id => {
+                document.getElementById(id).classList.remove('visible');
+            });
+            document.getElementById('result-uncertainty').textContent = '—';
+            document.getElementById('reduction').innerHTML = '';
+            document.getElementById('highlander').innerHTML = 'Waiting...';
+            document.getElementById('highlander').style.color = '#666';
+        }
+
+        function showAgent(n) {
+            const el = document.getElementById('e' + n);
+            const label = document.getElementById('l' + n);
+            const item = document.getElementById('a' + n);
+
+            el.classList.remove('hidden');
+            el.classList.add('fadeIn', 'pulsing');
+            label.classList.remove('hidden');
+            label.classList.add('fadeIn');
+            item.classList.add('visible');
+        }
+
+        async function animateHighlander() {
+            const highlander = document.getElementById('highlander');
+
+            highlander.innerHTML = '<span style="color: #ff4444;">7f3a...</span> comparing...';
+            await sleep(600);
+
+            highlander.innerHTML = '<span style="color: #ff4444;">7f3a...</span> → <span style="color: #44ff44;">2b1c...</span> ✓';
+            await sleep(600);
+
+            highlander.innerHTML += '<br><span style="color: #4444ff;">a9e4...</span> → <span style="color: #44ff44;">2b1c...</span> ✓';
+            await sleep(600);
+
+            highlander.innerHTML += '<br><br><strong style="color: #00ff88;">Winner: 2b1c...</strong>';
+            highlander.style.color = '#fff';
+        }
+
+        async function animateFusion() {
+            const e1 = document.getElementById('e1');
+            const e2 = document.getElementById('e2');
+            const e3 = document.getElementById('e3');
+            const fused = document.getElementById('fused');
+
+            // Animate ellipses moving toward center
+            e1.style.transition = 'all 1.5s ease-in-out';
+            e2.style.transition = 'all 1.5s ease-in-out';
+            e3.style.transition = 'all 1.5s ease-in-out';
+
+            e1.setAttribute('cx', '280');
+            e1.setAttribute('cy', '195');
+            e1.setAttribute('rx', '40');
+            e1.setAttribute('ry', '25');
+            e1.style.fillOpacity = '0.15';
+
+            e2.setAttribute('cx', '280');
+            e2.setAttribute('cy', '195');
+            e2.setAttribute('rx', '35');
+            e2.setAttribute('ry', '22');
+            e2.style.fillOpacity = '0.15';
+
+            e3.setAttribute('cx', '280');
+            e3.setAttribute('cy', '195');
+            e3.setAttribute('rx', '45');
+            e3.setAttribute('ry', '30');
+            e3.style.fillOpacity = '0.15';
+
+            await sleep(1500);
+
+            // Hide individual ellipses, show fused
+            e1.style.opacity = '0';
+            e2.style.opacity = '0';
+            e3.style.opacity = '0';
+
+            document.getElementById('l1').style.opacity = '0';
+            document.getElementById('l2').style.opacity = '0';
+            document.getElementById('l3').style.opacity = '0';
+
+            fused.classList.remove('hidden');
+            fused.classList.add('fadeIn', 'pulsing');
+
+            document.getElementById('lf').classList.remove('hidden');
+            document.getElementById('lf').classList.add('fadeIn');
+
+            document.getElementById('crosshair').classList.remove('hidden');
+            document.getElementById('crosshair').classList.add('fadeIn');
+        }
+
+        function showResult() {
+            const uncertainty = fusedResult.uncertainty;
+            const original = agents.reduce((sum, a) => sum + a.uncertainty, 0) / agents.length;
+            const reduction = Math.round((1 - uncertainty / original) * 100);
+
+            document.getElementById('result-uncertainty').textContent = `± ${uncertainty}m`;
+            document.getElementById('result-uncertainty').style.color = '#00ff88';
+
+            document.getElementById('reduction').innerHTML =
+                `<span class="reduction-badge">-${reduction}% uncertainty</span>`;
+        }
+
+        function updatePhase(text) {
+            document.getElementById('phase').textContent = text;
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+    </script>
+</body>
+
+</html>

@@ -391,16 +391,17 @@ fn test_covariance_intersection_rumor_safety() {
 
 ## Complexity Summary
 
-| Operation | Complexity | Notes |
+| Operation | Complexity per Object | Notes |
 |:--|:--|:--|
-| `predict()` | O((D·N)³) | Matrix mult on augmented state |
-| `update_oosm()` | O(S²) | Joseph form covariance update |
-| `query_sphere()` | O(k³·E) | k=radius/cell_size, E=entities per cell |
-| `query_radius()` | O(k·shards) | k=H3 ring count |
-| `verify_integrity()` | O(P) | Ed25519 scales with payload |
+| `predict()` | **O(1)** | Constant time (fixed 9×9 matrix ops) |
+| `update_oosm()` | **O(1)** | Constant time (fixed 9×9 matrix ops) |
+| `query_sphere()` | **O(1)** | Constant time (queries fixed number of neighboring cells) |
+| `verify_integrity()` | O(P) | Ed25519 verifies linear with payload size P |
 | `is_revoked()` | O(1) | HashSet lookup |
-| `process_packet()` | O(k+M log M) | k=7 H3 cells, M=candidates |
-| `covariance_intersection()` | O(1) | Fixed 6×6 matrices |
+| `process_packet()` | O(log M) | M candidates in local neighborhood |
+| `covariance_intersection()` | **O(1)** | Constant time (fixed 6×6 matrix ops) |
+
+> **Note on "O(N³)" notation:** In filtering literature, you often see O(N³) where N is the state dimension (e.g., 9 variables). Since N is fixed and small (9), these operations are **O(1) Constant Time** relative to the number of agents or tracks in the system. The system scales linearly with the number of tracked objects.
 
 ---
 

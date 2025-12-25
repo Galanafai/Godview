@@ -10,15 +10,23 @@ pub mod godview_time;
 pub mod godview_space;
 pub mod godview_trust;
 pub mod godview_tracking;
+pub mod metrics;
 
 #[cfg(feature = "visualization")]
 pub mod visualization;
+
+#[cfg(feature = "dashboard")]
+pub mod dashboard;
 
 // Re-export key types for convenience
 pub use godview_time::AugmentedStateFilter;
 pub use godview_space::{Entity, SpatialEngine, WorldShard};
 pub use godview_trust::{AuthError, SecurityContext, SignedPacket};
-pub use godview_tracking::{GlobalHazardPacket, TrackManager, TrackingConfig, TrackingError, UniqueTrack};
+pub use godview_tracking::{GlobalHazardPacket, TrackManager, TrackingConfig, TrackingError, UniqueTrack, MergeEvent};
+pub use metrics::{TrackMetrics, GhostScoreConfig, calculate_ghost_score, calculate_entropy, calculate_tension};
 
 #[cfg(feature = "visualization")]
 pub use visualization::RerunVisualizer;
+
+#[cfg(feature = "dashboard")]
+pub use dashboard::{FusionDashboard, MetricPacket, SystemStatus, GhostWatchEntry};

@@ -10,6 +10,7 @@ license = "MIT"
 default = []
 visualization = ["rerun"]
 kitti = ["kitti-dataset"]
+dashboard = ["ratatui", "crossterm", "crossbeam"]
 
 [dependencies]
 # Math & Physics (The "Time" Engine)
@@ -33,10 +34,16 @@ thiserror = "1.0"
 uuid = { version = "1.7", features = ["v4", "serde"] }
 
 # Visualization (Optional)
-rerun = { version = "0.20", optional = true }
+rerun = { version = "0.28", optional = true }
 
 # KITTI Dataset Loader (Optional)
 kitti-dataset = { version = "0.3", optional = true }
+
+# TUI Dashboard (Optional)
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
+crossbeam = { version = "0.8", optional = true }
+
 
 [dev-dependencies]
 approx = "0.5"
@@ -49,3 +56,14 @@ required-features = ["visualization"]
 name = "kitti_demo"
 required-features = ["visualization", "kitti"]
 
+[[example]]
+name = "nuscenes_fusion_demo"
+required-features = ["visualization"]
+
+[[example]]
+name = "simple_visual_demo"
+required-features = ["visualization"]
+
+[[example]]
+name = "extended_demo"
+required-features = ["visualization"]

@@ -79,6 +79,32 @@ pub struct GlobalHazardPacket {
 }
 
 // ============================================================================
+// MERGE EVENT (For Deep Inspection Visualization)
+// ============================================================================
+
+/// Represents a Highlander merge event where two track IDs collapse into one.
+///
+/// Used for genealogy visualization and debugging the CRDT logic.
+/// Captures the loser's position *before* deletion for the "pop" animation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeEvent {
+    /// The surviving (canonical) track ID
+    pub winner_id: Uuid,
+    
+    /// The absorbed track ID
+    pub loser_id: Uuid,
+    
+    /// Position where the merge occurred (loser's last position)
+    pub merge_position: [f64; 3],
+    
+    /// Human-readable reason for the merge decision
+    pub reason: String,
+    
+    /// Timestamp of the merge event
+    pub timestamp: f64,
+}
+
+// ============================================================================
 // UNIQUE TRACK (Internal State)
 // ============================================================================
 

@@ -27,7 +27,7 @@ impl RerunVisualizer {
         // Log initial setup
         rec.log_static(
             "world",
-            &rerun::ViewCoordinates::RIGHT_HAND_Z_UP,
+            &rerun::ViewCoordinates::RIGHT_HAND_Z_UP(),
         )?;
         
         Ok(Self { rec })
@@ -40,7 +40,7 @@ impl RerunVisualizer {
         
         rec.log_static(
             "world",
-            &rerun::ViewCoordinates::RIGHT_HAND_Z_UP,
+            &rerun::ViewCoordinates::RIGHT_HAND_Z_UP(),
         )?;
         
         Ok(Self { rec })
@@ -224,17 +224,17 @@ impl RerunVisualizer {
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.rec.log(
             "stats/tracks",
-            &rerun::Scalar::new(total_tracks as f64),
+            &rerun::Scalars::new([total_tracks as f64]),
         )?;
         
         self.rec.log(
             "stats/uncertainty",
-            &rerun::Scalar::new(avg_uncertainty),
+            &rerun::Scalars::new([avg_uncertainty]),
         )?;
         
         self.rec.log(
             "stats/reduction",
-            &rerun::Scalar::new(reduction_percent),
+            &rerun::Scalars::new([reduction_percent]),
         )?;
         
         Ok(())
@@ -267,7 +267,7 @@ impl RerunVisualizer {
         Ok(())
     }
     
-    /// Log an agent (vehicle/drone) as a 3D box at a position
+    /// Log an agent (vehicle/drone) as a 3D box at a position with sensor range visualization
     pub fn log_agent(
         &self,
         agent_name: &str,
@@ -277,15 +277,96 @@ impl RerunVisualizer {
         is_drone: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let height_offset = if is_drone { position[2] } else { size[2] as f64 / 2.0 };
+        let agent_path = format!("world/agents/{}", agent_name.replace(" ", "_").replace("(", "").replace(")", ""));
         
+        // Log the agent box (BIGGER for visibility)
+        let visual_size = [size[0] * 2.0, size[1] * 2.0, size[2] * 2.0]; // 2x size
         self.rec.log(
-            format!("world/agents/{}", agent_name),
+            format!("{}/body", agent_path),
             &rerun::Boxes3D::from_centers_and_sizes(
                 [[position[0] as f32, position[1] as f32, height_offset as f32]],
-                [size],
+                [visual_size],
             )
             .with_colors([color])
             .with_labels([agent_name])
+        )?;
+        
+        // Log a vertical beam from agent to ground (makes it easy to see)
+        self.rec.log(
+            format!("{}/beam", agent_path),
+            &rerun::LineStrips3D::new([[
+                [position[0] as f32, position[1] as f32, 0.0],
+                [position[0] as f32, position[1] as f32, height_offset as f32],
+            ]])
+            .with_colors([[color[0], color[1], color[2], 100]]) // Semi-transparent
+            .with_radii([0.1])
+        )?;
+        
+        // Log agent name as 3D text above the agent
+        self.rec.log(
+            format!("{}/label", agent_path),
+            &rerun::Points3D::new([[position[0] as f32, position[1] as f32, (height_offset + 3.0) as f32]])
+                .with_colors([color])
+                .with_radii([0.3])
+                .with_labels([agent_name])
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log a detection line from an agent to a detected object
+    pub fn log_detection_line(
+        &self,
+        agent_name: &str,
+        agent_pos: [f64; 3],
+        object_pos: [f64; 3],
+        color: [u8; 4],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let agent_path = format!("world/agents/{}", agent_name.replace(" ", "_").replace("(", "").replace(")", ""));
+        
+        self.rec.log(
+            format!("{}/detections", agent_path),
+            &rerun::LineStrips3D::new([[
+                [agent_pos[0] as f32, agent_pos[1] as f32, agent_pos[2] as f32],
+                [object_pos[0] as f32, object_pos[1] as f32, object_pos[2] as f32],
+            ]])
+            .with_colors([[color[0], color[1], color[2], 30]]) // Very transparent
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log a sensor range circle on the ground plane
+    pub fn log_sensor_range(
+        &self,
+        agent_name: &str,
+        center: [f64; 3],
+        range: f32,
+        color: [u8; 4],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let agent_path = format!("world/agents/{}", agent_name.replace(" ", "_").replace("(", "").replace(")", ""));
+        
+        // Draw circle as line strip (32 segments)
+        let segments = 32;
+        let mut points: Vec<[f32; 3]> = Vec::with_capacity(segments + 1);
+        for i in 0..=segments {
+            let angle = (i as f64 / segments as f64) * std::f64::consts::TAU;
+            points.push([
+                (center[0] + range as f64 * angle.cos()) as f32,
+                (center[1] + range as f64 * angle.sin()) as f32,
+                0.1, // Slightly above ground
+            ]);
+        }
+        
+        // Convert to pairs for line strip
+        let pairs: Vec<[[f32; 3]; 2]> = points.windows(2)
+            .map(|w| [w[0], w[1]])
+            .collect();
+        
+        self.rec.log_static(
+            format!("{}/range", agent_path),
+            &rerun::LineStrips3D::new(pairs)
+                .with_colors([[color[0], color[1], color[2], 80]]) // Semi-transparent
         )?;
         
         Ok(())
@@ -383,9 +464,225 @@ impl RerunVisualizer {
         Ok(())
     }
     
+    // ========================================================================
+    // DEEP INSPECTION METHODS (Ghost Hunter, Tension, Merge Events)
+    // ========================================================================
+    
+    /// Log a track with Ghost Hunter coloring based on ghost score.
+    /// 
+    /// Color scheme:
+    /// - Green (< 0.3): Solid consensus
+    /// - Orange (0.3 - 0.7): Ambiguous
+    /// - Red (> 0.7): Probable ghost (pulsing effect)
+    pub fn log_track_with_ghost_score(
+        &self,
+        track_id: Uuid,
+        position: [f64; 3],
+        velocity: [f64; 3],
+        covariance: &Matrix6<f64>,
+        ghost_score: f64,
+        frame_idx: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Map ghost score to color (Green -> Orange -> Red)
+        let color: [u8; 4] = if ghost_score > 0.7 {
+            // Red with pulsing alpha for high ghost scores
+            let pulse = ((frame_idx as f64 * 0.5).sin() * 0.3 + 0.7) * 255.0;
+            [255, 50, 50, pulse as u8]
+        } else if ghost_score > 0.3 {
+            // Orange for ambiguous
+            [255, 165, 0, 180]
+        } else {
+            // Green for solid consensus
+            [50, 255, 100, 150]
+        };
+        
+        // Extract position covariance
+        let pos_cov: Matrix3<f64> = covariance.fixed_view::<3, 3>(0, 0).into();
+        let eigen = pos_cov.symmetric_eigen();
+        let half_sizes: [f32; 3] = [
+            (eigen.eigenvalues[0].abs().sqrt() * 2.0) as f32,
+            (eigen.eigenvalues[1].abs().sqrt() * 2.0) as f32,
+            (eigen.eigenvalues[2].abs().sqrt() * 2.0) as f32,
+        ];
+        
+        let rotation = nalgebra::UnitQuaternion::from_matrix(&eigen.eigenvectors);
+        let quat = rotation.as_ref();
+        
+        let path = format!("world/tracks/{}", track_id);
+        
+        // Log ellipsoid with ghost-hunter coloring
+        self.rec.log(
+            format!("{}/ellipsoid", path),
+            &rerun::Ellipsoids3D::from_centers_and_half_sizes(
+                [[position[0] as f32, position[1] as f32, position[2] as f32]],
+                [half_sizes],
+            )
+            .with_quaternions([[quat.w as f32, quat.i as f32, quat.j as f32, quat.k as f32]])
+            .with_colors([color])
+            .with_fill_mode(rerun::FillMode::Solid)
+            .with_labels([format!("👻 {:.2}", ghost_score)])
+        )?;
+        
+        // Log ghost score to time series
+        self.rec.log(
+            format!("metrics/ghost_score/{}", track_id),
+            &rerun::Scalars::new([ghost_score]),
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log a tension line showing contradiction between detection and fused belief.
+    /// 
+    /// Draws a magenta line from the detection to the fused track position.
+    /// Only drawn when tension exceeds the significance threshold.
+    pub fn log_tension_line(
+        &self,
+        agent_id: &str,
+        detection_pos: [f64; 3],
+        fused_pos: [f64; 3],
+        tension: f64,
+        threshold: f64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if tension <= threshold {
+            return Ok(()); // Not significant
+        }
+        
+        // Calculate line intensity based on tension severity
+        let intensity = ((tension / threshold).min(3.0) / 3.0 * 255.0) as u8;
+        let color = [255, 0, 255, intensity]; // Magenta with variable alpha
+        
+        self.rec.log(
+            format!("world/debug/tension/{}", agent_id),
+            &rerun::LineStrips3D::new([[
+                [detection_pos[0] as f32, detection_pos[1] as f32, detection_pos[2] as f32],
+                [fused_pos[0] as f32, fused_pos[1] as f32, fused_pos[2] as f32],
+            ]])
+            .with_colors([color])
+            .with_radii([0.05])
+        )?;
+        
+        // Log tension value
+        self.rec.log(
+            format!("metrics/tension/{}", agent_id),
+            &rerun::Scalars::new([tension]),
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log a merge "pop" animation when Highlander resolves two tracks.
+    /// 
+    /// Creates a visual implosion effect at the merge location.
+    pub fn log_merge_pop(
+        &self,
+        merge_event: &crate::godview_tracking::MergeEvent,
+        frame_offset: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let pos = merge_event.merge_position;
+        
+        // Implosion effect: decreasing radius over frames
+        let radius = match frame_offset {
+            0 => 3.0,
+            1 => 2.5,
+            2 => 2.0,
+            3 => 1.5,
+            4 => 1.0,
+            _ => 0.0, // Clear after 5 frames
+        };
+        
+        if radius > 0.0 {
+            self.rec.log(
+                "world/events/merge_pop",
+                &rerun::Points3D::new([[pos[0] as f32, pos[1] as f32, pos[2] as f32]])
+                    .with_colors([[0, 255, 255, 150]]) // Cyan
+                    .with_radii([radius])
+            )?;
+        }
+        
+        // Log detailed text event
+        self.rec.log(
+            "logs/highlander",
+            &rerun::TextLog::new(format!(
+                "⚔️ MERGE: {} absorbed {} | Reason: {}",
+                &merge_event.winner_id.to_string()[..8],
+                &merge_event.loser_id.to_string()[..8],
+                merge_event.reason
+            ))
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log a node in the genealogy graph (for merge visualization).
+    pub fn log_genealogy_node(
+        &self,
+        track_id: Uuid,
+        node_type: &str, // "seed", "state", "merge"
+        position_y: f64, // Time-based Y position (waterfall)
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let color = match node_type {
+            "seed" => [100, 150, 255, 255],  // Blue
+            "merge" => [0, 255, 255, 255],   // Cyan
+            _ => [150, 150, 150, 255],       // Gray
+        };
+        
+        self.rec.log(
+            "genealogy/nodes",
+            &rerun::Points3D::new([[0.0, position_y as f32, 0.0]])
+                .with_colors([color])
+                .with_radii([0.3])
+                .with_labels([format!("{}", &track_id.to_string()[..8])])
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log an edge in the genealogy graph (merge relationship).
+    pub fn log_genealogy_edge(
+        &self,
+        from_id: Uuid,
+        to_id: Uuid,
+        from_y: f64,
+        to_y: f64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.rec.log(
+            format!("genealogy/edges/{}_{}", &from_id.to_string()[..8], &to_id.to_string()[..8]),
+            &rerun::Arrows3D::from_vectors([[0.0, (to_y - from_y) as f32, 0.0]])
+                .with_origins([[0.0, from_y as f32, 0.0]])
+                .with_colors([[255, 100, 100, 200]]) // Red for merge direction
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log entropy reduction metric for a track.
+    pub fn log_entropy(
+        &self,
+        track_id: Uuid,
+        entropy: f64,
+        entropy_reduction: f64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.rec.log(
+            format!("metrics/entropy/{}", track_id),
+            &rerun::Scalars::new([entropy]),
+        )?;
+        
+        self.rec.log(
+            format!("metrics/entropy_reduction/{}", track_id),
+            &rerun::Scalars::new([entropy_reduction]),
+        )?;
+        
+        Ok(())
+    }
+    
     /// Set the current timestamp for timeline scrubbing
-    pub fn set_time(&self, name: &str, timestamp_ms: u64) {
-        self.rec.set_time_nanos(name, timestamp_ms as i64 * 1_000_000);
+    pub fn set_time(&self, name: &str, value: u64) {
+        if name == "frame" || name == "step" {
+            self.rec.set_time_sequence(name, value as i64);
+        } else {
+            self.rec.set_time(name, rerun::time::Timestamp::from_nanos_since_epoch(value as i64 * 1_000_000));
+        }
     }
 }
 

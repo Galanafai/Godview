@@ -67,3 +67,15 @@ required-features = ["visualization"]
 [[example]]
 name = "extended_demo"
 required-features = ["visualization"]
+
+[[example]]
+name = "lidar_demo"
+required-features = ["visualization"]
+
+[[example]]
+name = "godview_showcase"
+required-features = ["visualization"]
+
+[[example]]
+name = "autonomous_demo"
+required-features = ["visualization"]

@@ -676,6 +676,379 @@ impl RerunVisualizer {
         Ok(())
     }
     
+    // ========================================================================
+    // 3D ASSET METHODS (LiDAR, Meshes, Bounding Boxes)
+    // ========================================================================
+    
+    /// Log a LiDAR point cloud
+    ///
+    /// Colors by intensity or height if no colors provided.
+    pub fn log_lidar_pointcloud(
+        &self,
+        entity_path: &str,
+        points: &[[f32; 3]],
+        intensities: Option<&[f32]>, // Optional intensity values [0-1]
+        color_by_height: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let colors: Vec<[u8; 4]> = if let Some(ints) = intensities {
+            // Color by intensity (grayscale)
+            ints.iter().map(|i| {
+                let v = (i.clamp(0.0, 1.0) * 255.0) as u8;
+                [v, v, v, 255]
+            }).collect()
+        } else if color_by_height {
+            // Color by height (Z value) - blue=low, red=high
+            let min_z = points.iter().map(|p| p[2]).fold(f32::INFINITY, f32::min);
+            let max_z = points.iter().map(|p| p[2]).fold(f32::NEG_INFINITY, f32::max);
+            let range = (max_z - min_z).max(0.1);
+            
+            points.iter().map(|p| {
+                let t = ((p[2] - min_z) / range).clamp(0.0, 1.0);
+                // Blue -> Cyan -> Green -> Yellow -> Red
+                let r = (t * 2.0).min(1.0);
+                let g = if t < 0.5 { t * 2.0 } else { 2.0 - t * 2.0 };
+                let b = 1.0 - (t * 2.0).min(1.0);
+                [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8, 255]
+            }).collect()
+        } else {
+            // Default: white
+            points.iter().map(|_| [200, 200, 200, 200]).collect()
+        };
+        
+        self.rec.log(
+            entity_path,
+            &rerun::Points3D::new(points.to_vec())
+                .with_colors(colors)
+                .with_radii([0.02]) // Small points for LiDAR
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log a 3D object bounding box (for object detection results)
+    ///
+    /// Draws a wireframe box with label and confidence.
+    pub fn log_3d_detection_box(
+        &self,
+        entity_path: &str,
+        center: [f64; 3],
+        size: [f32; 3],       // [length, width, height]
+        yaw: f32,             // Rotation around Z axis in radians
+        label: &str,
+        confidence: f32,
+        class_color: [u8; 4],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Create rotation quaternion from yaw
+        let half_yaw = yaw / 2.0;
+        let quat = [half_yaw.cos(), 0.0, 0.0, half_yaw.sin()]; // [w, x, y, z]
+        
+        // Adjust alpha based on confidence
+        let alpha = (confidence * 200.0 + 55.0) as u8;
+        let color = [class_color[0], class_color[1], class_color[2], alpha];
+        
+        self.rec.log(
+            entity_path,
+            &rerun::Boxes3D::from_centers_and_sizes(
+                [[center[0] as f32, center[1] as f32, center[2] as f32]],
+                [size],
+            )
+            .with_quaternions([quat])
+            .with_colors([color])
+            .with_labels([format!("{} ({:.0}%)", label, confidence * 100.0)])
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log a 3D mesh from file path (GLB/GLTF/OBJ)
+    ///
+    /// Returns an error if the mesh file doesn't exist.
+    pub fn log_3d_mesh(
+        &self,
+        entity_path: &str,
+        mesh_path: &std::path::Path,
+        position: [f64; 3],
+        scale: f32,
+        yaw: f32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Read mesh file
+        let mesh_data = std::fs::read(mesh_path)?;
+        let media_type = match mesh_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_lowercase())
+            .as_deref()
+        {
+            Some("glb") => rerun::MediaType::gltf(),
+            Some("gltf") => rerun::MediaType::gltf(),
+            Some("obj") => rerun::MediaType::obj(),
+            _ => rerun::MediaType::gltf(), // Default
+        };
+        
+        // Create rotation quaternion from yaw
+        let half_yaw = yaw / 2.0;
+        
+        // Log as Asset3D with transform
+        self.rec.log(
+            entity_path,
+            &rerun::Asset3D::from_file_contents(mesh_data, Some(media_type))
+        )?;
+        
+        // Apply transform
+        self.rec.log(
+            entity_path,
+            &rerun::Transform3D::from_translation_rotation_scale(
+                [position[0] as f32, position[1] as f32, position[2] as f32],
+                rerun::Quaternion::from_xyzw([0.0, 0.0, half_yaw.sin(), half_yaw.cos()]),
+                scale,
+            )
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log a colored 3D bounding box for an object class
+    ///
+    /// Standard class colors:
+    /// - Vehicle: Cyan
+    /// - Pedestrian: Orange
+    /// - Cyclist: Green
+    /// - Truck: Purple
+    pub fn log_class_bbox(
+        &self,
+        class_name: &str,
+        instance_id: &str,
+        center: [f64; 3],
+        size: [f32; 3],
+        yaw: f32,
+        confidence: f32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let color = match class_name.to_lowercase().as_str() {
+            "car" | "vehicle" => [0, 200, 255, 200],      // Cyan
+            "pedestrian" | "person" => [255, 150, 50, 200], // Orange
+            "cyclist" | "bicycle" | "motorcycle" => [100, 255, 100, 200], // Green
+            "truck" | "bus" => [200, 100, 255, 200],      // Purple
+            "drone" | "uav" => [255, 215, 0, 200],        // Gold
+            _ => [200, 200, 200, 200],                    // Gray
+        };
+        
+        self.log_3d_detection_box(
+            &format!("world/detections/{}/{}", class_name, instance_id),
+            center,
+            size,
+            yaw,
+            class_name,
+            confidence,
+            color,
+        )
+    }
+    
+    // ========================================================================
+    // PROCEDURAL 3D MESH GENERATORS
+    // ========================================================================
+    
+    /// Log a simple car mesh (wedge-shaped body)
+    ///
+    /// Creates a low-poly car shape with hood, cabin, and trunk.
+    pub fn log_car_mesh(
+        &self,
+        entity_path: &str,
+        center: [f64; 3],
+        scale: f32,
+        yaw: f32,
+        color: [u8; 4],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Car dimensions (before scaling)
+        let l = 4.5 * scale; // Length
+        let w = 2.0 * scale; // Width  
+        let h = 1.5 * scale; // Height
+        let hood_h = 0.8 * scale; // Hood height
+        
+        // Apply rotation
+        let cos_y = yaw.cos();
+        let sin_y = yaw.sin();
+        
+        // Helper to rotate and translate a point
+        let transform = |x: f32, y: f32, z: f32| -> [f32; 3] {
+            let rx = x * cos_y - y * sin_y + center[0] as f32;
+            let ry = x * sin_y + y * cos_y + center[1] as f32;
+            let rz = z + center[2] as f32;
+            [rx, ry, rz]
+        };
+        
+        // Define vertices for a wedge-shaped car
+        // Bottom rectangle
+        let v0 = transform(-l/2.0, -w/2.0, 0.0);      // Back left bottom
+        let v1 = transform(-l/2.0,  w/2.0, 0.0);      // Back right bottom
+        let v2 = transform( l/2.0,  w/2.0, 0.0);      // Front right bottom
+        let v3 = transform( l/2.0, -w/2.0, 0.0);      // Front left bottom
+        
+        // Back rectangle (top)
+        let v4 = transform(-l/2.0, -w/2.0, h);        // Back left top
+        let v5 = transform(-l/2.0,  w/2.0, h);        // Back right top
+        
+        // Middle (cabin top)
+        let v6 = transform(-l/4.0, -w/2.0, h);        // Cabin back left
+        let v7 = transform(-l/4.0,  w/2.0, h);        // Cabin back right
+        let v8 = transform( l/4.0,  w/2.0, h * 0.9);  // Cabin front right
+        let v9 = transform( l/4.0, -w/2.0, h * 0.9);  // Cabin front left
+        
+        // Hood (lower)
+        let v10 = transform(l/2.0, -w/2.0, hood_h);   // Front left hood
+        let v11 = transform(l/2.0,  w/2.0, hood_h);   // Front right hood
+        
+        let vertices = vec![v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11];
+        
+        // Define triangles (indices)
+        let triangles: Vec<[u32; 3]> = vec![
+            // Bottom
+            [0, 1, 2], [0, 2, 3],
+            // Back
+            [0, 4, 5], [0, 5, 1],
+            // Left side (3 triangles for shape)
+            [0, 3, 10], [0, 10, 9], [0, 9, 6], [0, 6, 4],
+            // Right side
+            [1, 11, 2], [1, 7, 11], [1, 5, 7], [7, 8, 11],
+            // Top back (to cabin)
+            [4, 6, 7], [4, 7, 5],
+            // Cabin top
+            [6, 9, 8], [6, 8, 7],
+            // Hood top
+            [9, 10, 11], [9, 11, 8],
+            // Front
+            [3, 2, 11], [3, 11, 10],
+        ];
+        
+        self.rec.log(
+            entity_path,
+            &rerun::Mesh3D::new(vertices)
+                .with_triangle_indices(triangles)
+                .with_albedo_factor(rerun::Rgba32::from_unmultiplied_rgba(
+                    color[0], color[1], color[2], color[3]
+                ))
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log a drone mesh (quadcopter with rotors)
+    ///
+    /// Creates a drone shape with central body and 4 rotor arms.
+    pub fn log_drone_mesh(
+        &self,
+        entity_path: &str,
+        center: [f64; 3],
+        scale: f32,
+        yaw: f32,
+        color: [u8; 4],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let arm_len = 1.5 * scale;
+        let body_size = 0.6 * scale;
+        let body_h = 0.3 * scale;
+        let rotor_r = 0.5 * scale;
+        
+        let cos_y = yaw.cos();
+        let sin_y = yaw.sin();
+        
+        let transform = |x: f32, y: f32, z: f32| -> [f32; 3] {
+            let rx = x * cos_y - y * sin_y + center[0] as f32;
+            let ry = x * sin_y + y * cos_y + center[1] as f32;
+            let rz = z + center[2] as f32;
+            [rx, ry, rz]
+        };
+        
+        let mut vertices = Vec::new();
+        let mut triangles: Vec<[u32; 3]> = Vec::new();
+        
+        // Central body (octagon approximation)
+        let n = 8;
+        let base_idx = vertices.len() as u32;
+        
+        // Bottom center
+        vertices.push(transform(0.0, 0.0, 0.0));
+        // Top center  
+        vertices.push(transform(0.0, 0.0, body_h));
+        
+        // Bottom ring
+        for i in 0..n {
+            let angle = (i as f32 / n as f32) * std::f32::consts::TAU;
+            vertices.push(transform(
+                body_size * angle.cos(),
+                body_size * angle.sin(),
+                0.0
+            ));
+        }
+        
+        // Top ring
+        for i in 0..n {
+            let angle = (i as f32 / n as f32) * std::f32::consts::TAU;
+            vertices.push(transform(
+                body_size * angle.cos(),
+                body_size * angle.sin(),
+                body_h
+            ));
+        }
+        
+        // Body triangles
+        for i in 0..n {
+            let next = (i + 1) % n;
+            // Bottom
+            triangles.push([base_idx, base_idx + 2 + i as u32, base_idx + 2 + next as u32]);
+            // Top
+            triangles.push([base_idx + 1, base_idx + 2 + n as u32 + next as u32, base_idx + 2 + n as u32 + i as u32]);
+            // Sides
+            triangles.push([base_idx + 2 + i as u32, base_idx + 2 + n as u32 + i as u32, base_idx + 2 + next as u32]);
+            triangles.push([base_idx + 2 + next as u32, base_idx + 2 + n as u32 + i as u32, base_idx + 2 + n as u32 + next as u32]);
+        }
+        
+        // 4 rotor arms
+        let arm_positions = [
+            (arm_len, arm_len),
+            (arm_len, -arm_len),
+            (-arm_len, -arm_len),
+            (-arm_len, arm_len),
+        ];
+        
+        for (ax, ay) in arm_positions {
+            let arm_idx = vertices.len() as u32;
+            
+            // Arm (simple triangle pointing out)
+            vertices.push(transform(0.0, 0.0, body_h * 0.5));
+            vertices.push(transform(ax - 0.1, ay - 0.1, body_h * 0.3));
+            vertices.push(transform(ax + 0.1, ay + 0.1, body_h * 0.3));
+            triangles.push([arm_idx, arm_idx + 1, arm_idx + 2]);
+            
+            // Rotor disk at end (flat hexagon)
+            let rotor_idx = vertices.len() as u32;
+            vertices.push(transform(ax, ay, body_h * 0.4));
+            
+            for i in 0..6 {
+                let angle = (i as f32 / 6.0) * std::f32::consts::TAU;
+                vertices.push(transform(
+                    ax + rotor_r * angle.cos(),
+                    ay + rotor_r * angle.sin(),
+                    body_h * 0.4
+                ));
+            }
+            
+            for i in 0..6 {
+                let next = (i + 1) % 6;
+                triangles.push([rotor_idx, rotor_idx + 1 + i as u32, rotor_idx + 1 + next as u32]);
+            }
+        }
+        
+        self.rec.log(
+            entity_path,
+            &rerun::Mesh3D::new(vertices)
+                .with_triangle_indices(triangles)
+                .with_albedo_factor(rerun::Rgba32::from_unmultiplied_rgba(
+                    color[0], color[1], color[2], color[3]
+                ))
+        )?;
+        
+        Ok(())
+    }
+    
     /// Set the current timestamp for timeline scrubbing
     pub fn set_time(&self, name: &str, value: u64) {
         if name == "frame" || name == "step" {

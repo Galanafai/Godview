@@ -15,7 +15,8 @@ use uuid::Uuid;
 
 /// Rerun-based visualizer for GodView distributed sensor fusion
 pub struct RerunVisualizer {
-    rec: RecordingStream,
+    /// The underlying Rerun recording stream (public for advanced use)
+    pub rec: RecordingStream,
 }
 
 impl RerunVisualizer {
@@ -44,6 +45,11 @@ impl RerunVisualizer {
         )?;
         
         Ok(Self { rec })
+    }
+    
+    /// Get access to the underlying recording stream for direct Rerun API access
+    pub fn recording(&self) -> &RecordingStream {
+        &self.rec
     }
     
     /// Log a track with its 6D Gaussian uncertainty ellipsoid
@@ -1049,6 +1055,145 @@ impl RerunVisualizer {
         Ok(())
     }
     
+    // ========================================================================
+    // PANEL TITLES AND ANNOTATIONS
+    // ========================================================================
+    
+    /// Log a panel title text in 3D space
+    ///
+    /// Use this to label different areas of your visualization.
+    pub fn log_panel_title(
+        &self,
+        panel_path: &str,
+        position: [f64; 3],
+        text: &str,
+        subtitle: Option<&str>,
+        color: [u8; 4],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let full_text = match subtitle {
+            Some(sub) => format!("{}\n{}", text, sub),
+            None => text.to_string(),
+        };
+        
+        self.rec.log(
+            format!("panels/{}", panel_path),
+            &rerun::TextLog::new(full_text.clone()),
+        )?;
+        
+        // Also log as 3D text annotation
+        self.rec.log(
+            format!("world/labels/{}", panel_path),
+            &rerun::Points3D::new([[position[0] as f32, position[1] as f32, position[2] as f32]])
+                .with_colors([color])
+                .with_radii([0.1])
+                .with_labels([full_text])
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log section titles for different demo areas
+    pub fn log_section_titles(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Problem section
+        self.log_panel_title(
+            "problem",
+            [0.0, 80.0, 20.0],
+            "🔴 THE PROBLEM",
+            Some("Multiple agents = multiple IDs for same object"),
+            [255, 100, 100, 255],
+        )?;
+        
+        // Data section  
+        self.log_panel_title(
+            "data",
+            [80.0, 0.0, 20.0],
+            "📡 RAW DATA",
+            Some("Each agent reports detections with local IDs"),
+            [100, 200, 255, 255],
+        )?;
+        
+        // Solution section
+        self.log_panel_title(
+            "solution",
+            [-80.0, 0.0, 20.0],
+            "✅ THE SOLUTION",
+            Some("Highlander merges duplicate IDs"),
+            [100, 255, 150, 255],
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log a Highlander merge event with visual animation (two tracks becoming one)
+    ///
+    /// Shows a visual "merge" animation with tracks converging
+    pub fn log_highlander_merge_visual(
+        &self,
+        winner_id: Uuid,
+        loser_id: Uuid,
+        merge_position: [f64; 3],
+        winner_position: [f64; 3],
+        loser_position: [f64; 3],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let merge_path = format!("world/highlander/merge_{}", winner_id);
+        
+        // Log merge point marker (gold flash)
+        self.rec.log(
+            format!("{}/flash", merge_path),
+            &rerun::Points3D::new([[merge_position[0] as f32, merge_position[1] as f32, merge_position[2] as f32]])
+                .with_colors([[255, 215, 0, 255]]) // Gold
+                .with_radii([2.0])
+                .with_labels(["⚡ MERGE!"])
+        )?;
+        
+        // Log connecting lines from old tracks to merge point
+        self.rec.log(
+            format!("{}/convergence", merge_path),
+            &rerun::LineStrips3D::new([[
+                [winner_position[0] as f32, winner_position[1] as f32, winner_position[2] as f32],
+                [merge_position[0] as f32, merge_position[1] as f32, merge_position[2] as f32],
+            ], [
+                [loser_position[0] as f32, loser_position[1] as f32, loser_position[2] as f32],
+                [merge_position[0] as f32, merge_position[1] as f32, merge_position[2] as f32],
+            ]])
+            .with_colors([[100, 255, 100, 200], [255, 100, 100, 200]]) // Green winner, red loser
+        )?;
+        
+        // Log text showing the merge
+        self.rec.log(
+            format!("{}/info", merge_path),
+            &rerun::TextLog::new(format!(
+                "HIGHLANDER: {} absorbed {}",
+                &winner_id.to_string()[..8],
+                &loser_id.to_string()[..8]
+            ))
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Log summary statistics panel
+    pub fn log_stats_panel(
+        &self,
+        real_objects: usize,
+        total_tracks: usize,
+        ghost_count: usize,
+        merges_performed: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let ghost_rate = if total_tracks > 0 { 
+            (ghost_count as f64 / total_tracks as f64 * 100.0) as i32 
+        } else { 0 };
+        
+        let summary = format!(
+            "📊 STATS\nReal Objects: {}\nTotal Tracks: {}\nGhost Tracks: {} ({}%)\nMerges: {}",
+            real_objects, total_tracks, ghost_count, ghost_rate, merges_performed
+        );
+        
+        self.rec.log("panels/stats", &rerun::TextLog::new(summary))?;
+        
+        Ok(())
+    }
+    
     /// Set the current timestamp for timeline scrubbing
     pub fn set_time(&self, name: &str, value: u64) {
         if name == "frame" || name == "step" {
@@ -1056,6 +1201,281 @@ impl RerunVisualizer {
         } else {
             self.rec.set_time(name, rerun::time::Timestamp::from_nanos_since_epoch(value as i64 * 1_000_000));
         }
+    }
+    
+    /// Set simulation time (seconds) for explicit timeline control
+    /// 
+    /// This is critical for CARLA integration - ensures Rerun timeline
+    /// matches simulation time exactly, not wall clock time.
+    pub fn set_sim_time(&self, sim_seconds: f64) {
+        let nanos = (sim_seconds * 1e9) as i64;
+        self.rec.set_time("sim_time", rerun::time::Timestamp::from_nanos_since_epoch(nanos));
+    }
+    
+    // ========================================================================
+    // CINEMATIC CAMERA (LinkedIn-Quality Visualization)
+    // ========================================================================
+    
+    /// Log a cinematic camera for smooth professional visualization.
+    /// 
+    /// Based on cara_sim_imp.md Section 9: Catmull-Rom splines + quaternion SLERP.
+    /// This camera can be selected in Rerun viewer for broadcast-quality recordings.
+    pub fn log_cinematic_camera(
+        &self,
+        position: [f64; 3],
+        look_at: [f64; 3],
+        up: [f64; 3],
+        fov_degrees: f32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Calculate forward vector
+        let forward = [
+            look_at[0] - position[0],
+            look_at[1] - position[1],
+            look_at[2] - position[2],
+        ];
+        let forward_len = (forward[0].powi(2) + forward[1].powi(2) + forward[2].powi(2)).sqrt();
+        let forward_norm = [
+            forward[0] / forward_len,
+            forward[1] / forward_len,
+            forward[2] / forward_len,
+        ];
+        
+        // Build rotation matrix from forward + up vectors
+        // Right = forward × up
+        let right = [
+            forward_norm[1] * up[2] - forward_norm[2] * up[1],
+            forward_norm[2] * up[0] - forward_norm[0] * up[2],
+            forward_norm[0] * up[1] - forward_norm[1] * up[0],
+        ];
+        let right_len = (right[0].powi(2) + right[1].powi(2) + right[2].powi(2)).sqrt();
+        let right_norm = [right[0] / right_len, right[1] / right_len, right[2] / right_len];
+        
+        // Recompute up = right × forward
+        let up_corrected = [
+            right_norm[1] * forward_norm[2] - right_norm[2] * forward_norm[1],
+            right_norm[2] * forward_norm[0] - right_norm[0] * forward_norm[2],
+            right_norm[0] * forward_norm[1] - right_norm[1] * forward_norm[0],
+        ];
+        
+        // Build rotation matrix (columns: right, up, -forward for OpenGL convention)
+        let rot_mat = nalgebra::Matrix3::new(
+            right_norm[0], up_corrected[0], -forward_norm[0],
+            right_norm[1], up_corrected[1], -forward_norm[1],
+            right_norm[2], up_corrected[2], -forward_norm[2],
+        );
+        
+        let rotation = nalgebra::UnitQuaternion::from_matrix(&rot_mat);
+        let q = rotation.as_ref();
+        
+        let cam_path = "world/cinematic_camera";
+        
+        // Log transform
+        self.rec.log(
+            cam_path,
+            &rerun::Transform3D::from_translation_rotation(
+                [position[0] as f32, position[1] as f32, position[2] as f32],
+                rerun::Quaternion::from_wxyz([q.w as f32, q.i as f32, q.j as f32, q.k as f32]),
+            ),
+        )?;
+        
+        // Log pinhole camera (lens properties)
+        let fov_rad = fov_degrees.to_radians();
+        let aspect = 16.0 / 9.0; // Standard widescreen
+        let image_width = 1920.0f32;
+        let image_height = image_width / aspect;
+        let focal_length = (image_width / 2.0) / (fov_rad / 2.0).tan();
+        
+        self.rec.log(
+            cam_path,
+            &rerun::Pinhole::from_focal_length_and_resolution(
+                [focal_length, focal_length],
+                [image_width, image_height],
+            ),
+        )?;
+        
+        Ok(())
+    }
+}
+
+// ============================================================================
+// CINEMATIC CAMERA CONTROLLER
+// ============================================================================
+
+/// Cinematic camera controller with smooth interpolation.
+///
+/// Implements Catmull-Rom spline pathing and quaternion SLERP
+/// for broadcast-quality visualization recordings.
+///
+/// Based on cara_sim_imp.md Section 9:
+/// - Position history ring buffer for spline interpolation
+/// - Delay offset for lazy follow effect
+/// - Camera look-at smoothing
+pub struct CinematicCamera {
+    /// Ring buffer of target positions for spline interpolation
+    position_history: std::collections::VecDeque<[f64; 3]>,
+    /// Ring buffer of target orientations (yaw only for simplicity)
+    heading_history: std::collections::VecDeque<f64>,
+    /// Maximum history size
+    max_history: usize,
+    /// Delay behind target (seconds) for smooth following
+    delay_offset: f64,
+    /// Camera distance behind target
+    follow_distance: f64,
+    /// Camera height above target
+    follow_height: f64,
+    /// Current interpolated position
+    current_position: [f64; 3],
+    /// Current interpolated look-at
+    current_look_at: [f64; 3],
+}
+
+impl CinematicCamera {
+    /// Create a new cinematic camera controller
+    pub fn new(delay_offset: f64, follow_distance: f64, follow_height: f64) -> Self {
+        Self {
+            position_history: std::collections::VecDeque::with_capacity(32),
+            heading_history: std::collections::VecDeque::with_capacity(32),
+            max_history: 32,
+            delay_offset,
+            follow_distance,
+            follow_height,
+            current_position: [0.0, 0.0, 10.0],
+            current_look_at: [0.0, 0.0, 0.0],
+        }
+    }
+    
+    /// Update target position (call every frame)
+    pub fn update_target(&mut self, position: [f64; 3], heading_degrees: f64) {
+        // Add to history
+        self.position_history.push_back(position);
+        self.heading_history.push_back(heading_degrees);
+        
+        // Trim to max size
+        while self.position_history.len() > self.max_history {
+            self.position_history.pop_front();
+            self.heading_history.pop_front();
+        }
+    }
+    
+    /// Get interpolated camera position and look-at point
+    pub fn get_camera_state(&mut self, dt: f64) -> ([f64; 3], [f64; 3]) {
+        if self.position_history.len() < 4 {
+            // Not enough history for spline, use simple follow
+            if let Some(&target) = self.position_history.back() {
+                let heading = self.heading_history.back().copied().unwrap_or(0.0);
+                let heading_rad = heading.to_radians();
+                
+                // Position behind target
+                let cam_pos = [
+                    target[0] - self.follow_distance * heading_rad.cos(),
+                    target[1] - self.follow_distance * heading_rad.sin(),
+                    target[2] + self.follow_height,
+                ];
+                
+                // Lerp towards target
+                self.current_position = self.lerp3(self.current_position, cam_pos, 0.1);
+                self.current_look_at = self.lerp3(self.current_look_at, target, 0.15);
+            }
+            return (self.current_position, self.current_look_at);
+        }
+        
+        // Catmull-Rom spline interpolation
+        let t = 0.5; // Interpolate in the middle of history
+        let target_pos = self.catmull_rom_interpolate(t);
+        let target_heading = self.heading_interpolate(t);
+        
+        let heading_rad = target_heading.to_radians();
+        
+        // Calculate camera position behind target
+        let cam_target = [
+            target_pos[0] - self.follow_distance * heading_rad.cos(),
+            target_pos[1] - self.follow_distance * heading_rad.sin(),
+            target_pos[2] + self.follow_height,
+        ];
+        
+        // Smooth lerp to target
+        self.current_position = self.lerp3(self.current_position, cam_target, dt * 3.0);
+        self.current_look_at = self.lerp3(self.current_look_at, target_pos, dt * 5.0);
+        
+        (self.current_position, self.current_look_at)
+    }
+    
+    /// Catmull-Rom spline interpolation through position history
+    /// 
+    /// Formula from cara_sim_imp.md Section 9.1.1:
+    /// P(t) = 0.5 * [1, t, t², t³] * M * [P₀, P₁, P₂, P₃]ᵀ
+    fn catmull_rom_interpolate(&self, t: f64) -> [f64; 3] {
+        let n = self.position_history.len();
+        if n < 4 {
+            return self.position_history.back().copied().unwrap_or([0.0, 0.0, 0.0]);
+        }
+        
+        // Get 4 control points from history
+        let idx = (n as f64 * t).floor() as usize;
+        let idx = idx.min(n - 4);
+        
+        let p0 = self.position_history[idx];
+        let p1 = self.position_history[idx + 1];
+        let p2 = self.position_history[idx + 2];
+        let p3 = self.position_history[idx + 3];
+        
+        // Local t within segment
+        let local_t = (t * (n - 3) as f64) - idx as f64;
+        let local_t = local_t.clamp(0.0, 1.0);
+        
+        // Catmull-Rom basis matrix
+        let t2 = local_t * local_t;
+        let t3 = t2 * local_t;
+        
+        let mut result = [0.0; 3];
+        for i in 0..3 {
+            result[i] = 0.5 * (
+                (2.0 * p1[i]) +
+                (-p0[i] + p2[i]) * local_t +
+                (2.0 * p0[i] - 5.0 * p1[i] + 4.0 * p2[i] - p3[i]) * t2 +
+                (-p0[i] + 3.0 * p1[i] - 3.0 * p2[i] + p3[i]) * t3
+            );
+        }
+        
+        result
+    }
+    
+    /// Interpolate heading angles (handles wrap-around at 360°)
+    fn heading_interpolate(&self, t: f64) -> f64 {
+        let n = self.heading_history.len();
+        if n < 2 {
+            return self.heading_history.back().copied().unwrap_or(0.0);
+        }
+        
+        let idx = ((n - 1) as f64 * t).floor() as usize;
+        let idx = idx.min(n - 2);
+        
+        let h0 = self.heading_history[idx];
+        let h1 = self.heading_history[idx + 1];
+        
+        // Handle wrap-around
+        let mut diff = h1 - h0;
+        if diff > 180.0 { diff -= 360.0; }
+        if diff < -180.0 { diff += 360.0; }
+        
+        let local_t = (t * (n - 1) as f64) - idx as f64;
+        h0 + diff * local_t.clamp(0.0, 1.0)
+    }
+    
+    /// Linear interpolation for 3D vectors
+    fn lerp3(&self, a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
+        let t = t.clamp(0.0, 1.0);
+        [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ]
+    }
+}
+
+impl Default for CinematicCamera {
+    fn default() -> Self {
+        Self::new(0.5, 15.0, 8.0)  // 0.5s delay, 15m behind, 8m above
     }
 }
 

@@ -251,6 +251,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut track_manager = TrackManager::with_defaults();
     let ghost_config = GhostScoreConfig::default();
     let mut rng = rand::thread_rng();
+    let mut merge_count = 0usize;
+    
+    // Log section titles
+    viz.log_section_titles()?;
 
     println!("▶️  Running simulation...\n");
 
@@ -504,6 +508,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let entropy_avg: f64 = if tracks.is_empty() { 0.0 } else {
                 tracks.iter().map(|t| calculate_entropy(&t.covariance)).sum::<f64>() / tracks.len() as f64
             };
+            
+            // Log stats panel
+            viz.log_stats_panel(7, tracks.len(), ghost_count, merge_count)?;
+            
             println!("  t={:.0}s | Tracks: {} | Ghosts: {} | Entropy: {:.1}",
                 t, tracks.len(), ghost_count, entropy_avg);
         }

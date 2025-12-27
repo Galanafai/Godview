@@ -624,12 +624,13 @@ class GodViewVideoDemo:
 
 
 def main():
+    global OUTPUT_FILE
+    
     parser = argparse.ArgumentParser(description="GodView LinkedIn Demo - MP4 Output")
     parser.add_argument("--duration", type=int, default=80, help="Demo duration in seconds")
-    parser.add_argument("--output", type=str, default=OUTPUT_FILE, help="Output MP4 filename")
+    parser.add_argument("--output", type=str, default="godview_demo.mp4", help="Output MP4 filename")
     args = parser.parse_args()
     
-    global OUTPUT_FILE
     OUTPUT_FILE = args.output
     
     print("[INIT] Connecting to CARLA...")

@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
 GodView Demo - Video Compositor (The Editor)
-Overlays HUD elements on rendered frames and encodes final video.
+=============================================
+Creates Before/After comparison video from NDJSON logs.
 
-Based on: carla.md Section 8
+FIX: This version generates frames PURELY from log data - no CARLA frames needed.
+It creates a visual "data view" showing the chaos vs. consensus narrative.
+
+Output modes:
+  - split: Side-by-side Before (RED) vs After (GREEN)
+  - before: Raw sensor chaos only
+  - after: GodView consensus only
 """
 
 import cv2
@@ -15,7 +22,6 @@ import argparse
 from collections import defaultdict
 
 # Configuration
-FRAMES_PATH = "/workspace/godview_demo/frames/pass2_drone"  # Default to drone view
 RAW_LOG_PATH = "/workspace/godview_demo/logs/raw_broken.ndjson"
 MERGED_LOG_PATH = "/workspace/godview_demo/logs/godview_merged.ndjson"
 EVENTS_LOG_PATH = "/workspace/godview_demo/logs/merge_events.ndjson"
@@ -26,29 +32,34 @@ FPS = 20
 FRAME_WIDTH = 1920
 FRAME_HEIGHT = 1080
 
-# HUD Colors (BGR)
-COLOR_RED = (0, 0, 255)      # Broken/Raw
-COLOR_GREEN = (0, 255, 0)    # GodView/Fixed
-COLOR_YELLOW = (0, 255, 255) # Warnings
-COLOR_WHITE = (255, 255, 255)
-COLOR_DARK_BG = (30, 30, 30)
-COLOR_PANEL_BG = (50, 50, 50, 180)
+# Colors (BGR for OpenCV)
+COLOR_BG = (20, 20, 25)           # Dark background
+COLOR_GRID = (40, 40, 50)         # Grid lines
+COLOR_RAW = (50, 50, 255)         # RED - broken
+COLOR_GODVIEW = (50, 255, 50)     # GREEN - fixed
+COLOR_GHOST = (150, 100, 255)     # Light red for ghosts
+COLOR_DRONE = (255, 200, 100)     # Cyan for drones
+COLOR_SYBIL = (255, 0, 255)       # Magenta for attacks
+COLOR_TEXT = (255, 255, 255)      # White
+COLOR_CRITICAL = (0, 0, 255)      # Red
+COLOR_STABLE = (0, 255, 0)        # Green
 
 # Fonts
 FONT = cv2.FONT_HERSHEY_SIMPLEX
-FONT_SCALE_LARGE = 1.2
-FONT_SCALE_MEDIUM = 0.8
-FONT_SCALE_SMALL = 0.6
+FONT_MONO = cv2.FONT_HERSHEY_PLAIN
 
 
 def load_ndjson(path):
-    """Load NDJSON file into list of dicts."""
+    """Load NDJSON file."""
     data = []
     if os.path.exists(path):
-        with open(path, "r") as f:
+        with open(path, 'r') as f:
             for line in f:
                 if line.strip():
-                    data.append(json.loads(line))
+                    try:
+                        data.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
     return data
 
 
@@ -56,200 +67,231 @@ def group_by_frame(data):
     """Group data by frame number."""
     by_frame = defaultdict(list)
     for item in data:
-        by_frame[item.get("frame", 0)].append(item)
+        by_frame[item.get('frame', 0)].append(item)
     return by_frame
 
 
-def world_to_screen(pos, camera_params):
-    """
-    Project 3D world coordinates to 2D screen coordinates.
-    Simplified orthographic projection for top-down view.
-    """
-    # Camera at z=60, looking down, centered at origin
-    # Scale: 1 meter = ~10 pixels at this height
-    scale = 15.0
-    center_x = FRAME_WIDTH // 2
-    center_y = FRAME_HEIGHT // 2
+def world_to_screen(pos, scale=8.0, offset_x=0, offset_y=0):
+    """Convert world coordinates to screen coordinates."""
+    center_x = FRAME_WIDTH // 4 + offset_x
+    center_y = FRAME_HEIGHT // 2 + offset_y
     
-    screen_x = int(center_x + pos[0] * scale)
-    screen_y = int(center_y - pos[1] * scale)  # Y is inverted
+    x = int(center_x + pos[0] * scale)
+    y = int(center_y - pos[1] * scale)  # Y inverted
     
-    return screen_x, screen_y
+    return x, y
 
 
-def draw_bounding_box(frame, pos, color, label="", is_drone=False):
-    """Draw a bounding box at the projected screen position."""
-    x, y = world_to_screen(pos, None)
+def draw_grid(frame, half=False):
+    """Draw coordinate grid."""
+    width = FRAME_WIDTH // 2 if half else FRAME_WIDTH
+    offset = FRAME_WIDTH // 2 if half else 0
+    
+    # Vertical lines
+    for x in range(offset, offset + width, 50):
+        cv2.line(frame, (x, 0), (x, FRAME_HEIGHT), COLOR_GRID, 1)
+    
+    # Horizontal lines
+    for y in range(0, FRAME_HEIGHT, 50):
+        cv2.line(frame, (offset, y), (offset + width, y), COLOR_GRID, 1)
+
+
+def draw_vehicle_box(frame, pos, color, label="", size=20, dashed=False):
+    """Draw a vehicle bounding box."""
+    x, y = world_to_screen(pos)
     
     # Skip if off-screen
     if x < 0 or x >= FRAME_WIDTH or y < 0 or y >= FRAME_HEIGHT:
         return
     
-    # Box size varies by type
-    if is_drone:
-        box_w, box_h = 40, 40
+    half = size // 2
+    pt1 = (x - half, y - half)
+    pt2 = (x + half, y + half)
+    
+    if dashed:
+        # Draw dashed rectangle
+        for i in range(0, size, 6):
+            cv2.line(frame, (pt1[0] + i, pt1[1]), (pt1[0] + i + 3, pt1[1]), color, 2)
+            cv2.line(frame, (pt1[0] + i, pt2[1]), (pt1[0] + i + 3, pt2[1]), color, 2)
+            cv2.line(frame, (pt1[0], pt1[1] + i), (pt1[0], pt1[1] + i + 3), color, 2)
+            cv2.line(frame, (pt2[0], pt1[1] + i), (pt2[0], pt1[1] + i + 3), color, 2)
     else:
-        box_w, box_h = 60, 30
+        cv2.rectangle(frame, pt1, pt2, color, 2)
     
-    # Draw box
-    pt1 = (x - box_w//2, y - box_h//2)
-    pt2 = (x + box_w//2, y + box_h//2)
-    cv2.rectangle(frame, pt1, pt2, color, 2)
-    
-    # Draw label
+    # Label
     if label:
-        cv2.putText(frame, label, (pt1[0], pt1[1] - 5),
-                    FONT, FONT_SCALE_SMALL, color, 1)
+        cv2.putText(frame, label, (pt1[0], pt1[1] - 5), FONT, 0.4, color, 1)
+
+
+def draw_drone(frame, pos, true_z, is_raw=True, offset_x=0):
+    """Draw drone with altitude indicator."""
+    # In raw mode, show pancake (z=0)
+    display_z = 0 if is_raw else true_z
+    display_pos = [pos[0], pos[1], display_z]
     
-    # For drones, draw vertical stem (Z indicator)
-    if is_drone and len(pos) > 2 and pos[2] > 0:
-        stem_height = int(pos[2] * 2)  # Scale Z for visibility
-        cv2.line(frame, (x, y + box_h//2), (x, y + box_h//2 + stem_height),
-                 color, 2)
-        cv2.putText(frame, f"Z:{pos[2]:.0f}m", (x + 5, y + stem_height),
-                    FONT, FONT_SCALE_SMALL, color, 1)
+    x, y = world_to_screen(display_pos, offset_x=offset_x)
+    
+    if x < 0 or x >= FRAME_WIDTH or y < 0 or y >= FRAME_HEIGHT:
+        return
+    
+    color = COLOR_RAW if is_raw else COLOR_GODVIEW
+    
+    # Drone symbol (circle with cross)
+    cv2.circle(frame, (x, y), 15, color, 2)
+    cv2.line(frame, (x - 10, y), (x + 10, y), color, 1)
+    cv2.line(frame, (x, y - 10), (x, y + 10), color, 1)
+    
+    # Z indicator
+    if not is_raw and true_z > 0:
+        # Draw altitude stem
+        ground_y = y + int(true_z * 2)  # Scale for visibility
+        cv2.line(frame, (x, y), (x, ground_y), COLOR_DRONE, 1)
+        cv2.putText(frame, f"Z:{true_z:.0f}m", (x + 5, y + 10), FONT, 0.4, COLOR_DRONE, 1)
+    else:
+        cv2.putText(frame, "Z:0!", (x + 5, y + 10), FONT, 0.4, COLOR_RAW, 1)
 
 
-def draw_hud_panel(frame, x, y, width, height, alpha=0.7):
-    """Draw semi-transparent panel for HUD."""
+def draw_hud_panel(frame, x, y, width, height):
+    """Draw semi-transparent panel."""
     overlay = frame.copy()
-    cv2.rectangle(overlay, (x, y), (x + width, y + height), COLOR_DARK_BG, -1)
-    cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
-    cv2.rectangle(frame, (x, y), (x + width, y + height), COLOR_WHITE, 1)
+    cv2.rectangle(overlay, (x, y), (x + width, y + height), (30, 30, 35), -1)
+    cv2.addWeighted(overlay, 0.8, frame, 0.2, 0, frame)
+    cv2.rectangle(frame, (x, y), (x + width, y + height), (60, 60, 70), 1)
 
 
-def draw_status_badge(frame, text, position, is_critical=False):
-    """Draw status badge with background."""
-    x, y = position
-    color = COLOR_RED if is_critical else COLOR_GREEN
-    text_size = cv2.getTextSize(text, FONT, FONT_SCALE_MEDIUM, 2)[0]
+def draw_status_badge(frame, text, pos, is_critical=False):
+    """Draw status badge."""
+    color = COLOR_CRITICAL if is_critical else COLOR_STABLE
+    x, y = pos
     
-    # Background
+    (tw, th), _ = cv2.getTextSize(text, FONT, 0.8, 2)
     padding = 10
-    cv2.rectangle(frame, 
-                  (x - padding, y - text_size[1] - padding),
-                  (x + text_size[0] + padding, y + padding),
-                  color, -1)
     
-    # Text
-    cv2.putText(frame, text, (x, y), FONT, FONT_SCALE_MEDIUM, COLOR_WHITE, 2)
+    cv2.rectangle(frame, (x, y - th - padding), (x + tw + padding * 2, y + padding), color, -1)
+    cv2.putText(frame, text, (x + padding, y), FONT, 0.8, COLOR_TEXT, 2)
 
 
-def draw_scrolling_log(frame, events, y_start, max_lines=5):
-    """Draw scrolling event log at bottom of frame."""
+def draw_event_log(frame, events, y_start, max_lines=6):
+    """Draw scrolling event log."""
     x = 20
     y = y_start
-    line_height = 25
+    line_height = 22
     
-    # Draw panel
-    panel_height = (max_lines + 1) * line_height
-    draw_hud_panel(frame, 10, y_start - 30, FRAME_WIDTH - 20, panel_height)
+    # Panel
+    panel_height = (max_lines + 1) * line_height + 10
+    draw_hud_panel(frame, 10, y_start - 25, FRAME_WIDTH - 20, panel_height)
     
     # Title
-    cv2.putText(frame, "GODVIEW EVENT LOG", (x, y), 
-                FONT, FONT_SCALE_MEDIUM, COLOR_YELLOW, 2)
+    cv2.putText(frame, "GODVIEW EVENT LOG", (x, y), FONT, 0.6, (255, 255, 100), 1)
     y += line_height
     
-    # Events (most recent first)
+    # Events
     for event in events[-max_lines:]:
-        event_code = event.get("event_code", "UNKNOWN")
-        details = event.get("details", {})
+        event_code = event.get('event_code', 'UNKNOWN')
+        details = event.get('details', {})
         
-        if event_code == "TRUST_REJECT":
-            text = f"[TRUST] Ed25519 Verified: REJECTED {details.get('entity_id', 'unknown')}"
-            color = COLOR_RED
-        elif event_code == "ID_MERGE":
-            text = f"[HIGHLANDER] Consensus: Merged {details.get('incoming_id', '')[:12]}... -> {details.get('canonical_id', '')[:12]}..."
-            color = COLOR_GREEN
-        elif event_code == "SPATIAL_CORRECTION":
-            text = f"[H3 GRID] Z-Correction: {details.get('entity_id', '')} -> {details.get('corrected_z', 0):.1f}m"
-            color = COLOR_YELLOW
+        if event_code == 'ID_MERGE':
+            color = COLOR_GODVIEW
+            text = f"[HIGHLANDER] Merged: {details.get('incoming_id', '')[:16]}..."
+        elif event_code == 'SPATIAL_CORRECTION':
+            color = COLOR_DRONE
+            text = f"[H3 GRID] Z-Fix: {details.get('entity_id', '')} -> {details.get('corrected_z', 0):.0f}m"
+        elif event_code == 'TRUST_REJECT':
+            color = COLOR_SYBIL
+            text = f"[SECURITY] REJECTED: {details.get('reason', 'invalid')}"
         else:
-            text = f"[{event_code}] {json.dumps(details)[:60]}"
-            color = COLOR_WHITE
+            color = COLOR_TEXT
+            text = f"[{event_code}] {str(details)[:50]}"
         
-        cv2.putText(frame, text, (x, y), FONT, FONT_SCALE_SMALL, color, 1)
+        cv2.putText(frame, text, (x, y), FONT_MONO, 1.0, color, 1)
         y += line_height
 
 
-def draw_metrics_panel(frame, frame_num, total_frames, mode="before"):
-    """Draw metrics panel in top-left corner."""
-    x, y = 20, 20
-    draw_hud_panel(frame, 10, 10, 400, 180)
-    
-    # Title
-    if mode == "before":
-        cv2.putText(frame, "RAW SENSOR FEED", (x, y + 25), FONT, FONT_SCALE_LARGE, COLOR_RED, 2)
-    else:
-        cv2.putText(frame, "GODVIEW CONSENSUS", (x, y + 25), FONT, FONT_SCALE_LARGE, COLOR_GREEN, 2)
-    
-    # Metrics
-    y_offset = 60
-    metrics = [
-        f"Frame: {frame_num}/{total_frames}",
-        f"H3 Spatial Grid: {'ACTIVE' if mode == 'after' else 'DISABLED'}",
-        f"Highlander Consensus: {'ON' if mode == 'after' else 'OFF'}",
-        f"Ed25519 Verification: {'ENFORCED' if mode == 'after' else 'BYPASSED'}"
-    ]
-    
-    for metric in metrics:
-        cv2.putText(frame, metric, (x, y + y_offset), FONT, FONT_SCALE_SMALL, COLOR_WHITE, 1)
-        y_offset += 25
-
-
-def compose_frame(base_frame, frame_num, raw_data, merged_data, events, mode="both"):
-    """Compose a single frame with HUD overlay."""
-    frame = base_frame.copy()
+def create_frame(frame_num, raw_data, merged_data, events, mode="split", total_frames=600):
+    """Create a single video frame."""
+    # Create dark background
+    frame = np.full((FRAME_HEIGHT, FRAME_WIDTH, 3), COLOR_BG, dtype=np.uint8)
     
     # Get data for this frame
-    raw_frame_data = raw_data.get(frame_num, [])
-    merged_frame_data = merged_data.get(frame_num, [])
-    frame_events = [e for e in events if e.get("frame", -1) <= frame_num][-10:]
+    raw_items = raw_data.get(frame_num, [])
+    merged_items = merged_data.get(frame_num, [])
+    frame_events = [e for e in events if e.get('frame', -1) <= frame_num][-15:]
     
-    # Draw bounding boxes
-    if mode in ["before", "both"]:
-        for packet in raw_frame_data:
-            pos = packet.get("position", [0, 0, 0])
-            is_drone = packet.get("class_id") == 4
-            faults = packet.get("faults", {})
+    if mode == "split":
+        # Left half: RAW (Before)
+        # Right half: GODVIEW (After)
+        
+        # Draw grids
+        draw_grid(frame, half=True)
+        
+        # Divider
+        cv2.line(frame, (FRAME_WIDTH // 2, 0), (FRAME_WIDTH // 2, FRAME_HEIGHT), COLOR_TEXT, 3)
+        
+        # Labels
+        cv2.putText(frame, "BEFORE (Raw Sensors)", (50, 50), FONT, 1.0, COLOR_RAW, 2)
+        cv2.putText(frame, "AFTER (GodView)", (FRAME_WIDTH // 2 + 50, 50), FONT, 1.0, COLOR_GODVIEW, 2)
+        
+        # Status badges
+        draw_status_badge(frame, "CRITICAL", (FRAME_WIDTH // 4 - 60, 100), is_critical=True)
+        draw_status_badge(frame, "STABLE", (FRAME_WIDTH * 3 // 4 - 50, 100), is_critical=False)
+        
+        # Draw RAW data (left side)
+        for item in raw_items:
+            pos = item.get('position', [0, 0, 0])
+            faults = item.get('faults', {})
+            class_id = item.get('class_id', 1)
             
-            # Jitter effect for OOSM
-            if faults.get("oosm"):
-                pos = [p + np.random.uniform(-1, 1) for p in pos]
+            if class_id == 4:  # Drone
+                draw_drone(frame, pos, item.get('true_z', 15), is_raw=True, offset_x=0)
+            else:
+                # Apply visual jitter for OOSM
+                if faults.get('oosm'):
+                    pos = [p + np.random.uniform(-2, 2) for p in pos]
+                
+                label = ""
+                if faults.get('ghost'):
+                    label = "GHOST"
+                if faults.get('sybil'):
+                    label = "SYBIL!"
+                
+                draw_vehicle_box(frame, pos, COLOR_RAW, label, dashed=faults.get('ghost', False))
+        
+        # Draw GODVIEW data (right side, offset by half width)
+        for item in merged_items:
+            pos = item.get('position', [0, 0, 0])
+            class_id = item.get('class_id', 1)
             
-            # Flatten for pancake
-            if faults.get("pancake"):
-                pos[2] = 0
+            # Offset for right half
+            shifted_pos = [pos[0], pos[1], pos[2]]
+            x, y = world_to_screen(shifted_pos, offset_x=FRAME_WIDTH // 2)
             
-            label = "GHOST" if faults.get("ghost") else ""
-            if faults.get("sybil"):
-                label = "SYBIL ATTACK!"
-            
-            draw_bounding_box(frame, pos, COLOR_RED, label, is_drone)
+            if class_id == 4:  # Drone
+                draw_drone(frame, pos, pos[2], is_raw=False, offset_x=FRAME_WIDTH // 2)
+            else:
+                draw_vehicle_box(frame, [pos[0] + FRAME_WIDTH // 16, pos[1], pos[2]], COLOR_GODVIEW)
     
-    if mode in ["after", "both"]:
-        for packet in merged_frame_data:
-            pos = packet.get("position", [0, 0, 0])
-            is_drone = packet.get("class_id") == 4
-            draw_bounding_box(frame, pos, COLOR_GREEN, "", is_drone)
-    
-    # Draw HUD elements
-    draw_metrics_panel(frame, frame_num, 600, mode)  # Assuming 600 total frames
-    
-    # Status badge
-    if mode == "before":
-        draw_status_badge(frame, "STATUS: CRITICAL", (FRAME_WIDTH - 280, 50), is_critical=True)
     else:
-        draw_status_badge(frame, "STATUS: STABLE", (FRAME_WIDTH - 250, 50), is_critical=False)
+        # Single view mode
+        draw_grid(frame)
+        color = COLOR_RAW if mode == "before" else COLOR_GODVIEW
+        data = raw_items if mode == "before" else merged_items
+        
+        for item in data:
+            pos = item.get('position', [0, 0, 0])
+            draw_vehicle_box(frame, pos, color)
     
-    # Scrolling log
-    draw_scrolling_log(frame, frame_events, FRAME_HEIGHT - 150)
+    # Draw frame counter
+    cv2.putText(frame, f"Frame: {frame_num}/{total_frames}", (20, FRAME_HEIGHT - 200), 
+                FONT, 0.6, COLOR_TEXT, 1)
+    
+    # Draw event log
+    draw_event_log(frame, frame_events, FRAME_HEIGHT - 180)
     
     return frame
 
 
 def encode_video(frames_pattern, output_file, fps=20):
-    """Encode frames to MP4 using ffmpeg."""
+    """Encode frames to MP4."""
     cmd = [
         "ffmpeg", "-y",
         "-framerate", str(fps),
@@ -266,98 +308,80 @@ def encode_video(frames_pattern, output_file, fps=20):
 
 def main():
     parser = argparse.ArgumentParser(description="GodView Demo - Video Compositor")
-    parser.add_argument("--frames-dir", default=FRAMES_PATH, help="Input frames directory")
     parser.add_argument("--mode", default="split", choices=["before", "after", "split"],
-                        help="Output mode: before (red), after (green), split (side-by-side)")
-    parser.add_argument("--max-frames", type=int, default=600, help="Max frames to process")
+                        help="Output mode")
+    parser.add_argument("--max-frames", type=int, default=600, help="Max frames")
+    parser.add_argument("--raw-log", default=RAW_LOG_PATH, help="Raw log path")
+    parser.add_argument("--merged-log", default=MERGED_LOG_PATH, help="Merged log path")
+    parser.add_argument("--events-log", default=EVENTS_LOG_PATH, help="Events log path")
+    parser.add_argument("--output-dir", default=OUTPUT_PATH, help="Output directory")
     args = parser.parse_args()
     
-    separator = "=" * 60
-    print(separator)
+    print("=" * 60)
     print("GodView Demo - Video Compositor")
-    print(separator)
+    print("=" * 60)
     
     # Load data
-    print("\n[1/4] Loading data...")
-    raw_data = group_by_frame(load_ndjson(RAW_LOG_PATH))
-    merged_data = group_by_frame(load_ndjson(MERGED_LOG_PATH))
-    events = load_ndjson(EVENTS_LOG_PATH)
+    print("\n[1/3] Loading NDJSON logs...")
+    raw_data = group_by_frame(load_ndjson(args.raw_log))
+    merged_data = group_by_frame(load_ndjson(args.merged_log))
+    events = load_ndjson(args.events_log)
+    
     print(f"  Raw packets: {sum(len(v) for v in raw_data.values())}")
     print(f"  Merged packets: {sum(len(v) for v in merged_data.values())}")
     print(f"  Events: {len(events)}")
     
-    # Create output directory
-    os.makedirs(OUTPUT_PATH, exist_ok=True)
-    composite_dir = os.path.join(OUTPUT_PATH, "composite_frames")
+    if not raw_data and not merged_data:
+        print("\n[ERROR] No data found! Run scenario_runner.py and generate_logs.py first.")
+        return
+    
+    # Create output directories
+    os.makedirs(args.output_dir, exist_ok=True)
+    composite_dir = os.path.join(args.output_dir, "composite_frames")
     os.makedirs(composite_dir, exist_ok=True)
     
-    # Find input frames
-    print(f"\n[2/4] Processing frames from {args.frames_dir}...")
-    frame_files = sorted([f for f in os.listdir(args.frames_dir) if f.endswith('.png')])
-    total_frames = min(len(frame_files), args.max_frames)
-    print(f"  Found {len(frame_files)} frames, processing {total_frames}")
+    # Determine frame range
+    max_frame = max(
+        max(raw_data.keys()) if raw_data else 0,
+        max(merged_data.keys()) if merged_data else 0
+    )
+    total_frames = min(max_frame + 1, args.max_frames)
     
-    # Process frames
-    print("\n[3/4] Compositing frames with HUD...")
-    for i, frame_file in enumerate(frame_files[:total_frames]):
-        if i >= args.max_frames:
-            break
-        
-        # Load base frame
-        frame_path = os.path.join(args.frames_dir, frame_file)
-        base_frame = cv2.imread(frame_path)
-        
-        if base_frame is None:
-            print(f"  Warning: Could not load {frame_path}")
-            continue
-        
-        # Compose based on mode
-        if args.mode == "split":
-            # Side-by-side: before on left, after on right
-            left = compose_frame(base_frame, i, raw_data, merged_data, events, "before")
-            right = compose_frame(base_frame, i, raw_data, merged_data, events, "after")
-            
-            # Resize each to half width
-            left_half = cv2.resize(left, (FRAME_WIDTH // 2, FRAME_HEIGHT))
-            right_half = cv2.resize(right, (FRAME_WIDTH // 2, FRAME_HEIGHT))
-            
-            # Combine
-            composed = np.hstack([left_half, right_half])
-            
-            # Add center divider
-            cv2.line(composed, (FRAME_WIDTH // 2, 0), (FRAME_WIDTH // 2, FRAME_HEIGHT), COLOR_WHITE, 3)
-            cv2.putText(composed, "BEFORE", (FRAME_WIDTH // 4 - 50, 50), FONT, 1.5, COLOR_RED, 3)
-            cv2.putText(composed, "AFTER", (3 * FRAME_WIDTH // 4 - 40, 50), FONT, 1.5, COLOR_GREEN, 3)
-        else:
-            composed = compose_frame(base_frame, i, raw_data, merged_data, events, args.mode)
-        
-        # Save composed frame
+    print(f"\n[2/3] Generating {total_frames} frames ({args.mode} mode)...")
+    
+    for i in range(total_frames):
+        frame = create_frame(i, raw_data, merged_data, events, args.mode, total_frames)
         output_path = os.path.join(composite_dir, f"composite_{i:04d}.png")
-        cv2.imwrite(output_path, composed)
+        cv2.imwrite(output_path, frame)
         
-        if i % 50 == 0:
+        if i % 100 == 0:
             print(f"    Frame {i}/{total_frames}")
     
-    # Encode videos
-    print("\n[4/4] Encoding videos with ffmpeg...")
+    print(f"  Saved frames to {composite_dir}")
+    
+    # Encode video
+    print("\n[3/3] Encoding video with ffmpeg...")
     
     if args.mode == "before":
-        output_file = os.path.join(OUTPUT_PATH, "video_before.mp4")
+        output_file = os.path.join(args.output_dir, "video_before.mp4")
     elif args.mode == "after":
-        output_file = os.path.join(OUTPUT_PATH, "video_after.mp4")
+        output_file = os.path.join(args.output_dir, "video_after.mp4")
     else:
-        output_file = os.path.join(OUTPUT_PATH, "final_linkedin.mp4")
+        output_file = os.path.join(args.output_dir, "final_linkedin.mp4")
     
-    encode_video(
-        os.path.join(composite_dir, "composite_%04d.png"),
-        output_file,
-        FPS
-    )
-    
-    print(f"\n{separator}")
-    print("COMPLETE!")
-    print(f"  Output: {output_file}")
-    print(separator)
+    try:
+        encode_video(
+            os.path.join(composite_dir, "composite_%04d.png"),
+            output_file,
+            FPS
+        )
+        print(f"\n{'=' * 60}")
+        print("COMPLETE!")
+        print(f"  Video: {output_file}")
+        print("=" * 60)
+    except Exception as e:
+        print(f"  FFmpeg error: {e}")
+        print(f"  Frames available at: {composite_dir}")
 
 
 if __name__ == "__main__":

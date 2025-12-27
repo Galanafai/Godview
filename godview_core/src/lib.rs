@@ -18,6 +18,11 @@ pub mod visualization;
 #[cfg(feature = "dashboard")]
 pub mod dashboard;
 
+#[cfg(feature = "carla")]
+pub mod carla_zmq;
+
+pub mod validation;
+
 // Re-export key types for convenience
 pub use godview_time::AugmentedStateFilter;
 pub use godview_space::{Entity, SpatialEngine, WorldShard};

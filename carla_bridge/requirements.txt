@@ -14,6 +14,9 @@ torchvision>=0.15.0
 # Zenoh for pub/sub
 eclipse-zenoh>=0.11.0
 
+# ZeroMQ for high-performance IPC (zmq_bridge.py)
+pyzmq>=25.0.0
+
 # Utilities
 pyyaml>=6.0
 matplotlib>=3.7.0

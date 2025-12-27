@@ -11,6 +11,7 @@ default = []
 visualization = ["rerun"]
 kitti = ["kitti-dataset"]
 dashboard = ["ratatui", "crossterm", "crossbeam"]
+carla = ["zmq"]  # High-performance CARLA integration via ZeroMQ
 
 [dependencies]
 # Math & Physics (The "Time" Engine)
@@ -43,6 +44,9 @@ kitti-dataset = { version = "0.3", optional = true }
 ratatui = { version = "0.29", optional = true }
 crossterm = { version = "0.28", optional = true }
 crossbeam = { version = "0.8", optional = true }
+
+# CARLA ZMQ Bridge (Optional)
+zmq = { version = "0.10", optional = true }
 
 
 [dev-dependencies]
@@ -79,3 +83,12 @@ required-features = ["visualization"]
 [[example]]
 name = "autonomous_demo"
 required-features = ["visualization"]
+
+[[example]]
+name = "multispace_demo"
+required-features = ["visualization"]
+
+[[example]]
+name = "carla_demo"
+required-features = ["carla", "visualization"]
+

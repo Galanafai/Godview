@@ -226,7 +226,53 @@ class Replayer:
         # Debug: print all actors
         print("All actors:", [a.type_id for a in self.world.get_actors()])
     
-    # ... (rest of methods)
+    def get_phase_for_frame(self, frame_idx: int) -> str:
+        """Get phase name for a frame index."""
+        if SETUP_FRAMES[0] <= frame_idx < SETUP_FRAMES[1]:
+            return "SETUP"
+        elif CHAOS_FRAMES[0] <= frame_idx < CHAOS_FRAMES[1]:
+            return "CHAOS"
+        elif ACTIVATION_FRAMES[0] <= frame_idx < ACTIVATION_FRAMES[1]:
+            return "ACTIVATION"
+        elif SOLUTION_FRAMES[0] <= frame_idx < SOLUTION_FRAMES[1]:
+            return "SOLUTION"
+        else:
+            return "DEEPDIVE"
+    
+    def compute_birdseye_transform(self, frame_idx: int) -> carla.Transform:
+        """Compute bird's-eye camera transform with orbit animation."""
+        # During SETUP, orbit from 0 deg to 90 deg yaw
+        if frame_idx <= SETUP_FRAMES[1]:
+            progress = frame_idx / (SETUP_FRAMES[1] - SETUP_FRAMES[0])
+            yaw = progress * 90.0
+        else:
+            # DEEPDIVE: static or slow orbit
+            progress = (frame_idx - DEEPDIVE_FRAMES[0]) / (DEEPDIVE_FRAMES[1] - DEEPDIVE_FRAMES[0])
+            yaw = 90.0 + progress * 45.0
+        
+        return carla.Transform(
+            carla.Location(
+                x=self.scene_center.x,
+                y=self.scene_center.y,
+                z=BIRDSEYE_HEIGHT
+            ),
+            carla.Rotation(pitch=-90.0, yaw=yaw, roll=0.0)
+        )
+    
+    def compute_chase_transform(self, hero_transform: carla.Transform) -> carla.Transform:
+        """Compute chase camera transform relative to hero vehicle."""
+        # Get hero forward direction
+        yaw_rad = math.radians(hero_transform.rotation.yaw)
+        
+        # Position behind and above
+        cam_x = hero_transform.location.x - CHASE_DISTANCE * math.cos(yaw_rad)
+        cam_y = hero_transform.location.y - CHASE_DISTANCE * math.sin(yaw_rad)
+        cam_z = hero_transform.location.z + CHASE_HEIGHT
+        
+        return carla.Transform(
+            carla.Location(x=cam_x, y=cam_y, z=cam_z),
+            carla.Rotation(pitch=CHASE_PITCH, yaw=hero_transform.rotation.yaw, roll=0.0)
+        )
 
     def run_birdseye_pass(self, recording_file: str):
         """Capture bird's-eye frames for SETUP and DEEPDIVE phases."""

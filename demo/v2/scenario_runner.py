@@ -487,9 +487,11 @@ class ScenarioRunner:
         tm = self.setup_world()
         
         # Start recording (MUST be before spawning to capture spawn events)
-        recording_file = str(OUTPUT_DIR / "godview_demo.log")
+        # Use relative path so CARLA server saves it in its own default directory
+        # (Avoids issues with absolute host paths if CARLA is in Docker)
+        recording_file = "godview_demo.log"
         self.client.start_recorder(recording_file)
-        print(f"[RECORD] Started recording to {recording_file}")
+        print(f"[RECORD] Started recording to {recording_file} (on server)")
         
         # Spawn actors
         self.spawn_actors(tm)

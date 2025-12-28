@@ -539,20 +539,26 @@ class ScenarioRunner:
     
     def cleanup(self):
         """Destroy all actors."""
+        print("[CLEANUP] Stopping recording...")
+        self.client.stop_recorder()
+
         print("[CLEANUP] Destroying actors...")
         
-        for vehicle in self.vehicles:
-            if vehicle.is_alive:
-                vehicle.destroy()
-        
-        for drone in self.drones:
-            if drone.is_alive:
-                drone.destroy()
+        all_actors = self.vehicles + self.drones
+        for actor in all_actors:
+            try:
+                if actor and actor.is_alive:
+                    actor.destroy()
+            except RuntimeError:
+                pass
         
         # Reset world settings
-        settings = self.world.get_settings()
-        settings.synchronous_mode = False
-        self.world.apply_settings(settings)
+        try:
+            settings = self.world.get_settings()
+            settings.synchronous_mode = False
+            self.world.apply_settings(settings)
+        except RuntimeError:
+            pass
         
         print("[CLEANUP] Complete!")
 

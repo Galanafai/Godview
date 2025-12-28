@@ -31,8 +31,8 @@ SIMULATION_FRAMES = 2400   # 80 seconds
 FPS = 30
 
 # Actor counts
-NUM_VEHICLES = 15
-NUM_DRONES = 3  # Pedestrians teleported to altitude
+NUM_VEHICLES = 40  # Increased from 15
+NUM_DRONES = 20    # Increased from 3
 
 # Scene center (Town10HD)
 SCENE_CENTER = carla.Location(x=0, y=0, z=0)
@@ -77,7 +77,10 @@ def build_object_detection(
     bbox_extent: dict,
     confidence: float = 0.8,
     note: Optional[str] = None,
-    signature: Optional[str] = None
+    signature: Optional[str] = None,
+    is_hero: bool = False,
+    velocity: Optional[dict] = None,
+    covariance: Optional[List[float]] = None
 ) -> dict:
     """Build a single object detection."""
     obj = {
@@ -86,12 +89,17 @@ def build_object_detection(
         "confidence": confidence,
         "pose": pose,
         "bbox_extent": bbox_extent,
-        "covariance": [0.5, 0.0, 0.0, 0.5]
+        # Default high covariance for raw detections if not provided
+        "covariance": covariance if covariance else [2.0, 0.0, 0.0, 2.0]
     }
     if note:
         obj["note"] = note
     if signature:
         obj["signature"] = signature
+    if is_hero:
+        obj["is_hero"] = True
+    if velocity:
+        obj["velocity"] = velocity
     return obj
 
 
@@ -113,7 +121,9 @@ def build_canonical_object(
     pose: dict,
     bbox_extent: dict,
     confidence: float = 0.95,
-    velocity: Optional[dict] = None
+    velocity: Optional[dict] = None,
+    covariance: Optional[List[float]] = None,
+    is_hero: bool = False
 ) -> dict:
     """Build a single canonical object."""
     obj = {
@@ -121,10 +131,14 @@ def build_canonical_object(
         "class": obj_class,
         "confidence": confidence,
         "pose": pose,
-        "bbox_extent": bbox_extent
+        "bbox_extent": bbox_extent,
+        # Default low covariance for fused state if not provided
+        "covariance": covariance if covariance else [0.2, 0.0, 0.0, 0.2]
     }
     if velocity:
         obj["velocity"] = velocity
+    if is_hero:
+        obj["is_hero"] = True
     return obj
 
 
@@ -294,21 +308,38 @@ class ScenarioRunner:
             pose = self.get_actor_pose(vehicle, add_jitter=True)
             bbox = self.get_actor_bbox(vehicle)
             
+            # Is this the hero vehicle?
+            is_hero = (vehicle.id == self.hero_vehicle.id) if self.hero_vehicle else False
+            
+            # Calculate velocity (approximate from physics control or previous state)
+            v = vehicle.get_velocity()
+            velocity = {'x': v.x, 'y': v.y, 'z': v.z}
+            
+            # High covariance for raw detections (simulating sensor noise)
+            # Format: [var_x, cov_xy, cov_yx, var_y]
+            raw_cov = [2.5, 0.1, 0.1, 2.5]
+            
             obj = build_object_detection(
                 local_id=f"vehicle_{vehicle.id}",
                 obj_class="vehicle",
                 pose=pose,
                 bbox_extent=bbox,
                 confidence=0.7 + random.uniform(-0.1, 0.1),
-                signature=f"sig_{vehicle.id}"
+                signature=f"sig_{vehicle.id}",
+                is_hero=is_hero,
+                velocity=velocity,
+                covariance=raw_cov
             )
             objects.append(obj)
             
-            # Ghost generation
-            if random.random() < GHOST_RATE:
+            # Ghost generation (NEVER for hero)
+            if not is_hero and random.random() < GHOST_RATE:
                 ghost_pose = pose.copy()
                 ghost_pose['x'] += random.uniform(-3, 3)
                 ghost_pose['y'] += random.uniform(-3, 3)
+                
+                # Very high covariance for ghosts
+                ghost_cov = [5.0, 0.0, 0.0, 5.0]
                 
                 ghost_obj = build_object_detection(
                     local_id=f"ghost_{vehicle.id}_{frame_idx}",
@@ -316,7 +347,8 @@ class ScenarioRunner:
                     pose=ghost_pose,
                     bbox_extent=bbox,
                     confidence=0.4 + random.uniform(0, 0.2),
-                    note="GHOST_DUPLICATE"
+                    note="GHOST_DUPLICATE",
+                    covariance=ghost_cov
                 )
                 objects.append(ghost_obj)
                 self.stats["ghosts_generated"] += 1
@@ -332,6 +364,9 @@ class ScenarioRunner:
             # Pancake: force Z to ground level
             pose['z'] = 0.5
             
+            # High vertical uncertainty
+            drone_cov = [1.0, 0.0, 0.0, 1.0]
+            
             obj = build_object_detection(
                 local_id=f"drone_{drone.id}",
                 obj_class="drone",
@@ -339,12 +374,17 @@ class ScenarioRunner:
                 bbox_extent=bbox,
                 confidence=0.6,
                 note="PANCAKE_FAILURE_EXAMPLE",
-                signature=f"sig_drone_{drone.id}"
+                signature=f"sig_drone_{drone.id}",
+                covariance=drone_cov
             )
             objects.append(obj)
         
         # Sybil attack object
         if SYBIL_ACTIVE and self.sybil_position and frame_idx > 450:  # After setup phase
+            # Sybil has fake velocity
+            sybil_vel = {'x': 0, 'y': 0, 'z': 0}
+            sybil_cov = [0.1, 0.0, 0.0, 0.1] # Fake high precision
+            
             sybil_obj = build_object_detection(
                 local_id="sybil_fake_barrier",
                 obj_class="vehicle",
@@ -352,7 +392,9 @@ class ScenarioRunner:
                 bbox_extent={'x': 3.0, 'y': 1.0, 'z': 2.0},
                 confidence=0.9,
                 note="SYBIL_ATTACK",
-                signature="INVALID_SIGNATURE"
+                signature="INVALID_SIGNATURE",
+                velocity=sybil_vel,
+                covariance=sybil_cov
             )
             objects.append(sybil_obj)
         
@@ -378,12 +420,23 @@ class ScenarioRunner:
             pose = self.get_actor_pose(vehicle, add_jitter=False)
             bbox = self.get_actor_bbox(vehicle)
             
+            is_hero = (vehicle.id == self.hero_vehicle.id) if self.hero_vehicle else False
+            
+            v = vehicle.get_velocity()
+            velocity = {'x': v.x, 'y': v.y, 'z': v.z}
+            
+            # Tight covariance for fused state
+            fused_cov = [0.2, 0.0, 0.0, 0.2]
+            
             obj = build_canonical_object(
                 canonical_id=f"vehicle_{vehicle.id}",
                 obj_class="vehicle",
                 pose=pose,
                 bbox_extent=bbox,
-                confidence=0.95
+                confidence=0.95,
+                is_hero=is_hero,
+                velocity=velocity,
+                covariance=fused_cov
             )
             objects.append(obj)
         
@@ -403,7 +456,9 @@ class ScenarioRunner:
                 obj_class="drone",
                 pose=pose,
                 bbox_extent=bbox,
-                confidence=0.92
+                confidence=0.92,
+                velocity={'x': 0, 'y': 0, 'z': 0},
+                covariance=[0.5, 0.0, 0.0, 0.5]
             )
             objects.append(obj)
         

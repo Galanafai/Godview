@@ -513,3 +513,244 @@ def draw_rejection_stamp(
     cv2.rectangle(frame, (tx - 5, ty - text_size[1] - 5), 
                  (tx + text_size[0] + 5, ty + 5), Colors.RED, -1)
     cv2.putText(frame, text, (tx, ty), FONT, 0.6, Colors.WHITE, 2, cv2.LINE_AA)
+
+
+# ============================================================================
+# TECHNICAL VISUALIZATIONS (GODVIEW POWER)
+# ============================================================================
+
+def draw_velocity_vector(
+    frame: np.ndarray,
+    center: Tuple[int, int],
+    velocity: dict,
+    color: Tuple[int, int, int] = Colors.YELLOW,
+    scale: float = 2.0
+) -> None:
+    """Draw a velocity vector arrow."""
+    if not velocity: return
+    vx = velocity.get('x', 0)
+    vy = velocity.get('y', 0)
+    if abs(vx) < 0.1 and abs(vy) < 0.1: return
+    
+    end_point = (
+        int(center[0] + vx * 8 * scale),
+        int(center[1] + vy * 8 * scale)
+    )
+    cv2.arrowedLine(frame, center, end_point, color, 2, tipLength=0.3)
+
+
+def draw_covariance_ellipse(
+    frame: np.ndarray,
+    center: Tuple[int, int],
+    covariance: List[float],
+    scale_factor: float = 15.0,
+    color: Tuple[int, int, int] = Colors.RED,
+    alpha: float = 0.3
+) -> None:
+    """Draw uncertainty ellipse."""
+    if not covariance or len(covariance) < 4: return
+    try:
+        cov_matrix = np.array([[covariance[0], covariance[1]], [covariance[2], covariance[3]]])
+        vals, vecs = np.linalg.eigh(cov_matrix)
+        order = vals.argsort()[::-1]
+        vals, vecs = vals[order], vecs[:, order]
+        theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+        width = int(2 * np.sqrt(abs(vals[0])) * scale_factor)
+        height = int(2 * np.sqrt(abs(vals[1])) * scale_factor)
+        
+        if width < 2 or height < 2: return
+
+        overlay = frame.copy()
+        cv2.ellipse(overlay, center, (width, height), theta, 0, 360, color, -1)
+        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        cv2.ellipse(frame, center, (width, height), theta, 0, 360, color, 1)
+    except Exception: pass
+
+
+def draw_lidar_points(
+    frame: np.ndarray,
+    bbox_corners: List[Tuple[int, int]],
+    density: int = 15,
+    color: Tuple[int, int, int] = (0, 255, 255)
+) -> None:
+    """Draw procedural LiDAR points."""
+    if len(bbox_corners) != 8: return
+    lines = [(0,1),(1,2),(2,3),(3,0), (4,5),(5,6),(6,7),(7,4), (0,4),(1,5),(2,6),(3,7)]
+    for s, e in lines:
+        p1, p2 = bbox_corners[s], bbox_corners[e]
+        dist = np.hypot(p2[0]-p1[0], p2[1]-p1[1])
+        steps = max(2, int(dist / 10))
+        for t in np.linspace(0, 1, steps):
+            x = int(p1[0] + (p2[0]-p1[0])*t + np.random.randint(-1, 2))
+            y = int(p1[1] + (p2[1]-p1[1])*t + np.random.randint(-1, 2))
+            if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
+                frame[y, x] = color
+
+
+def draw_drone_model(
+    frame: np.ndarray,
+    center: Tuple[int, int],
+    size: int = 30,
+    color: Tuple[int, int, int] = Colors.WHITE
+) -> None:
+    """Draw a 3D wireframe drone model."""
+    cx, cy = center
+    d = size // 2
+    cv2.line(frame, (cx-d, cy-d), (cx+d, cy+d), color, 2)
+    cv2.line(frame, (cx+d, cy-d), (cx-d, cy+d), color, 2)
+    r = size // 4
+    rotor_col = (180, 180, 180)
+    for dx, dy in [(-d, -d), (d, -d), (-d, d), (d, d)]:
+        cv2.circle(frame, (cx+dx, cy+dy), r, rotor_col, 1)
+        cv2.circle(frame, (cx+dx, cy+dy), 2, rotor_col, -1)
+    cv2.circle(frame, center, 5, Colors.GREEN, -1)
+
+
+def draw_technical_label(
+    frame: np.ndarray,
+    pos: Tuple[int, int],
+    lines: List[str],
+    color: Tuple[int, int, int] = Colors.GREEN,
+    bg_color: Tuple[int, int, int] = (0, 20, 0)
+) -> None:
+    """Draw a multi-line technical label."""
+    x, y = pos
+    padding = 5
+    line_height = 16
+    font_scale = 0.4
+    box_h = len(lines) * line_height + padding * 2
+    box_w = max([cv2.getTextSize(l, FONT_MONO, font_scale, 1)[0][0] for l in lines] + [0]) + padding * 2
+    cv2.rectangle(frame, (x, y), (x + box_w, y + box_h), bg_color, -1)
+    cv2.rectangle(frame, (x, y), (x + box_w, y + box_h), color, 1)
+    for i, line in enumerate(lines):
+        text_y = y + padding + (i + 1) * line_height - 4
+        cv2.putText(frame, line, (x + padding, text_y), FONT_MONO, font_scale, color, 1, cv2.LINE_AA)
+
+
+# ============================================================================
+# TECHNICAL VISUALIZATIONS (GODVIEW POWER)
+# ============================================================================
+
+def draw_velocity_vector(
+    frame: np.ndarray,
+    center: Tuple[int, int],
+    velocity: dict,
+    color: Tuple[int, int, int] = Colors.YELLOW,
+    scale: float = 2.0
+) -> None:
+    """Draw a velocity vector arrow."""
+    # Safety check for None or empty dict
+    if not velocity:
+        return
+        
+    vx = velocity.get('x', 0)
+    vy = velocity.get('y', 0)
+    
+    if abs(vx) < 0.1 and abs(vy) < 0.1:
+        return
+    
+    # Simple projection: map world vx/vy relative to screen
+    # In bird's-eye (pitch=-90), x is right, y is down
+    # In chase view, this is approximate but adds visual flair
+    end_point = (
+        int(center[0] + vx * 8 * scale),
+        int(center[1] + vy * 8 * scale)
+    )
+    
+    cv2.arrowedLine(frame, center, end_point, color, 2, tipLength=0.3)
+
+
+def draw_covariance_ellipse(
+    frame: np.ndarray,
+    center: Tuple[int, int],
+    covariance: List[float],  # [var_x, cov_xy, cov_yx, var_y]
+    scale_factor: float = 15.0,
+    color: Tuple[int, int, int] = Colors.RED,
+    alpha: float = 0.3
+) -> None:
+    """Draw uncertainty ellipse."""
+    if not covariance or len(covariance) < 4:
+        return
+        
+    try:
+        cov_matrix = np.array([
+            [covariance[0], covariance[1]],
+            [covariance[2], covariance[3]]
+        ])
+        
+        vals, vecs = np.linalg.eigh(cov_matrix)
+        order = vals.argsort()[::-1]
+        vals = vals[order]
+        vecs = vecs[:, order]
+        
+        theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+        width = int(2 * np.sqrt(abs(vals[0])) * scale_factor)
+        height = int(2 * np.sqrt(abs(vals[1])) * scale_factor)
+        
+        if width < 2 or height < 2:
+            return
+
+        overlay = frame.copy()
+        cv2.ellipse(overlay, center, (width, height), theta, 0, 360, color, -1)
+        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        cv2.ellipse(frame, center, (width, height), theta, 0, 360, color, 1)
+            
+    except Exception:
+        pass
+
+
+def draw_lidar_points(
+    frame: np.ndarray,
+    bbox_corners: List[Tuple[int, int]],
+    density: int = 15,
+    color: Tuple[int, int, int] = (0, 255, 255)
+) -> None:
+    """Draw procedural LiDAR points on vehicle surfaces."""
+    if len(bbox_corners) != 8:
+        return
+        
+    # Draw points along edges to simulate scan lines
+    lines = [
+        (0, 1), (1, 2), (2, 3), (3, 0), # Bottom
+        (4, 5), (5, 6), (6, 7), (7, 4), # Top
+        (0, 4), (1, 5), (2, 6), (3, 7)  # Sides
+    ]
+    
+    for s, e in lines:
+        p1, p2 = bbox_corners[s], bbox_corners[e]
+        dist = np.hypot(p2[0]-p1[0], p2[1]-p1[1])
+        steps = max(2, int(dist / 10))  # One point every 10px
+        
+        for t in np.linspace(0, 1, steps):
+            # Jitter
+            x = int(p1[0] + (p2[0]-p1[0])*t + np.random.randint(-1, 2))
+            y = int(p1[1] + (p2[1]-p1[1])*t + np.random.randint(-1, 2))
+            if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
+                frame[y, x] = color
+
+
+def draw_drone_model(
+    frame: np.ndarray,
+    center: Tuple[int, int],
+    size: int = 30,
+    color: Tuple[int, int, int] = Colors.WHITE
+) -> None:
+    """Draw a 3D wireframe drone model."""
+    cx, cy = center
+    d = size // 2
+    
+    # Arms
+    cv2.line(frame, (cx-d, cy-d), (cx+d, cy+d), color, 2)
+    cv2.line(frame, (cx+d, cy-d), (cx-d, cy+d), color, 2)
+    
+    # Rotors
+    r = size // 4
+    rotor_col = (180, 180, 180)
+    for dx, dy in [(-d, -d), (d, -d), (-d, d), (d, d)]:
+        cv2.circle(frame, (cx+dx, cy+dy), r, rotor_col, 1)
+        # Propeller blur
+        cv2.circle(frame, (cx+dx, cy+dy), 2, rotor_col, -1)
+    
+    # Main body
+    cv2.circle(frame, center, 5, Colors.GREEN, -1)
+

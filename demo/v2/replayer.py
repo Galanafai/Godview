@@ -226,6 +226,146 @@ class Replayer:
     
     # ... (rest of methods)
 
+    def run_birdseye_pass(self, recording_file: str):
+        """Capture bird's-eye frames for SETUP and DEEPDIVE phases."""
+        print("\\n" + "=" * 60)
+        print("BIRD'S-EYE PASS")
+        print("=" * 60)
+        
+        # Start replay
+        print(f"[REPLAY] Starting {recording_file}")
+        self.client.replay_file(recording_file, 0.0, 0.0, 0)
+        
+        # Create capture object
+        capture = FrameCapture(self.world, self.blueprint_library)
+        
+        # Initial camera
+        initial_transform = self.compute_birdseye_transform(0)
+        camera = capture.spawn_camera(initial_transform)
+        spectator = self.world.get_spectator()
+        
+        frame_count = 0
+        
+        for frame_idx in range(TOTAL_FRAMES):
+            # Tick world
+            self.world.tick()
+            
+            # Only capture for SETUP and DEEPDIVE phases
+            is_setup = SETUP_FRAMES[0] <= frame_idx < SETUP_FRAMES[1]
+            is_deepdive = DEEPDIVE_FRAMES[0] <= frame_idx < DEEPDIVE_FRAMES[1]
+            
+            if not (is_setup or is_deepdive):
+                continue
+            
+            # Update camera position
+            cam_transform = self.compute_birdseye_transform(frame_idx)
+            camera.set_transform(cam_transform)
+            spectator.set_transform(cam_transform)
+            
+            # Capture frame
+            image = capture.get_frame(timeout=2.0)
+            if image is None:
+                print(f"[WARNING] No frame at {frame_idx}")
+                continue
+            
+            # Save image
+            frame_path = self.birdseye_dir / f"frame_{frame_idx:05d}.png"
+            image.save_to_disk(str(frame_path))
+            
+            # Save metadata
+            meta_path = self.birdseye_meta_dir / f"frame_{frame_idx:05d}.json"
+            phase = self.get_phase_for_frame(frame_idx)
+            save_frame_metadata(meta_path, cam_transform, self.intrinsics, frame_idx, phase)
+            
+            frame_count += 1
+            
+            # Progress
+            if frame_count % 30 == 0:
+                print(f"[BIRDSEYE] Captured {frame_count} frames (current: {frame_idx})")
+        
+        capture.destroy()
+        print(f"[BIRDSEYE] Complete: {frame_count} frames saved")
+    
+    def run_chase_pass(self, recording_file: str):
+        """Capture chase cam frames for CHAOS, ACTIVATION, SOLUTION phases."""
+        print("\\n" + "=" * 60)
+        print("CHASE CAM PASS")
+        print("=" * 60)
+        
+        # Start fresh replay
+        print(f"[REPLAY] Restarting {recording_file}")
+        
+        # Give world time to settle
+        for _ in range(5):
+            self.world.tick()
+        
+        self.client.replay_file(recording_file, 0.0, 0.0, 0)
+        
+        # Wait for hero vehicle
+        self.find_hero_vehicle()
+        
+        if not self.hero_vehicle:
+            print("[ERROR] Cannot run chase pass without hero vehicle!")
+            return
+        
+        # Create camera attached to vehicle
+        capture = FrameCapture(self.world, self.blueprint_library)
+        
+        # Relative transform for attached camera
+        attach_transform = carla.Transform(
+            carla.Location(x=-CHASE_DISTANCE, z=CHASE_HEIGHT),
+            carla.Rotation(pitch=CHASE_PITCH)
+        )
+        
+        camera = capture.spawn_camera(attach_transform, attach_to=self.hero_vehicle)
+        spectator = self.world.get_spectator()
+        
+        frame_count = 0
+        
+        # Chase pass frame offset (start from 450)
+        last_processed_frame = 0
+        
+        for frame_idx in range(TOTAL_FRAMES):
+            # Tick world
+            self.world.tick()
+            
+            # Only capture for middle phases
+            if not (CHAOS_FRAMES[0] <= frame_idx < SOLUTION_FRAMES[1]):
+                continue
+                
+            # Skip if we already processed this far (just in case)
+            if frame_idx <= last_processed_frame and frame_idx > 0:
+                continue
+            last_processed_frame = frame_idx
+            
+            # Get world transform of camera
+            cam_transform = camera.get_transform()
+            spectator.set_transform(cam_transform)
+            
+            # Capture frame
+            image = capture.get_frame(timeout=2.0)
+            if image is None:
+                print(f"[WARNING] No frame at {frame_idx}")
+                continue
+            
+            # Save image
+            frame_path = self.chase_dir / f"frame_{frame_idx:05d}.png"
+            image.save_to_disk(str(frame_path))
+            
+            # Save metadata
+            meta_path = self.chase_meta_dir / f"frame_{frame_idx:05d}.json"
+            phase = self.get_phase_for_frame(frame_idx)
+            save_frame_metadata(meta_path, cam_transform, self.intrinsics, frame_idx, phase)
+            
+            frame_count += 1
+            
+            # Progress
+            if frame_count % 30 == 0:
+                print(f"[CHASE] Captured {frame_count} frames (current: {frame_idx})")
+        
+        capture.destroy()
+        print(f"[CHASE] Complete: {frame_count} frames saved")
+    
     def run(self, recording_file: str, run_mode: str = "all"):
         """Run camera passes based on mode."""
         print("=" * 60)
@@ -240,7 +380,7 @@ class Replayer:
         if run_mode in ["all", "chase"]:
             self.run_chase_pass(recording_file)
         
-        print("\n" + "=" * 60)
+        print("\\n" + "=" * 60)
         print("REPLAYER COMPLETE")
         print("=" * 60)
         print(f"Output: {OUTPUT_DIR}")

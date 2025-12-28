@@ -8,7 +8,7 @@ per the GodView specification.
 
 import json
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Generator
+from typing import List, Dict, Optional, Generator, Union
 from pathlib import Path
 
 
@@ -102,7 +102,7 @@ def parse_canonical_object(obj_dict: dict) -> CanonicalObject:
     )
 
 
-def parse_packet(line: str) -> Optional[DetectionPacket | MergeEventPacket | CanonicalStatePacket]:
+def parse_packet(line: str) -> Optional[Union[DetectionPacket, MergeEventPacket, CanonicalStatePacket]]:
     """
     Parse a single NDJSON line into a packet object.
     

@@ -485,12 +485,14 @@ class ScenarioRunner:
         
         # Setup
         tm = self.setup_world()
-        self.spawn_actors(tm)
         
-        # Start recording
+        # Start recording (MUST be before spawning to capture spawn events)
         recording_file = str(OUTPUT_DIR / "godview_demo.log")
         self.client.start_recorder(recording_file)
         print(f"[RECORD] Started recording to {recording_file}")
+        
+        # Spawn actors
+        self.spawn_actors(tm)
         
         # Main loop
         start_time = time.time()

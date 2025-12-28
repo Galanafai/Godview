@@ -208,8 +208,8 @@ class Replayer:
         """Find the hero vehicle after replay starts."""
         print("[REPLAYER] Waiting for hero vehicle...")
         
-        # Try for up to 5 seconds
-        for i in range(50):
+        # Try for up to 20 seconds
+        for i in range(200):
             self.world.tick()
             vehicles = self.world.get_actors().filter('vehicle.*')
             if vehicles:
@@ -218,9 +218,11 @@ class Replayer:
                 self.hero_vehicle = sorted_vehicles[0]
                 print(f"[REPLAYER] Found hero vehicle: {self.hero_vehicle.type_id} (ID: {self.hero_vehicle.id})")
                 return
+            if i % 10 == 0:
+                print(f"[REPLAYER] Waiting for vehicles... ({i}/200)")
             time.sleep(0.1)
             
-        print("[REPLAYER] Warning: No hero vehicle found after 5 seconds!")
+        print("[REPLAYER] Warning: No hero vehicle found after 20 seconds!")
         # Debug: print all actors
         print("All actors:", [a.type_id for a in self.world.get_actors()])
     
@@ -396,7 +398,7 @@ def main():
     parser = argparse.ArgumentParser(description="GodView V2 Replayer")
     parser.add_argument("--host", default="localhost", help="CARLA host")
     parser.add_argument("--port", type=int, default=2000, help="CARLA port")
-    parser.add_argument("--recording", default="data/godview_demo.log", help="Recording file")
+    parser.add_argument("--recording", default="godview_demo.log", help="Recording file")
     parser.add_argument("--pass_type", default="all", choices=["all", "birdseye", "chase"], help="Which pass to run")
     args = parser.parse_args()
     
@@ -410,8 +412,8 @@ def main():
     replayer = Replayer(client, world)
     
     try:
-        recording_path = Path(__file__).parent / args.recording
-        replayer.run(str(recording_path), args.pass_type)
+        # Use filename directly as server expects relative path for default location
+        replayer.run(args.recording, args.pass_type)
     finally:
         replayer.cleanup()
 

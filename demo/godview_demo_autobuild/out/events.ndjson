@@ -1,0 +1,5 @@
+{"packet_type": "EVENT", "frame": 1140, "event_type": "MERGE", "payload": {"from_ids": ["agent_02_car_target_01", "agent_03_car_target_01"], "to_id": "canonical_car_target_01", "reason": "spatial_gating_highlander"}}
+{"packet_type": "EVENT", "frame": 1500, "event_type": "TRUST_REJECT", "payload": {"agent_id": "unknown_x", "object_id": "spoof_bus_01", "reason": "invalid_signature"}}
+{"packet_type": "EVENT", "frame": 1740, "event_type": "OOSM_CORRECTED", "payload": {"agent_id": "agent_07", "delayed_frames": 10, "correction_magnitude_m": 0.8}}
+{"packet_type": "EVENT", "frame": 1860, "event_type": "SPACE_SEPARATION", "payload": {"drone_id": "drone_00", "car_id": "agent_03", "delta_z": 15.0}}
+{"packet_type": "EVENT", "frame": 2010, "event_type": "HANDOFF_OK", "payload": {"object_id": "canonical_car_target_01", "from_agent": "agent_05", "to_agent": "agent_06", "id_stable": true}}

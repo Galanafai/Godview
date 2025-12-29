@@ -1,0 +1,11 @@
+# GodView Demo Fix - Requirements
+# Ubuntu 22.04 + Python 3.10+
+
+opencv-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# Optional: Open3D for 3D inset (falls back to 2D if unavailable)
+# open3d>=0.18.0
+
+# FFmpeg must be installed: sudo apt install ffmpeg

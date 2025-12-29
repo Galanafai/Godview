@@ -1,0 +1,103 @@
+{
+  "hook": {
+    "start": 0,
+    "end": 5,
+    "spotlight": [
+      "agent_00",
+      "agent_01",
+      "drone_00"
+    ]
+  },
+  "occlusion": {
+    "start": 5,
+    "end": 14,
+    "spotlight": [
+      "agent_00",
+      "agent_01"
+    ],
+    "split_screen": [
+      10,
+      14
+    ]
+  },
+  "ghosts": {
+    "start": 14,
+    "end": 21,
+    "spotlight": [
+      "agent_02",
+      "agent_03"
+    ],
+    "split_screen": [
+      17,
+      21
+    ]
+  },
+  "spoof": {
+    "start": 21,
+    "end": 28,
+    "spotlight": [
+      "agent_04",
+      "unknown_x"
+    ],
+    "split_screen": [
+      24,
+      28
+    ]
+  },
+  "remote_obs": {
+    "start": 28,
+    "end": 38,
+    "spotlight": [
+      "agent_00",
+      "agent_01",
+      "drone_00"
+    ]
+  },
+  "merge": {
+    "start": 38,
+    "end": 48,
+    "spotlight": [
+      "agent_02",
+      "agent_03",
+      "drone_00"
+    ]
+  },
+  "trust_reject": {
+    "start": 48,
+    "end": 55,
+    "spotlight": [
+      "agent_04"
+    ]
+  },
+  "oosm": {
+    "start": 55,
+    "end": 62,
+    "spotlight": [
+      "agent_07"
+    ]
+  },
+  "space": {
+    "start": 62,
+    "end": 68,
+    "spotlight": [
+      "agent_03",
+      "drone_00"
+    ]
+  },
+  "bandwidth": {
+    "start": 68,
+    "end": 75,
+    "spotlight": [
+      "agent_00"
+    ]
+  },
+  "close": {
+    "start": 75,
+    "end": 85,
+    "spotlight": [
+      "agent_00",
+      "agent_01",
+      "agent_02"
+    ]
+  }
+}

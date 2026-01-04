@@ -1,0 +1,129 @@
+
+[1m[96m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓[0m
+[1m[96m┃                                                                      ┃[0m
+[1m[96m┃      🛰️  GODVIEW KERNEL v0.3.0 — BYZANTINE SENSOR RESOLUTION  🛰️      ┃[0m
+[1m[96m┃                                                                      ┃[0m
+[1m[96m┃   "Solving the Byzantine Generals Problem for Autonomous Systems"   ┃[0m
+[1m[96m┃                                                                      ┃[0m
+[1m[96m┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛[0m
+
+[1m[93m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1m[93m  PHASE 1 │ RAW SENSOR INGESTION (CHAOS)                                               
+[1m[93m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  [1m[33mINCOMING ZMQ STREAM:[0m
+
+  [2m[01][0m [33mLTS:101 [0m │ [34mCAM_FRONT   [0m │ drone_001            │ z= 50.0m 
+  [2m[02][0m [33mLTS:102 [0m │ [32mLIDAR_TOP   [0m │ car_001              │ z=  0.0m 
+  [2m[03][0m [33mLTS:95  [0m │ [35mRADAR_REAR  [0m │ car_002              │ z=  0.0m [91m⚠️  OLD![0m
+  [2m[04][0m [33mLTS:103 [0m │ [34mCAM_FRONT   [0m │ car_ghost_A          │ z=  0.0m 
+  [2m[05][0m [33mLTS:104 [0m │ [32mLIDAR_TOP   [0m │ car_ghost_B          │ z=  0.0m 
+  [2m[06][0m [33mLTS:105 [0m │ [31mUNKNOWN_SRC [0m │ phantom_hazard_001   │ z=  0.0m [91m🚨 UNTRUSTED[0m
+
+  [1m[91m⚠️  DANGER ZONE:[0m
+     [31m• Conflicting timestamps (causality violations)[0m
+     [31m• Same coordinates, different altitudes (pancake problem)[0m
+     [31m• Duplicate entity IDs (ghost objects)[0m
+     [31m• Untrusted sources injecting data (phantom hazards)[0m
+
+[1m[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1m[32m  PHASE 2a │ TIME ENGINE (Augmented State EKF)                                               
+[1m[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  [1m[32mLamport Clock Rule:[0m T_new = max(T_local, T_msg) + 1
+  [1m[31mCausal Constraint:[0m REJECT if T_msg < T_local
+  [2mCurrent T_local = 100[0m
+
+  [32m[TIME][0m [1m✅ ACCEPT[0m │ drone_001 │ LTS:101 → T_local=102
+  [32m[TIME][0m [1m✅ ACCEPT[0m │ car_001 │ LTS:102 → T_local=103
+  [31m[TIME][0m [1m🚫 REJECT[0m │ car_002 │ LTS:95
+         [2m└── 🧱 CAUSAL WALL: CAUSALITY VIOLATION: LTS 95 < T_local 103[0m
+  [32m[TIME][0m [1m✅ ACCEPT[0m │ car_ghost_A │ LTS:103 → T_local=104
+  [32m[TIME][0m [1m✅ ACCEPT[0m │ car_ghost_B │ LTS:104 → T_local=105
+
+[1m[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1m[36m  PHASE 2b │ SPACE ENGINE (H3 + 3D Voxel Grid)                                               
+[1m[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  [1m[36mChecking Pancake Scenario:[0m
+  ├── drone_001 at (z = 50m) → H3: 8928308280ff... │ Voxel Z: 5
+  └── car_001 at (z = 0m)  → H3: 8928308280ff... │ Voxel Z: 0
+
+  [91m[NAIVE 2D][0m [1m⚠️  COLLISION DETECTED![0m (Same H3 cell)
+  [92m[GODVIEW 3D][0m [1m✅ NO COLLISION[0m — Voxel 5 ≠ Voxel 0
+              [2m└── 3D disambiguation: Altitude separation = 50m[0m
+
+[1m[35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1m[35m  PHASE 2c │ TRACKING ENGINE (Highlander CRDT)                                               
+[1m[35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  [1m[35mHighlander Rule:[0m "There can be only one!"
+  [2mCanonical ID = min(observed_ids) — Smallest UUID wins[0m
+
+  [35m[TRACK][0m [1m👻 GHOST DETECTED![0m
+  ├── ID: car_ghost_A at (37.7751, -122.4180)
+  └── ID: car_ghost_B at (37.7751, -122.4180)
+       [2m(Same position = Same physical object!)[0m
+
+  [35m[TRACK][0m Applying Highlander merge...
+  ├── [32m[1mWinner (canonical_id):[0m [1mcar_ghost_A[0m
+  └── [31m[2mLoser  (absorbed):    [0m[2m car_ghost_B[0m
+
+  [32m✅ GHOST MERGED[0m → Single consistent identity across all sensors
+
+[1m[34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1m[34m  PHASE 2d │ TRUST ENGINE (Beta Distribution + CapBAC)                                               
+[1m[34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  [1m[34mBeta Distribution Trust:[0m Trust = α / (α + β)
+  [2mThreshold: 50%[0m
+
+  ┌────────────────┬───────────┬──────────────┐
+  │ [1mSource[0m         │ [1mTrust (%)[0m│ [1mDecision[0m     │
+  ├────────────────┼───────────┼──────────────┤
+  │ CAM_FRONT      │ [92m   96%[0m    │ [32m✅ ACCEPT[0m  │
+  │ LIDAR_TOP      │ [92m   93%[0m    │ [32m✅ ACCEPT[0m  │
+  │ RADAR_REAR     │ [32m   85%[0m    │ [32m✅ ACCEPT[0m  │
+  │ CAM_FRONT      │ [92m   96%[0m    │ [32m✅ ACCEPT[0m  │
+  │ LIDAR_TOP      │ [92m   93%[0m    │ [32m✅ ACCEPT[0m  │
+  │ UNKNOWN_SRC    │ [31m    9%[0m    │ [31m🚫 BLOCKED[0m  │
+  └────────────────┴───────────┴──────────────┘
+
+  [1m[31mPhantom Hazard Blocked:[0m
+  └── UNKNOWN_SRC tried to inject phantom obstacle → [31m🚫 REJECTED[0m
+      [2m(Trust score 9.1% < 50% threshold)[0m
+
+[1m[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1m[92m  FINAL │ FUSED WORLD STATE (CONSENSUS)                                               
+[1m[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  ┌────────────────┬──────────────────┬───────────┬────────────┬───────────┐
+  │ [1mCanonical ID[0m   │ [1mPosition[0m          │ [1mClass[0m     │ [1mConfidence[0m│ [1mStatus[0m    │
+  ├────────────────┼──────────────────┼───────────┼────────────┼───────────┤
+  │ [36mdrone_001     [0m │ 37.77, -122.42 z=50m  │ DRONE     │ [92m 95.0%[0m    │ [32mTRACKED[0m  │
+  │ [36mcar_001       [0m │ 37.77, -122.42 z=0m   │ VEHICLE   │ [92m 98.0%[0m    │ [32mTRACKED[0m  │
+  │ [36mcar_ghost_A   [0m │ 37.78, -122.42 z=0m   │ VEHICLE   │ [32m 93.0%[0m    │ [35mMERGED[0m  │
+  └────────────────┴──────────────────┴───────────┴────────────┴───────────┘
+
+  [1m[37m┌─────────────────────────────────────────┐[0m
+  [1m[37m│            RESOLUTION SUMMARY            │[0m
+  [1m[37m└─────────────────────────────────────────┘[0m
+
+  [33m├─ Time Violations Blocked:[0m   1[0m
+  [36m├─ Pancake Disambiguations:[0m   1[0m
+  [35m├─ Ghost IDs Merged:[0m          1[0m
+  [31m├─ Phantom Hazards Blocked:[0m   1[0m
+  [32m└─ Final Track Count:[0m         [92m3[0m
+
+[1m[92m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓[0m
+[1m[92m┃                                                                      ┃[0m
+[1m[92m┃  ✅ BYZANTINE CONSENSUS ACHIEVED                                     ┃[0m
+[1m[92m┃                                                                      ┃[0m
+[1m[92m┃     • All sensors agree on world state                               ┃[0m
+[1m[92m┃     • Causality violations blocked                                   ┃[0m
+[1m[92m┃     • Altitude ambiguity resolved (3D voxels)                        ┃[0m
+[1m[92m┃     • Ghost objects merged (Highlander CRDT)                         ┃[0m
+[1m[92m┃     • Untrusted sources rejected (Beta trust)                        ┃[0m
+[1m[92m┃                                                                      ┃[0m
+[1m[92m┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛[0m
+

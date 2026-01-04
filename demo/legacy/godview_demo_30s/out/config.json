@@ -1,0 +1,57 @@
+{
+  "building": {
+    "x": 5,
+    "y": 5,
+    "width": 8,
+    "height": 10
+  },
+  "agent_a": {
+    "id": "agent_A",
+    "x": -15,
+    "y": -5,
+    "color": "blue"
+  },
+  "agent_b": {
+    "id": "agent_B",
+    "x": 10,
+    "y": -10,
+    "color": "orange"
+  },
+  "drone": {
+    "id": "drone",
+    "x": 0,
+    "y": 0,
+    "z": 12,
+    "color": "green"
+  },
+  "hero_ped": {
+    "id": "ped_hero",
+    "class": "pedestrian",
+    "x": 12,
+    "y": 8,
+    "vx": -0.1,
+    "vy": 0
+  },
+  "beats": {
+    "thesis": [
+      0,
+      90
+    ],
+    "occlusion": [
+      90,
+      360
+    ],
+    "merge": [
+      360,
+      600
+    ],
+    "trust": [
+      600,
+      780
+    ],
+    "scale": [
+      780,
+      900
+    ]
+  }
+}

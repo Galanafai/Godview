@@ -1,0 +1,20 @@
+[1m[34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  [1m[34mBeta Distribution Trust:[0m Trust = α / (α + β)
+  [2mThreshold: 50%[0m
+
+  ┌────────────────┬───────────┬──────────────┐
+  │ [1mSource[0m         │ [1mTrust (%)[0m│ [1mDecision[0m     │
+  ├────────────────┼───────────┼──────────────┤
+  │ CAM_FRONT      │ [92m   96%[0m    │ [32m✅ ACCEPT[0m  │
+  │ LIDAR_TOP      │ [92m   93%[0m    │ [32m✅ ACCEPT[0m  │
+  │ RADAR_REAR     │ [32m   85%[0m    │ [32m✅ ACCEPT[0m  │
+  │ CAM_FRONT      │ [92m   96%[0m    │ [32m✅ ACCEPT[0m  │
+  │ LIDAR_TOP      │ [92m   93%[0m    │ [32m✅ ACCEPT[0m  │
+  │ UNKNOWN_SRC    │ [31m    9%[0m    │ [31m🚫 BLOCKED[0m  │
+  └────────────────┴───────────┴──────────────┘
+
+  [1m[31mPhantom Hazard Blocked:[0m
+  └── UNKNOWN_SRC tried to inject phantom obstacle → [31m🚫 REJECTED[0m
+      [2m(Trust score 9.1% < 50% threshold)[0m
+

@@ -1,0 +1,25 @@
+[1m[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  [1m[32mLamport Clock Rule:[0m T_new = max(T_local, T_msg) + 1
+  [1m[31mCausal Constraint:[0m REJECT if T_msg < T_local
+  [2mCurrent T_local = 100[0m
+
+  [32m[TIME][0m [1m✅ ACCEPT[0m │ drone_001 │ LTS:101 → T_local=102
+  [32m[TIME][0m [1m✅ ACCEPT[0m │ car_001 │ LTS:102 → T_local=103
+  [31m[TIME][0m [1m🚫 REJECT[0m │ car_002 │ LTS:95
+         [2m└── 🧱 CAUSAL WALL: CAUSALITY VIOLATION: LTS 95 < T_local 103[0m
+  [32m[TIME][0m [1m✅ ACCEPT[0m │ car_ghost_A │ LTS:103 → T_local=104
+  [32m[TIME][0m [1m✅ ACCEPT[0m │ car_ghost_B │ LTS:104 → T_local=105
+
+[1m[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1m[36m  PHASE 2b │ SPACE ENGINE (H3 + 3D Voxel Grid)                                               
+[1m[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  [1m[36mChecking Pancake Scenario:[0m
+  ├── drone_001 at (z = 50m) → H3: 8928308280ff... │ Voxel Z: 5
+  └── car_001 at (z = 0m)  → H3: 8928308280ff... │ Voxel Z: 0
+
+  [91m[NAIVE 2D][0m [1m⚠️  COLLISION DETECTED![0m (Same H3 cell)
+  [92m[GODVIEW 3D][0m [1m✅ NO COLLISION[0m — Voxel 5 ≠ Voxel 0
+              [2m└── 3D disambiguation: Altitude separation = 50m[0m
+

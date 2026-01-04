@@ -1,0 +1,30 @@
+
+[1m[96m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓[0m
+[1m[96m┃                                                                      ┃[0m
+[1m[96m┃      🛰️  GODVIEW KERNEL v0.3.0 — BYZANTINE SENSOR RESOLUTION  🛰️      ┃[0m
+[1m[96m┃                                                                      ┃[0m
+[1m[96m┃   "Solving the Byzantine Generals Problem for Autonomous Systems"   ┃[0m
+[1m[96m┃                                                                      ┃[0m
+[1m[96m┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛[0m
+
+[1m[93m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1m[93m  PHASE 1 │ RAW SENSOR INGESTION (CHAOS)                                               
+[1m[93m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  [1m[33mINCOMING ZMQ STREAM:[0m
+
+  [2m[01][0m [33mLTS:101 [0m │ [34mCAM_FRONT   [0m │ drone_001            │ z= 50.0m 
+  [2m[02][0m [33mLTS:102 [0m │ [32mLIDAR_TOP   [0m │ car_001              │ z=  0.0m 
+  [2m[03][0m [33mLTS:95  [0m │ [35mRADAR_REAR  [0m │ car_002              │ z=  0.0m [91m⚠️  OLD![0m
+  [2m[04][0m [33mLTS:103 [0m │ [34mCAM_FRONT   [0m │ car_ghost_A          │ z=  0.0m 
+  [2m[05][0m [33mLTS:104 [0m │ [32mLIDAR_TOP   [0m │ car_ghost_B          │ z=  0.0m 
+  [2m[06][0m [33mLTS:105 [0m │ [31mUNKNOWN_SRC [0m │ phantom_hazard_001   │ z=  0.0m [91m🚨 UNTRUSTED[0m
+
+  [1m[91m⚠️  DANGER ZONE:[0m
+     [31m• Conflicting timestamps (causality violations)[0m
+     [31m• Same coordinates, different altitudes (pancake problem)[0m
+     [31m• Duplicate entity IDs (ghost objects)[0m
+     [31m• Untrusted sources injecting data (phantom hazards)[0m
+
+[1m[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1m[32m  PHASE 2a │ TIME ENGINE (Augmented State EKF)                                               

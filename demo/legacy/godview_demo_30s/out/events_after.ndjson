@@ -1,0 +1,4 @@
+{"packet_type": "EVENT", "frame": 200, "event_type": "PACKET_ARRIVAL", "payload": {"src": "agent_A", "dst": "agent_B", "object_id": "ped_hero"}}
+{"packet_type": "EVENT", "frame": 420, "event_type": "OOSM_CORRECTED", "payload": {"agent_id": "drone", "delayed_frames": 10}}
+{"packet_type": "EVENT", "frame": 450, "event_type": "MERGE", "payload": {"from_ids": ["A_ped", "D_ped"], "canonical_id": "canonical_ped_1"}}
+{"packet_type": "EVENT", "frame": 680, "event_type": "TRUST_REJECT", "payload": {"agent_id": "unknown_node", "reason": "invalid_signature"}}

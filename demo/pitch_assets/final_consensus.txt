@@ -1,0 +1,35 @@
+
+[1m[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1m[92m  FINAL │ FUSED WORLD STATE (CONSENSUS)                                               
+[1m[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+  ┌────────────────┬──────────────────┬───────────┬────────────┬───────────┐
+  │ [1mCanonical ID[0m   │ [1mPosition[0m          │ [1mClass[0m     │ [1mConfidence[0m│ [1mStatus[0m    │
+  ├────────────────┼──────────────────┼───────────┼────────────┼───────────┤
+  │ [36mdrone_001     [0m │ 37.77, -122.42 z=50m  │ DRONE     │ [92m 95.0%[0m    │ [32mTRACKED[0m  │
+  │ [36mcar_001       [0m │ 37.77, -122.42 z=0m   │ VEHICLE   │ [92m 98.0%[0m    │ [32mTRACKED[0m  │
+  │ [36mcar_ghost_A   [0m │ 37.78, -122.42 z=0m   │ VEHICLE   │ [32m 93.0%[0m    │ [35mMERGED[0m  │
+  └────────────────┴──────────────────┴───────────┴────────────┴───────────┘
+
+  [1m[37m┌─────────────────────────────────────────┐[0m
+  [1m[37m│            RESOLUTION SUMMARY            │[0m
+  [1m[37m└─────────────────────────────────────────┘[0m
+
+  [33m├─ Time Violations Blocked:[0m   1[0m
+  [36m├─ Pancake Disambiguations:[0m   1[0m
+  [35m├─ Ghost IDs Merged:[0m          1[0m
+  [31m├─ Phantom Hazards Blocked:[0m   1[0m
+  [32m└─ Final Track Count:[0m         [92m3[0m
+
+[1m[92m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓[0m
+[1m[92m┃                                                                      ┃[0m
+[1m[92m┃  ✅ BYZANTINE CONSENSUS ACHIEVED                                     ┃[0m
+[1m[92m┃                                                                      ┃[0m
+[1m[92m┃     • All sensors agree on world state                               ┃[0m
+[1m[92m┃     • Causality violations blocked                                   ┃[0m
+[1m[92m┃     • Altitude ambiguity resolved (3D voxels)                        ┃[0m
+[1m[92m┃     • Ghost objects merged (Highlander CRDT)                         ┃[0m
+[1m[92m┃     • Untrusted sources rejected (Beta trust)                        ┃[0m
+[1m[92m┃                                                                      ┃[0m
+[1m[92m┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛[0m
+

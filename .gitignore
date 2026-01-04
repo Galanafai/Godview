@@ -1,5 +1,9 @@
 # Ignore build artifacts
+target/
 agent/target/
+
+# Windows system files
+Thumbs.db
 viewer/node_modules/
 viewer/dist/
 

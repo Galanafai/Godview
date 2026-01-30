@@ -11,16 +11,16 @@
 //! - Ghost rate (false positive tracks)
 //!
 //! Usage:
-//! ```rust
+//! ```ignore
 //! use godview_core::validation::{ValidationSession, GroundTruthEntry};
 //!
 //! let mut session = ValidationSession::new();
 //!
 //! // Record ground truth from CARLA
-//! session.record_ground_truth(actor_id, position, velocity, sim_time);
+//! session.record_ground_truth(actor_id, position, velocity, heading, class, sim_time);
 //!
 //! // Record GodView detection
-//! session.record_detection(actor_id, detected_position, sim_time);
+//! session.record_detection(actor_id, detected_position, confidence, source, sim_time);
 //!
 //! // Get metrics
 //! let report = session.generate_report();

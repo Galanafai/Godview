@@ -11,6 +11,7 @@ pub mod godview_space;
 pub mod godview_trust;
 pub mod godview_tracking;
 pub mod metrics;
+pub mod agent_runtime;
 
 #[cfg(feature = "visualization")]
 pub mod visualization;
@@ -29,6 +30,10 @@ pub use godview_space::{Entity, SpatialEngine, WorldShard};
 pub use godview_trust::{AuthError, SecurityContext, SignedPacket};
 pub use godview_tracking::{GlobalHazardPacket, TrackManager, TrackingConfig, TrackingError, UniqueTrack, MergeEvent};
 pub use metrics::{TrackMetrics, GhostScoreConfig, calculate_ghost_score, calculate_entropy, calculate_tension};
+pub use agent_runtime::{GodViewAgent, AgentConfig};
+
+// Re-export environment types for convenience
+pub use godview_env::{GodViewContext, NetworkTransport, NetworkController, NodeId, TokioContext};
 
 #[cfg(feature = "visualization")]
 pub use visualization::RerunVisualizer;

@@ -4009,6 +4009,7 @@ dependencies = [
  "crossterm 0.28.1",
  "ed25519-dalek",
  "geo 0.28.0",
+ "godview_env",
  "h3o",
  "kitti-dataset",
  "nalgebra",
@@ -4022,6 +4023,19 @@ dependencies = [
  "thiserror 1.0.69",
  "uuid",
  "zmq",
+]
+
+[[package]]
+name = "godview_env"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ed25519-dalek",
+ "rand 0.8.5",
+ "serde",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -51,6 +51,9 @@ zmq = { version = "0.10", optional = true }
 # Persistent Key-Value Store (Trust Engine)
 sled = "0.34"
 
+# Environment Abstraction (DST)
+godview_env = { path = "../godview_env" }
+
 
 [dev-dependencies]
 approx = "0.5"

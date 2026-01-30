@@ -850,6 +850,7 @@ name = "godview_sim"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "biscuit-auth",
  "clap",
  "ed25519-dalek",
  "godview_core",

@@ -161,22 +161,25 @@ proptest = "1.4"
 
 ## Current Status
 
-**Phase**: 4.2 Simulator Core ✅ **COMPLETE**
+**Phase**: 4.3 Network & Multi-Agent ✅ **COMPLETE**
 
 **Phase 4.1** (Complete):
 - `godview_env` crate with `GodViewContext`, `NetworkTransport`, `TokioContext`
 - `agent_runtime` module with `GodViewAgent<Ctx, Net>`
-- 38 tests passing
 
 **Phase 4.2** (Complete):
-- `godview_sim` crate with 8 source files
-- `SimContext` - deterministic virtual clock + seeded RNG
-- `DeterministicKeyProvider` - reproducible Ed25519 keys
-- `Oracle` - ground truth physics with noise generation
-- `SimNetwork` + `SimNetworkController` - fault injection
-- `SimWorld` - simulation harness with agent spawning
-- 5 chaos scenarios defined (TimeWarp, SplitBrain, Byzantine, FlashMob, SlowLoris)
-- CLI binary `godview-sim` with scenario runner
-- 16 tests passing
+- `godview_sim` crate with simulation infrastructure
+- `SimContext`, `DeterministicKeyProvider`, `Oracle`, `SimNetwork`
 
-**Next Phase**: 4.3 Network & Multi-Agent - Implement full scenario execution
+**Phase 4.3** (Complete):
+- `SimulatedAgent` wrapper bridging `GodViewAgent` to simulation
+- `ScenarioRunner` with full implementation of all 5 scenarios:
+  - **DST-001 TimeWarp**: OOSM stress test with jitter
+  - **DST-002 SplitBrain**: Network partition + convergence
+  - **DST-003 Byzantine**: Malicious agent + revocation
+  - **DST-004 FlashMob**: 1000 drones H3 boundary crossing
+  - **DST-005 SlowLoris**: 50% packet loss recovery
+- `ScenarioResult` and `ScenarioMetrics` for validation
+- 20 tests passing
+
+**Next Phase**: 4.4 CI/CD Integration - GitHub Actions workflow, 100 seeds per commit

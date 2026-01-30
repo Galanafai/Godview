@@ -161,15 +161,22 @@ proptest = "1.4"
 
 ## Current Status
 
-**Phase**: 4.1 Abstraction Layer ✅ **COMPLETE**
+**Phase**: 4.2 Simulator Core ✅ **COMPLETE**
 
-**Completed**:
-- [x] `godview_env` crate with 7 source files
-- [x] `GodViewContext` trait (time, sleep, spawn, derive_signing_key)
-- [x] `NetworkTransport` + `NetworkController` traits
-- [x] `TokioContext` production implementation (3 tests)
-- [x] `agent_runtime` module with `GodViewAgent<Ctx, Net>`
-- [x] Integration of all 4 engines via trait bounds
-- [x] 38 tests passing
+**Phase 4.1** (Complete):
+- `godview_env` crate with `GodViewContext`, `NetworkTransport`, `TokioContext`
+- `agent_runtime` module with `GodViewAgent<Ctx, Net>`
+- 38 tests passing
 
-**Next Phase**: 4.2 Simulator Core - Add `madsim`, create `SimContext`, build Oracle
+**Phase 4.2** (Complete):
+- `godview_sim` crate with 8 source files
+- `SimContext` - deterministic virtual clock + seeded RNG
+- `DeterministicKeyProvider` - reproducible Ed25519 keys
+- `Oracle` - ground truth physics with noise generation
+- `SimNetwork` + `SimNetworkController` - fault injection
+- `SimWorld` - simulation harness with agent spawning
+- 5 chaos scenarios defined (TimeWarp, SplitBrain, Byzantine, FlashMob, SlowLoris)
+- CLI binary `godview-sim` with scenario runner
+- 16 tests passing
+
+**Next Phase**: 4.3 Network & Multi-Agent - Implement full scenario execution

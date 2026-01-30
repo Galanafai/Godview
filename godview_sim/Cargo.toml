@@ -1,0 +1,48 @@
+[package]
+name = "godview_sim"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic Simulation Testing (DST) harness for GodView"
+license = "MIT"
+
+[[bin]]
+name = "godview-sim"
+path = "src/main.rs"
+
+[dependencies]
+# Core GodView
+godview_core = { path = "../godview_core" }
+godview_env = { path = "../godview_env" }
+
+# Deterministic Simulation Runtime
+madsim = "0.2"
+
+# Async
+async-trait = "0.1"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+# Crypto
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand = "0.8"
+rand_chacha = "0.3"
+rand_distr = "0.4"
+
+# Data structures
+nalgebra = "0.33"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+# CLI
+clap = { version = "4.0", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+proptest = "1.4"

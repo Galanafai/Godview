@@ -1,0 +1,164 @@
+# GodView Deterministic Simulation Testing (DST) Workflow
+#
+# Runs chaos engineering scenarios with 100 randomized seeds per commit
+# to ensure deterministic behavior and catch Heisenbugs.
+
+name: DST
+
+on:
+  push:
+    branches: [main, v4, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      seed_count:
+        description: 'Number of random seeds to test'
+        required: false
+        default: '100'
+      scenario:
+        description: 'Scenario to run (all, time_warp, split_brain, byzantine, flash_mob, slow_loris)'
+        required: false
+        default: 'all'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Build the simulator first
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: stable
+          
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-dst-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-dst-
+      
+      - name: Build godview-sim
+        run: cargo build --release -p godview_sim
+        
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: godview-sim
+          path: target/release/godview-sim
+
+  # Run DST with multiple seeds in parallel
+  dst:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Split 100 seeds into 10 parallel jobs
+        seed_batch: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: godview-sim
+          path: ./
+          
+      - name: Make executable
+        run: chmod +x ./godview-sim
+        
+      - name: Run DST batch ${{ matrix.seed_batch }}
+        id: dst
+        run: |
+          # Calculate seed range for this batch
+          BATCH=${{ matrix.seed_batch }}
+          SEEDS_PER_BATCH=10
+          START_SEED=$((BATCH * SEEDS_PER_BATCH))
+          
+          # Generate base seed from commit hash for reproducibility
+          COMMIT_HASH="${{ github.sha }}"
+          BASE_SEED=$(printf '%d' "0x${COMMIT_HASH:0:8}")
+          
+          echo "Running seeds $START_SEED to $((START_SEED + SEEDS_PER_BATCH - 1))"
+          echo "Base seed: $BASE_SEED"
+          
+          SCENARIO="${{ github.event.inputs.scenario || 'all' }}"
+          FAILED=0
+          
+          for i in $(seq 0 $((SEEDS_PER_BATCH - 1))); do
+            SEED=$((BASE_SEED + START_SEED + i))
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Seed $SEED (batch $BATCH, index $i)"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            if ! ./godview-sim --seed $SEED --scenario $SCENARIO --duration 10; then
+              echo "::error::Seed $SEED FAILED"
+              echo "$SEED" >> failed_seeds.txt
+              FAILED=$((FAILED + 1))
+            fi
+          done
+          
+          if [ $FAILED -gt 0 ]; then
+            echo "failed_count=$FAILED" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+      - name: Upload failed seeds
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-seeds-batch-${{ matrix.seed_batch }}
+          path: failed_seeds.txt
+
+  # Summary job
+  summary:
+    needs: dst
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.dst.result }}" == "failure" ]; then
+            echo "::error::Some DST seeds failed! Check artifacts for failed_seeds.txt"
+            exit 1
+          fi
+          echo "✅ All 100 seeds passed!"
+
+  # Fast unit tests (always run)
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: stable
+          
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          
+      - name: Run unit tests
+        run: |
+          cargo test -p godview_env
+          cargo test -p godview_core
+          cargo test -p godview_sim

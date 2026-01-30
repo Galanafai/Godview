@@ -48,6 +48,9 @@ crossbeam = { version = "0.8", optional = true }
 # CARLA ZMQ Bridge (Optional)
 zmq = { version = "0.10", optional = true }
 
+# Persistent Key-Value Store (Trust Engine)
+sled = "0.34"
+
 
 [dev-dependencies]
 approx = "0.5"

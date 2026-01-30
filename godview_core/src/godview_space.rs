@@ -197,22 +197,95 @@ impl WorldShard {
     }
     
     /// Convert global GPS to local coordinates relative to cell center
+    ///
+    /// **V4**: Uses Gnomonic projection (not equirectangular) for accuracy at all latitudes.
+    /// The Gnomonic projection minimizes distortion within small H3 cells.
     pub fn global_to_local(&self, global_pos: [f64; 3]) -> [f32; 3] {
         // Get cell center - LatLng implements From<CellIndex>
         let center = LatLng::from(self.cell_id);
         
-        // Simple equirectangular approximation for local areas
-        const EARTH_RADIUS: f64 = 6378137.0;
-        
-        let lat_diff = (global_pos[0] - center.lat()) * (std::f64::consts::PI / 180.0);
-        let lon_diff = (global_pos[1] - center.lng()) * (std::f64::consts::PI / 180.0);
-        
-        let x = (lon_diff * EARTH_RADIUS * center.lat().cos()) as f32;
-        let z = (-lat_diff * EARTH_RADIUS) as f32;
+        // V4: Gnomonic projection centered on cell (minimizes distortion within shard)
+        let (x, z) = gnomonic_project(
+            global_pos[0], global_pos[1],
+            center.lat(), center.lng()
+        );
         let y = global_pos[2] as f32;
         
         [x, y, z]
     }
+    
+    /// Convert local coordinates back to global GPS
+    ///
+    /// **V4**: Inverse Gnomonic projection for coordinate round-trips.
+    pub fn local_to_global(&self, local_coords: [f32; 3]) -> [f64; 3] {
+        let center = LatLng::from(self.cell_id);
+        
+        let (lat, lon) = gnomonic_inverse(
+            local_coords[0], local_coords[2],
+            center.lat(), center.lng()
+        );
+        let alt = local_coords[1] as f64;
+        
+        [lat, lon, alt]
+    }
+}
+
+/// Gnomonic projection: projects lat/lon onto tangent plane at cell center
+///
+/// Returns (x, z) in meters on the tangent plane.
+/// This projection preserves local linearity and minimizes distortion within small cells.
+fn gnomonic_project(lat: f64, lon: f64, center_lat: f64, center_lon: f64) -> (f32, f32) {
+    const EARTH_RADIUS: f64 = 6378137.0;
+    
+    // Convert to radians
+    let lat_rad = lat.to_radians();
+    let lon_rad = lon.to_radians();
+    let clat_rad = center_lat.to_radians();
+    let clon_rad = center_lon.to_radians();
+    
+    // cos(c) = angular distance from center
+    let cos_c = clat_rad.sin() * lat_rad.sin() 
+        + clat_rad.cos() * lat_rad.cos() * (lon_rad - clon_rad).cos();
+    
+    // Avoid division by zero for points at center
+    if cos_c.abs() < 1e-10 {
+        return (0.0, 0.0);
+    }
+    
+    // Gnomonic projection formulas
+    let x = EARTH_RADIUS * (lat_rad.cos() * (lon_rad - clon_rad).sin()) / cos_c;
+    let z = EARTH_RADIUS * (clat_rad.cos() * lat_rad.sin() 
+        - clat_rad.sin() * lat_rad.cos() * (lon_rad - clon_rad).cos()) / cos_c;
+    
+    (x as f32, -z as f32) // Negate Z for right-handed coordinate system
+}
+
+/// Inverse Gnomonic projection: converts local (x, z) back to (lat, lon)
+fn gnomonic_inverse(x: f32, z: f32, center_lat: f64, center_lon: f64) -> (f64, f64) {
+    const EARTH_RADIUS: f64 = 6378137.0;
+    
+    let x = x as f64;
+    let z = -z as f64; // Undo the negation from forward projection
+    
+    let clat_rad = center_lat.to_radians();
+    let clon_rad = center_lon.to_radians();
+    
+    // Distance from center on tangent plane
+    let rho = (x * x + z * z).sqrt();
+    
+    // Handle center point
+    if rho < 1e-10 {
+        return (center_lat, center_lon);
+    }
+    
+    // Angular distance from center
+    let c = (rho / EARTH_RADIUS).atan();
+    
+    // Inverse formulas
+    let lat_rad = (c.cos() * clat_rad.sin() + z * c.sin() * clat_rad.cos() / rho).asin();
+    let lon_rad = clon_rad + (x * c.sin()).atan2(rho * clat_rad.cos() * c.cos() - z * clat_rad.sin() * c.sin());
+    
+    (lat_rad.to_degrees(), lon_rad.to_degrees())
 }
 
 /// The Global Spatial Index

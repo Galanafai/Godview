@@ -4,11 +4,14 @@
 //! - Using Biscuit tokens for decentralized authorization
 //! - Using Ed25519 signatures for cryptographic provenance
 //! - Preventing Sybil attacks and data spoofing
+//! - **V4**: Persisting revocation list to survive restarts
 
 use biscuit_auth::{Biscuit, KeyPair, PublicKey, macros::*};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Authentication and authorization errors
@@ -28,6 +31,9 @@ pub enum AuthError {
     
     #[error("Biscuit error: {0}")]
     BiscuitError(String),
+    
+    #[error("Storage error: {0}")]
+    StorageError(String),
 }
 
 /// A cryptographically signed packet
@@ -100,12 +106,88 @@ impl SignedPacket {
     }
 }
 
+// ============================================================================
+// REVOCATION STORE (V4: Persistent Storage)
+// ============================================================================
+
+/// Trait for persistent revocation storage
+/// 
+/// Implementations must be thread-safe and persist data across restarts.
+pub trait RevocationStore: Send + Sync {
+    /// Insert a revoked key into the store
+    fn insert(&self, key_bytes: [u8; 32]) -> Result<(), AuthError>;
+    
+    /// Check if a key is in the revocation store
+    fn contains(&self, key_bytes: &[u8; 32]) -> bool;
+    
+    /// Load all revoked keys from persistent storage
+    fn load_all(&self) -> Result<HashSet<[u8; 32]>, AuthError>;
+}
+
+/// Sled-based persistent revocation store
+/// 
+/// Uses an embedded key-value database for durability.
+pub struct SledRevocationStore {
+    db: sled::Db,
+}
+
+impl SledRevocationStore {
+    /// Open a persistent store at the given path
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, AuthError> {
+        let db = sled::open(path)
+            .map_err(|e| AuthError::StorageError(format!("Failed to open sled DB: {}", e)))?;
+        Ok(Self { db })
+    }
+    
+    /// Create a temporary store (for testing)
+    #[cfg(test)]
+    pub fn open_temp() -> Result<Self, AuthError> {
+        let config = sled::Config::new().temporary(true);
+        let db = config.open()
+            .map_err(|e| AuthError::StorageError(format!("Failed to open temp DB: {}", e)))?;
+        Ok(Self { db })
+    }
+}
+
+impl RevocationStore for SledRevocationStore {
+    fn insert(&self, key_bytes: [u8; 32]) -> Result<(), AuthError> {
+        self.db.insert(&key_bytes, &[1u8])
+            .map_err(|e| AuthError::StorageError(format!("Insert failed: {}", e)))?;
+        self.db.flush()
+            .map_err(|e| AuthError::StorageError(format!("Flush failed: {}", e)))?;
+        Ok(())
+    }
+    
+    fn contains(&self, key_bytes: &[u8; 32]) -> bool {
+        self.db.contains_key(key_bytes).unwrap_or(false)
+    }
+    
+    fn load_all(&self) -> Result<HashSet<[u8; 32]>, AuthError> {
+        let mut keys = HashSet::new();
+        for result in self.db.iter() {
+            let (key, _) = result
+                .map_err(|e| AuthError::StorageError(format!("Iteration failed: {}", e)))?;
+            if key.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&key);
+                keys.insert(arr);
+            }
+        }
+        Ok(keys)
+    }
+}
+
+// ============================================================================
+// SECURITY CONTEXT
+// ============================================================================
+
 /// Security context for the GodView system
 ///
 /// Handles:
 /// - Biscuit token verification
 /// - Access control policy enforcement
 /// - Public key management
+/// - **V4**: Optional persistent revocation storage
 pub struct SecurityContext {
     /// Root public key for verifying Biscuit tokens
     pub root_public_key: PublicKey,
@@ -113,10 +195,13 @@ pub struct SecurityContext {
     /// Cache of revoked public keys (stored as bytes for O(1) lookup)
     /// VerifyingKey doesn't implement Hash, so we store [u8; 32] instead
     revoked_keys: HashSet<[u8; 32]>,
+    
+    /// Optional persistent store for revocations
+    store: Option<Arc<dyn RevocationStore>>,
 }
 
 impl SecurityContext {
-    /// Create a new SecurityContext
+    /// Create a new SecurityContext (in-memory only, for backward compatibility)
     ///
     /// # Arguments
     /// * `root_public_key` - The root authority's public key
@@ -124,7 +209,29 @@ impl SecurityContext {
         Self {
             root_public_key,
             revoked_keys: HashSet::new(),
+            store: None,
         }
+    }
+    
+    /// Create a SecurityContext with persistent revocation storage (V4)
+    ///
+    /// Hydrates the in-memory cache from the persistent store on creation.
+    ///
+    /// # Arguments  
+    /// * `root_public_key` - The root authority's public key
+    /// * `store` - Persistent revocation store implementation
+    pub fn with_store(
+        root_public_key: PublicKey,
+        store: Arc<dyn RevocationStore>,
+    ) -> Result<Self, AuthError> {
+        // Hydrate in-memory cache from persistent store
+        let revoked_keys = store.load_all()?;
+        
+        Ok(Self {
+            root_public_key,
+            revoked_keys,
+            store: Some(store),
+        })
     }
     
     /// Verify access to a resource
@@ -215,9 +322,21 @@ impl SecurityContext {
     
     /// Revoke a public key (for compromised agents)
     /// 
+    /// If a persistent store is configured, the revocation is also persisted.
+    /// In-memory revocation always succeeds; storage errors are logged but not propagated.
+    /// 
     /// Complexity: O(1) insertion
     pub fn revoke_key(&mut self, key: VerifyingKey) {
-        self.revoked_keys.insert(key.to_bytes());
+        let key_bytes = key.to_bytes();
+        self.revoked_keys.insert(key_bytes);
+        
+        // Persist to store if configured (V4)
+        if let Some(ref store) = self.store {
+            if let Err(e) = store.insert(key_bytes) {
+                // Log but don't fail - in-memory revocation still valid
+                eprintln!("[WARN] Failed to persist revocation: {}", e);
+            }
+        }
     }
     
     /// Check if a key is revoked

@@ -134,12 +134,21 @@ impl AugmentedStateFilter {
     /// This is the core innovation - it processes delayed measurements
     /// by correlating them with the appropriate past state.
     ///
+    /// **V4 Safety**: No panics - gracefully handles stale measurements and
+    /// matrix degradation with covariance reset.
+    ///
     /// # Arguments
     /// * `measurement` - The delayed measurement vector
     /// * `t_meas` - Timestamp when measurement was actually captured
     pub fn update_oosm(&mut self, measurement: DVector<f64>, t_meas: f64) {
         // Step 1: Find the lag index closest to t_meas
         let lag_idx = self.find_lag_index(t_meas);
+        
+        // V4: MaxLag gating - discard measurements older than history
+        if lag_idx > self.max_lag_depth {
+            // Measurement is too old - beyond our history window
+            return;
+        }
         
         // Step 2: Construct sparse measurement matrix H
         // H maps measurement to the past state at lag_idx
@@ -154,8 +163,15 @@ impl AugmentedStateFilter {
         // K = P * H^T * (H * P * H^T + R)^{-1}
         let S = &H_aug * &self.covariance * H_aug.transpose() + &self.measurement_noise;
         
-        // Solve for K using Cholesky decomposition (more stable than inverse)
-        let S_chol = S.cholesky().expect("Covariance not positive definite");
+        // V4: Cholesky recovery - no panics, gracefully handle matrix degradation
+        let S_chol = match S.cholesky() {
+            Some(chol) => chol,
+            None => {
+                // Covariance matrix degraded - perform self-healing reset
+                self.reset_covariance();
+                return;
+            }
+        };
         let K = &self.covariance * H_aug.transpose() * S_chol.inverse();
         
         // Step 5: Update state
@@ -170,6 +186,16 @@ impl AugmentedStateFilter {
         
         self.covariance = &IKH * &self.covariance * IKH.transpose()
             + &K * &self.measurement_noise * K.transpose();
+    }
+    
+    /// Reset covariance to diagonal with high uncertainty (V4: Self-healing)
+    ///
+    /// Called when Cholesky decomposition fails due to matrix degradation.
+    /// This allows the filter to recover and re-converge.
+    fn reset_covariance(&mut self) {
+        let aug_size = self.state_vector.len();
+        // Reset to high-uncertainty diagonal (1000.0 is a conservative value)
+        self.covariance = DMatrix::identity(aug_size, aug_size) * 1000.0;
     }
     
     /// Get current state estimate (most recent block)

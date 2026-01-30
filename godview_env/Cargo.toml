@@ -1,0 +1,31 @@
+[package]
+name = "godview_env"
+version = "0.1.0"
+edition = "2021"
+description = "Environment abstraction layer for GodView (Reality/Simulation)"
+license = "MIT"
+
+[dependencies]
+# Async traits
+async-trait = "0.1"
+
+# Async runtime (production)
+tokio = { version = "1.0", features = ["rt-multi-thread", "time", "sync"] }
+
+# Crypto (for Keypair abstraction)
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+
+# Randomness
+rand = "0.8"
+
+# Error handling
+thiserror = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+
+# UUID for NodeId
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "time"] }

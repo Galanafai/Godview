@@ -8,7 +8,7 @@
 //! - Adaptive learning (neighbor reputation, track confidence)
 
 use crate::adaptive::AdaptiveState;
-use crate::evolution::EvolutionaryState;
+use crate::evolution::{EvolutionaryState, FitnessProvider, OracleFitness};
 use crate::context::SimContext;
 use crate::network::SimNetwork;
 use crate::oracle::SensorReading;
@@ -51,6 +51,9 @@ pub struct SimulatedAgent {
     /// Evolutionary state (parameter adaptation)
     evolution: EvolutionaryState,
     
+    /// Strategy for calculating fitness
+    fitness_provider: Box<dyn FitnessProvider>,
+
     /// RNG for evolutionary decisions
     rng: ChaCha8Rng,
 }
@@ -84,6 +87,7 @@ impl SimulatedAgent {
             gossip_received: 0,
             adaptive: AdaptiveState::new(),
             evolution: EvolutionaryState::new(),
+            fitness_provider: Box::new(OracleFitness::new()), // Default to Oracle
             rng,
         }
     }
@@ -99,6 +103,11 @@ impl SimulatedAgent {
         let mut agent = Self::new(context, network, root_public_key, agent_index, config);
         agent.adaptive = AdaptiveState::new_bad_actor();
         agent
+    }
+    
+    /// Sets the fitness provider for this agent (e.g. to switch to BlindFitness).
+    pub fn set_fitness_provider(&mut self, provider: Box<dyn FitnessProvider>) {
+        self.fitness_provider = provider;
     }
     
     /// Returns the agent's node ID.
@@ -123,15 +132,30 @@ impl SimulatedAgent {
     ///
     /// Returns true if parameters were updated (epoch ended).
     pub fn tick_evolution(&mut self, epoch_length_ticks: u64, ground_truth: Option<&[(u64, Vector3<f64>)]>) -> bool {
-        // Record samples if ground truth is available
-        if let Some(gt) = ground_truth {
-            let error = self.compute_position_error(gt);
-            self.evolution.record_accuracy(error);
-        }
+        // Collect metrics for this tick
+        
+        // 1. Accuracy (if GT available)
+        let error = if let Some(gt) = ground_truth {
+            self.compute_position_error(gt)
+        } else {
+            0.0 // No error data if no GT
+        };
+        
+        // 2. Consistency (NIS) via Time Engine
+        // Assumption: avg_nis is available from the filter
+        let nis = self.inner.time_engine.get_average_nis();
+        
+        // 3. Consensus (Peer Agreement) via Tracking Engine
+        let pa_cost = self.inner.track_manager.get_peer_agreement_cost();
+        
+        // Record all raw metrics to evolutionary state
+        self.evolution.record_metrics(error, nis, pa_cost);
         
         // Check if epoch should end
         if self.inner.tick_count() % epoch_length_ticks == 0 {
-            self.evolution.evolve(&mut self.rng);
+            // Calculate fitness using the configured provider
+            // The state handles aggregating average metrics from the recorded sums
+            self.evolution.evolve(&mut self.rng, self.fitness_provider.as_ref());
             return true;
         }
         false
@@ -160,7 +184,8 @@ impl SimulatedAgent {
             self.recent_packets.push(packet.clone());
             
             // Process through TrackManager
-            match self.inner.track_manager.process_packet(&packet) {
+            // Local readings: No adaptive state or neighbor ID needed
+            match self.inner.track_manager.process_packet(&packet, None, None) {
                 Ok(_track_id) => {
                     self.readings_processed += 1;
                 }
@@ -196,7 +221,12 @@ impl SimulatedAgent {
                 .unwrap_or(0.0);
             
             // Process through TrackManager
-            let was_useful = match self.inner.track_manager.process_packet(packet) {
+            // Gossip: Pass adaptive state and neighbor ID for peer agreement tracking
+            let was_useful = match self.inner.track_manager.process_packet(
+                packet, 
+                Some(&self.adaptive), 
+                Some(neighbor_id)
+            ) {
                 Ok(_) => existing_confidence < 0.5, // Useful if we didn't have it
                 Err(_) => false,
             };
@@ -228,8 +258,8 @@ impl SimulatedAgent {
     }
     
     /// Records a message sent metric for evolution.
-    pub fn record_message_sent_metric(&mut self) {
-        self.evolution.record_message_sent();
+    pub fn record_message_sent_metric(&mut self, bytes_sent: u64) {
+        self.evolution.record_message_sent(bytes_sent);
     }
     
     /// Returns current gossip interval in ticks (evolved).

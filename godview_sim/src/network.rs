@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use godview_env::{EnvError, NetworkTransport, NodeId, SignedPacketEnvelope};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
 
 /// Simulated network interface for an agent.
@@ -16,6 +17,12 @@ pub struct SimNetwork {
     
     /// Receiver for incoming packets (behind tokio mutex for async)
     rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(NodeId, SignedPacketEnvelope)>>>,
+
+    /// Metric: Total bytes sent
+    pub bytes_sent: Arc<AtomicU64>,
+
+    /// Metric: Total packets sent
+    pub packets_sent: Arc<AtomicU64>,
 }
 
 /// Internal message to the network router.
@@ -37,6 +44,8 @@ impl SimNetwork {
             local_id,
             tx,
             rx: Arc::new(tokio::sync::Mutex::new(rx)),
+            bytes_sent: Arc::new(AtomicU64::new(0)),
+            packets_sent: Arc::new(AtomicU64::new(0)),
         }
     }
     
@@ -48,7 +57,16 @@ impl SimNetwork {
             local_id,
             tx,
             rx: Arc::new(tokio::sync::Mutex::new(rx)),
+            bytes_sent: Arc::new(AtomicU64::new(0)),
+            packets_sent: Arc::new(AtomicU64::new(0)),
         }
+    }
+    /// Returns current bandwidth usage (bytes_sent, packets_sent).
+    pub fn get_bandwidth_usage(&self) -> (u64, u64) {
+        (
+            self.bytes_sent.load(Ordering::Relaxed),
+            self.packets_sent.load(Ordering::Relaxed),
+        )
     }
 }
 
@@ -58,9 +76,15 @@ impl NetworkTransport for SimNetwork {
         let msg = NetworkMessage {
             from: self.local_id,
             to: target,
-            packet,
+            packet: packet.clone(),
         };
         
+        // Track metrics
+        // Estimate wire size: payload + overhead (timestamp=8 + hop=1 + envelope_struct~=16)
+        let wire_size = packet.payload.len() as u64 + 25;
+        self.bytes_sent.fetch_add(wire_size, Ordering::Relaxed);
+        self.packets_sent.fetch_add(1, Ordering::Relaxed);
+
         self.tx.send(msg).await.map_err(|_| {
             EnvError::network("Channel closed")
         })
@@ -212,5 +236,44 @@ mod tests {
         
         // Reverse direction is separate
         assert_eq!(controller.get_latency(b, a), 0);
+    }
+    
+    #[tokio::test]
+    async fn test_bandwidth_tracking() {
+        let (tx, _rx) = mpsc::channel(10);
+        let (_, rx_dummy) = mpsc::channel(10);
+        
+        let network = SimNetwork::new(
+            NodeId::new(),
+            tx,
+            rx_dummy,
+        );
+        
+        // Initial state
+        let (bytes, packets) = network.get_bandwidth_usage();
+        assert_eq!(bytes, 0);
+        assert_eq!(packets, 0);
+        
+        // Send a packet
+        let payload = vec![1, 2, 3, 4, 5]; // 5 bytes
+        let packet = SignedPacketEnvelope::new(payload, 100);
+        
+        // Wire size estimate: 5 (payload) + 25 (overhead) = 30
+        network.send(NodeId::new(), packet).await.unwrap();
+        
+        let (bytes, packets) = network.get_bandwidth_usage();
+        assert_eq!(bytes, 30);
+        assert_eq!(packets, 1);
+        
+        // Send another
+        let payload2 = vec![0; 100]; // 100 bytes
+        let packet2 = SignedPacketEnvelope::new(payload2, 200);
+        
+        // Wire size: 100 + 25 = 125
+        network.send(NodeId::new(), packet2).await.unwrap();
+        
+        let (bytes, packets) = network.get_bandwidth_usage();
+        assert_eq!(bytes, 30 + 125);
+        assert_eq!(packets, 2);
     }
 }

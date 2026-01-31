@@ -129,6 +129,8 @@ impl ScenarioRunner {
             ScenarioId::EvoWar => self.run_evo_war(),
             ScenarioId::ResourceStarvation => self.run_resource_starvation(),
             ScenarioId::ProtocolDrift => self.run_protocol_drift(),
+            ScenarioId::BlindLearning => self.run_blind_learning(),
+            ScenarioId::BlackoutSurvival => self.run_blackout_survival(),
         }
     }
     
@@ -1819,7 +1821,9 @@ impl ScenarioRunner {
                     
                     // Record measurement for BLUE team sender
                     if blue_team_ids.contains(&from_idx) {
-                        agents[from_idx].record_message_sent_metric();
+                        // Estimate wire size (struct ~100 bytes + overhead ~25)
+                        let size = 125;
+                        agents[from_idx].record_message_sent_metric(size);
                     }
                 }
                 
@@ -1954,7 +1958,9 @@ impl ScenarioRunner {
                         pending_packets.push((idx, p.clone()));
                     }
                     for _ in 0..recent_count {
-                        agent.record_message_sent_metric(); // Charged for attempting
+                        // Estimate average packet size (e.g., 100 bytes + overhead)
+                        let size = 125;
+                        agent.record_message_sent_metric(size); // Charged for attempting
                     }
                 }
             }
@@ -2016,6 +2022,340 @@ impl ScenarioRunner {
             final_time_secs: 0.0,
             final_entity_count: 0,
             failure_reason: None,
+            metrics: ScenarioMetrics::default(),
+        }
+    }
+
+    /// DST-017: BlindLearning - Evolve without Ground Truth.
+    ///
+    /// Agents must optimize NIS (Internal Consistency) and Peer Agreement (Consensus)
+    /// to find good parameters, without ever knowing their true error.
+    fn run_blind_learning(&self) -> ScenarioResult {
+        use crate::evolution::BlindFitness;
+
+        info!("DST-017: BlindLearning - ADAPTING BLINDLY 🙈");
+        
+        let num_agents = 50;
+        let packet_loss_rate = 0.20; // Moderate noise
+        
+        // Oracle setup
+        let mut oracle = Oracle::new(self.seed);
+        for i in 0..50 {
+            oracle.spawn_entity(
+                Vector3::new((i % 10) as f64 * 50.0, (i / 10) as f64 * 50.0, 100.0),
+                Vector3::new(5.0, 2.0, 0.0),
+                "blind_target",
+            );
+        }
+        
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        // Agents initialized with BLIND FITNESS
+        let mut agents: Vec<SimulatedAgent> = (0..num_agents)
+            .map(|i| {
+                let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+                let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+                let mut agent = SimulatedAgent::new(context, network, root_key.clone(), i as u64, AgentConfig::default());
+                
+                // CRITICAL: Switch to Blind Fitness!
+                agent.set_fitness_provider(Box::new(BlindFitness::new()));
+                agent
+            })
+            .collect();
+            
+        let mut swarm_network = crate::swarm_network::SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1;
+        let target_ticks = (self.max_duration_secs.min(45.0) * 10.0) as u64; // Runs a bit longer
+        let evo_epoch_ticks = 20;
+        
+        let mut rng = rand::rngs::StdRng::seed_from_u64(self.seed);
+        use rand::{Rng, SeedableRng};
+        
+        info!("  Config: {} agents using BlindFitness (NIS+PA+BW)", num_agents);
+        
+        // Tracking convergence
+        let mut initial_rms = 0.0;
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            let ground_truth = oracle.ground_truth_positions();
+            
+            // Measure initial performance after a few ticks
+            if tick == 20 {
+                initial_rms = agents.iter().map(|a| a.compute_position_error(&ground_truth)).sum::<f64>() / num_agents as f64;
+                info!("  Initial RMS: {:.2}m", initial_rms);
+            }
+            
+            for (idx, agent) in agents.iter_mut().enumerate() {
+                 // Evolution Step
+                 // We pass ground_truth ONLY for recording the "true" accuracy for our report/metrics.
+                 // The agent's BlindFitness provider will IGNORE it.
+                agent.tick_evolution(evo_epoch_ticks, Some(&ground_truth));
+                
+                let agent_readings: Vec<_> = readings.iter()
+                    .enumerate()
+                    .filter(|(entity_idx, _)| (entity_idx + idx) % 5 == 0)
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                agent.ingest_readings(&agent_readings);
+            }
+            
+            // Gossip Logic (with packet drop)
+            if tick % 5 == 0 {
+                // Collect packets
+                let all_packets: Vec<_> = agents.iter_mut()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        // Respect evolved interval? 
+                        // Simplified: check simple modulus against agent's interval
+                        if tick % a.gossip_interval() == 0 {
+                            let packets: Vec<_> = a.recent_packets().iter().map(|p| (idx, p.clone())).collect();
+                            // Charge bandwidth
+                            let count = packets.len();
+                             // Estimate wire size (struct ~100 bytes + overhead ~25)
+                            a.record_message_sent_metric(count as u64 * 125);
+                            packets
+                        } else {
+                            Vec::new()
+                        }
+                    })
+                    .collect();
+
+                // Distribute
+                for (from_idx, packet) in all_packets {
+                    // 20% Packet loss
+                    if rng.gen::<f64>() < packet_loss_rate { continue; }
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    
+                    // Limit neighbors by evolved parameter
+                    let max_neighbors = agent.max_gossip_neighbors();
+                     let limited_incoming = if incoming.len() > max_neighbors {
+                        &incoming[0..max_neighbors]
+                    } else {
+                        &incoming[..]
+                    };
+                    
+                    agent.receive_gossip(limited_incoming);
+                    agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        let ground_truth = oracle.ground_truth_positions();
+        let final_rms: f64 = agents.iter().map(|a| a.compute_position_error(&ground_truth)).sum::<f64>() / num_agents as f64;
+        
+        // Did we improve?
+        let improved = final_rms < initial_rms;
+        // Did we survive reasonably well?
+        let passed = final_rms < 10.0; 
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  BLIND LEARNING RESULTS:");
+        info!("    Initial RMS:   {:.2}m", initial_rms);
+        info!("    Final RMS:     {:.2}m  {}", final_rms, if passed { "✓" } else { "✗" });
+        info!("    Improvement:   {}", if improved { "YES (Optimized!)" } else { "NO" });
+        
+        // Check params
+        let agent0_params = &agents[0].evolutionary_state().current_params;
+        info!("    Final Params:  interval={}, neighbors={}, conf={:.2}", 
+            agent0_params.gossip_interval_ticks, agent0_params.max_neighbors_gossip, agent0_params.confidence_threshold);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        ScenarioResult {
+            scenario: ScenarioId::BlindLearning,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed { Some(format!("RMS {:.2}m", final_rms)) } else { None },
+            metrics: ScenarioMetrics::default(),
+        }
+    }
+
+    /// DST-018: BlackoutSurvival - Total System Failure.
+    ///
+    /// The ultimate test: 50% Packet Loss + Sensor Faults + Bad Actors + Bandwidth Limit.
+    /// Agents must usage BlindFitness to filter noise, reject bad actors, and survive.
+    fn run_blackout_survival(&self) -> ScenarioResult {
+        use crate::evolution::BlindFitness;
+
+        info!("DST-018: BlackoutSurvival - TOTAL SYSTEM FAILURE 💀");
+        
+        // 1. Extreme Environment
+        let num_agents = 50;
+        let num_bad_actors = 10; // 20% Traitors
+        let packet_loss_rate = 0.50; // High loss
+        let sensor_fault_rate = 0.10; // 10% Blackouts
+        let bandwidth_limit = 1500; // Global limit
+        
+        // Oracle setup
+        let mut oracle = Oracle::new(self.seed);
+        for i in 0..50 {
+            oracle.spawn_entity(
+                Vector3::new((i % 10) as f64 * 50.0, (i / 10) as f64 * 50.0, 100.0),
+                Vector3::new(5.0, 2.0, 0.0),
+                "blackout_target",
+            );
+        }
+        
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        // Agents: Blind Fitness + Bad Actors
+        let mut agents: Vec<SimulatedAgent> = Vec::with_capacity(num_agents);
+        for i in 0..num_agents {
+             let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+            let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+            let mut agent = SimulatedAgent::new(context, network, root_key.clone(), i as u64, AgentConfig::default());
+            
+            // Usage Blind Fitness
+            agent.set_fitness_provider(Box::new(BlindFitness::new()));
+            
+             // Bad Actors?
+            if i < num_bad_actors as usize {
+                 let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+                 let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+                 let mut bad_agent = SimulatedAgent::new_bad_actor(context, network, root_key.clone(), i as u64, AgentConfig::default());
+                 bad_agent.set_fitness_provider(Box::new(BlindFitness::new())); 
+                 agent = bad_agent;
+            }
+            agents.push(agent);
+        }
+            
+        let mut swarm_network = crate::swarm_network::SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1;
+        let target_ticks = (self.max_duration_secs.min(60.0) * 10.0) as u64;
+        let evo_epoch_ticks = 20;
+        
+        let mut rng = rand::rngs::StdRng::seed_from_u64(self.seed);
+        use rand::{Rng, SeedableRng};
+        
+        info!("  Config: {} agents ({} bad), 50% loss, 10% sensor faults, BW limit", num_agents, num_bad_actors);
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            let ground_truth = oracle.ground_truth_positions();
+            
+            for (idx, agent) in agents.iter_mut().enumerate() {
+                // Evolution
+                agent.tick_evolution(evo_epoch_ticks, Some(&ground_truth));
+                
+                // Sensor Faults injection
+                let mut agent_readings: Vec<_> = readings.iter()
+                    .enumerate()
+                    .filter(|(entity_idx, _)| (entity_idx + idx) % 5 == 0)
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                
+                // 10% chance to lose all readings (Blackout)
+                if rng.gen::<f64>() < sensor_fault_rate {
+                    agent_readings.clear();
+                } else if rng.gen::<f64>() < 0.05 {
+                     // 5% chance of severe noise
+                     for r in agent_readings.iter_mut() {
+                         r.position.x += rng.gen_range(-50.0..50.0);
+                         r.position.y += rng.gen_range(-50.0..50.0);
+                     }
+                }
+                
+                agent.ingest_readings(&agent_readings);
+            }
+            
+             // Gossip Logic
+            if tick % 5 == 0 {
+                // Collect packets
+                let mut all_packets: Vec<_> = agents.iter_mut()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        if tick % a.gossip_interval() == 0 {
+                            let packets: Vec<_> = a.recent_packets().iter().map(|p| (idx, p.clone())).collect();
+                            // Charge bandwidth
+                            let count = packets.len();
+                            a.record_message_sent_metric(count as u64 * 125);
+                            packets
+                        } else {
+                            Vec::new()
+                        }
+                    })
+                    .collect();
+                
+                // Global Bandwidth Limit (Starvation)
+                 if all_packets.len() > bandwidth_limit {
+                    // Random drop to limit
+                    use rand::seq::SliceRandom;
+                    all_packets.shuffle(&mut rng);
+                    all_packets.truncate(bandwidth_limit);
+                }
+
+                // Distribute
+                for (from_idx, packet) in all_packets {
+                    // 50% Packet loss
+                    if rng.gen::<f64>() < packet_loss_rate { continue; }
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    
+                    // Limit neighbors
+                    let max_neighbors = agent.max_gossip_neighbors();
+                     let limited_incoming = if incoming.len() > max_neighbors {
+                        &incoming[0..max_neighbors]
+                    } else {
+                        &incoming[..]
+                    };
+                    
+                     // Receive gossip with neighbor attribution hacks for trust
+                     let neighbors = swarm_network.neighbors(agent_idx);
+                     if !neighbors.is_empty() && !limited_incoming.is_empty() {
+                        let per = limited_incoming.len() / neighbors.len().max(1);
+                        for (i, neighbor_id) in neighbors.iter().enumerate() {
+                            let start = i * per;
+                            let end = if i == neighbors.len() - 1 { limited_incoming.len() } else { (i + 1) * per };
+                            if start < end {
+                                agent.receive_gossip_from(*neighbor_id, &limited_incoming[start..end]);
+                            }
+                        }
+                    }
+                    agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        let ground_truth = oracle.ground_truth_positions();
+        
+        // Filter out bad actors for scoring
+        let good_agent_rms: Vec<f64> = agents.iter().enumerate()
+            .filter(|(idx, _)| *idx >= num_bad_actors)
+            .map(|(_, a)| a.compute_position_error(&ground_truth))
+            .collect();
+            
+        let avg_rms = good_agent_rms.iter().sum::<f64>() / good_agent_rms.len().max(1) as f64;
+        
+        // Did we survive?
+        let passed = avg_rms < 15.0; // Relaxed threshold due to 50% loss + faults
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  BLACKOUT RESULTS:");
+        info!("    Survivor RMS:  {:.2}m  {}", avg_rms, if passed { "✓" } else { "✗" });
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        ScenarioResult {
+            scenario: ScenarioId::BlackoutSurvival,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed { Some(format!("RMS {:.2}m", avg_rms)) } else { None },
             metrics: ScenarioMetrics::default(),
         }
     }

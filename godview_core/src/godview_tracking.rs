@@ -14,8 +14,9 @@
 use h3o::{CellIndex, LatLng, Resolution};
 use nalgebra::{Matrix3, Matrix6, Vector3, Vector6};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use uuid::Uuid;
+use crate::godview_trust::AdaptiveState;
 
 // ============================================================================
 // CONFIGURATION
@@ -229,7 +230,16 @@ pub struct TrackManager {
     
     /// Runtime configuration
     config: TrackingConfig,
+
+    /// History of Peer Agreement Cost (J_PA) values
+    /// Used for blind fitness evaluation
+    pub peer_agreement_history: VecDeque<f64>,
+
+    /// Maximum size of the Peer Agreement rolling window
+    pub pa_window_size: usize,
 }
+
+
 
 impl TrackManager {
     /// Create a new TrackManager with the given configuration.
@@ -238,6 +248,8 @@ impl TrackManager {
             tracks: HashMap::new(),
             spatial_index: HashMap::new(),
             config,
+            peer_agreement_history: VecDeque::new(),
+            pa_window_size: 30,
         }
     }
     
@@ -530,6 +542,16 @@ impl TrackManager {
             avg_per_cell,
         }
     }
+
+    /// Get average Peer Agreement Cost (J_PA) over the rolling window.
+    /// Used for blind fitness evaluation.
+    pub fn get_peer_agreement_cost(&self) -> f64 {
+        if self.peer_agreement_history.is_empty() {
+            return 0.0;
+        }
+        let sum: f64 = self.peer_agreement_history.iter().sum();
+        sum / self.peer_agreement_history.len() as f64
+    }
     
     // ========================================================================
     // PHASE 3 & 4: FUSION ENGINE (Highlander + Covariance Intersection)
@@ -597,6 +619,8 @@ impl TrackManager {
         &mut self,
         track_id: Uuid,
         packet: &GlobalHazardPacket,
+        adaptive_state: Option<&AdaptiveState>,
+        neighbor_id: Option<usize>,
     ) -> Result<Uuid, TrackingError> {
         // Get the track
         let track = self.tracks.get(&track_id)
@@ -639,6 +663,35 @@ impl TrackManager {
         track.age = 0;
         track.h3_cell = new_cell;
         
+        // --- Blind Fitness Instrumentation (Peer Agreement) ---
+        // If this packet came from a neighbor, calculate weighted disagreement
+        if let (Some(state), Some(nid)) = (adaptive_state, neighbor_id) {
+             // 1. Calculate distance d_ij (Euclidean distance between track and packet)
+             let dist = (track.state - x_meas).norm();
+             
+             // 2. Get neighbor reputation weight w_ij
+             // We access the reputation from the passed AdaptiveState
+             if let Some(rep) = state.neighbor_reputations.get(&nid) {
+                 let w_ij = rep.reliability_score;
+                 
+                 // 3. Store weighted disagreement: w_ij * d_ij
+                 // Note: This is an instantaneous sample. The full J_PA aggregator 
+                 // usually sums over all neighbors. Here we store individual samples
+                 // which get averaged over time. 
+                 
+                 // Only count if weight is significant to avoid noise from bad actors
+                 if w_ij > 0.1 {
+                     let weighted_agreement = w_ij * dist;
+                     
+                     if self.peer_agreement_history.len() >= self.pa_window_size {
+                        self.peer_agreement_history.pop_front();
+                     }
+                     self.peer_agreement_history.push_back(weighted_agreement);
+                 }
+             }
+        }
+        // ----------------------------------------------------
+
         // Stage 3: Highlander ID Resolution
         track.merge_id(packet.entity_id);
         let new_canonical_id = track.canonical_id;
@@ -675,13 +728,18 @@ impl TrackManager {
     /// **Stage 4:** State Fusion (Covariance Intersection)
     /// 
     /// Returns the canonical track ID (either existing or newly created).
-    pub fn process_packet(&mut self, packet: &GlobalHazardPacket) -> Result<Uuid, TrackingError> {
+    pub fn process_packet(
+        &mut self, 
+        packet: &GlobalHazardPacket,
+        adaptive_state: Option<&AdaptiveState>,
+        neighbor_id: Option<usize>
+    ) -> Result<Uuid, TrackingError> {
         // Stages 1 & 2: Find association
         match self.find_association(packet)? {
             Some(track_id) => {
                 // Stages 3 & 4: Fuse with existing track
                 // fuse_track returns the (possibly updated) canonical_id
-                let canonical_id = self.fuse_track(track_id, packet)?;
+                let canonical_id = self.fuse_track(track_id, packet, adaptive_state, neighbor_id)?;
                 Ok(canonical_id)
             }
             None => {
@@ -697,7 +755,7 @@ impl TrackManager {
     pub fn process_packets(&mut self, packets: &[GlobalHazardPacket]) -> Vec<(Result<Uuid, TrackingError>, Uuid)> {
         packets
             .iter()
-            .map(|packet| (self.process_packet(packet), packet.entity_id))
+            .map(|packet| (self.process_packet(packet, None, None), packet.entity_id))
             .collect()
     }
 }

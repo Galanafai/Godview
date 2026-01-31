@@ -1,4 +1,3 @@
-use godview_core::godview_tracking::GlobalHazardPacket;
 use rand::Rng;
 
 /// Parameters that can be evolved/adapted at runtime.
@@ -24,8 +23,113 @@ impl Default for EvoParams {
     }
 }
 
+/// Context passed to the fitness function containing all collected metrics.
+#[derive(Debug, Clone, Default)]
+pub struct FitnessContext {
+    // --- Oracle Metrics ---
+    /// Average position error against ground truth (meters).
+    pub avg_position_error: f64,
+    
+    // --- Blind Metrics ---
+    /// Average Normalized Innovation Squared (consistency).
+    pub avg_nis: f64,
+    
+    /// Average Peer Agreement Cost (weighted disagreement).
+    pub peer_agreement_cost: f64,
+    
+    /// Bandwidth usage (bytes sent / tick).
+    pub bandwidth_usage_per_tick: f64,
+    
+    // --- Common Metrics ---
+    /// Messages sent per tick (spam metric).
+    pub msgs_per_tick: f64,
+}
+
+/// Trait for fitness calculation strategies (Oracle vs Blind).
+pub trait FitnessProvider: Send + Sync {
+    /// Calculate fitness score based on the provided context.
+    /// Higher is better.
+    fn calculate_fitness(&self, ctx: &FitnessContext) -> f64;
+    
+    /// Returns the name of this provider.
+    fn name(&self) -> &str;
+}
+
+/// Original Oracle-based fitness function.
+/// Reward = (100 / (AvgError + 1)) - (Cost * MsgsPerSample)
+pub struct OracleFitness {
+    pub bandwidth_cost_factor: f64,
+}
+
+impl OracleFitness {
+    pub fn new() -> Self {
+        Self { bandwidth_cost_factor: 0.5 }
+    }
+}
+
+impl Default for OracleFitness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FitnessProvider for OracleFitness {
+    fn calculate_fitness(&self, ctx: &FitnessContext) -> f64 {
+        let avg_error = ctx.avg_position_error;
+        let msgs_per_tick = ctx.msgs_per_tick;
+        
+        // Reward accuracy, penalize spam
+        (100.0 / (avg_error + 0.1)) - (self.bandwidth_cost_factor * msgs_per_tick)
+    }
+    
+    fn name(&self) -> &str {
+        "OracleFitness"
+    }
+}
+
+/// Blind fitness function using NIS and Peer Agreement.
+/// J = w1 * NIS + w2 * PA + w3 * BW
+/// Fitness = 100 / (J + 1)
+pub struct BlindFitness {
+    pub w_nis: f64,
+    pub w_pa: f64,
+    pub w_bw: f64,
+}
+
+impl BlindFitness {
+    pub fn new() -> Self {
+        Self {
+            w_nis: 1.0,
+            w_pa: 1.0,
+            w_bw: 0.001, // Low weight for raw bandwidth bytes
+        }
+    }
+}
+
+impl Default for BlindFitness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FitnessProvider for BlindFitness {
+    fn calculate_fitness(&self, ctx: &FitnessContext) -> f64 {
+        // We want to MINIMIZE the cost J, effectively minimizing NIS (inconsistency) and PA (disagreement)
+        let cost = (self.w_nis * ctx.avg_nis) + 
+                   (self.w_pa * ctx.peer_agreement_cost) + 
+                   (self.w_bw * ctx.bandwidth_usage_per_tick);
+        
+        // Convert loss to fitness (Higher is better)
+        // 100 / (Cost + 1) similar to Oracle fitness
+        100.0 / (cost + 1.0)
+    }
+    
+    fn name(&self) -> &str {
+        "BlindFitness"
+    }
+}
+
 /// State for the evolutionary learning process.
-#[derive(Debug, Clone)]
 pub struct EvolutionaryState {
     /// Current active parameters.
     pub current_params: EvoParams,
@@ -46,6 +150,11 @@ pub struct EvolutionaryState {
     epoch_msgs_sent: u64,
     epoch_error_sum: f64,
     epoch_samples: u64,
+    
+    // Blind metrics accumulators
+    epoch_nis_sum: f64,
+    epoch_pa_sum: f64,
+    epoch_bytes_sent: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -69,55 +178,70 @@ impl EvolutionaryState {
             epoch_msgs_sent: 0,
             epoch_error_sum: 0.0,
             epoch_samples: 0,
+            epoch_nis_sum: 0.0,
+            epoch_pa_sum: 0.0,
+            epoch_bytes_sent: 0,
         }
     }
     
-    /// Record a metric for the current epoch.
-    pub fn record_accuracy(&mut self, error: f64) {
+    /// Record metrics for the current epoch.
+    pub fn record_metrics(
+        &mut self, 
+        error: f64, 
+        nis: f64, 
+        pa_cost: f64
+    ) {
         self.epoch_error_sum += error;
+        self.epoch_nis_sum += nis;
+        self.epoch_pa_sum += pa_cost;
         self.epoch_samples += 1;
     }
     
-    pub fn record_message_sent(&mut self) {
+    /// Legacy: Record only accuracy (for backward compat if needed).
+    pub fn record_accuracy(&mut self, error: f64) {
+        self.record_metrics(error, 0.0, 0.0);
+    }
+    
+    pub fn record_message_sent(&mut self, bytes: u64) {
         self.epoch_msgs_sent += 1;
+        self.epoch_bytes_sent += bytes;
     }
     
     /// End the current epoch, calculate fitness, and evolve parameters.
-    pub fn evolve<R: Rng>(&mut self, rng: &mut R) {
-        // 1. Calculate Fitness
-        // Reward = (100 / (AvgError + 1)) - (Cost * MsgsPerSample)
-        // We want accurate tracks (low error) with minimal bandwidth.
-        let avg_error = if self.epoch_samples > 0 {
-            self.epoch_error_sum / self.epoch_samples as f64
-        } else {
-            100.0 // Penalty for no tracking
+    pub fn evolve<R: Rng>(
+        &mut self, 
+        rng: &mut R, 
+        provider: &dyn FitnessProvider
+    ) {
+        // 1. Construct Fitness Context from accumulators
+        let samples = self.epoch_samples.max(1) as f64;
+        
+        let ctx = FitnessContext {
+            avg_position_error: self.epoch_error_sum / samples,
+            avg_nis: self.epoch_nis_sum / samples,
+            peer_agreement_cost: self.epoch_pa_sum / samples,
+            // Assuming samples equiv to ticks roughly for this rate calc
+            bandwidth_usage_per_tick: self.epoch_bytes_sent as f64 / samples,
+            msgs_per_tick: self.epoch_msgs_sent as f64 / samples,
         };
         
-        // Normalize messages per sample (tick) to penalize spam
-        let msgs_per_sample = if self.epoch_samples > 0 {
-            self.epoch_msgs_sent as f64 / self.epoch_samples as f64
-        } else {
-            0.0
-        };
-        
-        let cost_factor = 0.5; // Adjustable cost of bandwidth
-        let fitness = (100.0 / (avg_error + 0.1)) - (cost_factor * msgs_per_sample);
+        // 2. Calculate Fitness via Provider
+        let fitness = provider.calculate_fitness(&ctx);
         
         self.prev_fitness = self.current_fitness;
         self.current_fitness = fitness;
         
-        // 2. Evaluate last mutation
+        // 3. Evaluate last mutation
         if let Some(mutation) = self.active_mutation {
             if self.current_fitness >= self.prev_fitness {
                 // Good mutation! Keep it.
-                // Maybe accelerate?
             } else {
                 // Bad mutation. Revert.
                 self.current_params = self.prev_params;
             }
         }
         
-        // 3. Propose new mutation
+        // 4. Propose new mutation
         self.prev_params = self.current_params;
         self.active_mutation = Some(self.pick_mutation(rng));
         self.apply_mutation();
@@ -126,6 +250,9 @@ impl EvolutionaryState {
         self.epoch_error_sum = 0.0;
         self.epoch_samples = 0;
         self.epoch_msgs_sent = 0;
+        self.epoch_nis_sum = 0.0;
+        self.epoch_pa_sum = 0.0;
+        self.epoch_bytes_sent = 0;
     }
     
     fn pick_mutation<R: Rng>(&self, rng: &mut R) -> MutationType {

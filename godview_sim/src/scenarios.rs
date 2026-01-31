@@ -58,6 +58,12 @@ pub enum ScenarioId {
     
     /// DST-016: Protocol divergence adaptation
     ProtocolDrift,
+    
+    /// DST-017: Blind fitness learning (no oracle)
+    BlindLearning,
+    
+    /// DST-018: Total system failure survival
+    BlackoutSurvival,
 }
 
 impl ScenarioId {
@@ -82,6 +88,8 @@ impl ScenarioId {
             ScenarioId::EvoWar,
             ScenarioId::ResourceStarvation,
             ScenarioId::ProtocolDrift,
+            ScenarioId::BlindLearning,
+            ScenarioId::BlackoutSurvival,
         ]
     }
     
@@ -107,6 +115,7 @@ impl ScenarioId {
             ScenarioId::TimeTornado,
             ScenarioId::ZombieApocalypse,
             ScenarioId::RapidFire,
+            ScenarioId::BlackoutSurvival,
         ]
     }
     
@@ -140,6 +149,8 @@ impl ScenarioId {
             ScenarioId::EvoWar => "evo_war",
             ScenarioId::ResourceStarvation => "resource_starvation",
             ScenarioId::ProtocolDrift => "protocol_drift",
+            ScenarioId::BlindLearning => "blind_learning",
+            ScenarioId::BlackoutSurvival => "blackout_survival",
         }
     }
     
@@ -164,6 +175,8 @@ impl ScenarioId {
             ScenarioId::EvoWar => "🧬 Evolution vs Chaos: agents adapt parameters to survive",
             ScenarioId::ResourceStarvation => "🧬 Bandwidth Constrained: evolve efficiency",
             ScenarioId::ProtocolDrift => "🧬 Protocol Divergence: one group changes logic",
+            ScenarioId::BlindLearning => "🧬 Blind Learning: adapt without ground truth",
+            ScenarioId::BlackoutSurvival => "💀 BLACKOUT: Loss + Faults + Bad Actors + Bandwidth Limit",
         }
     }
     
@@ -175,7 +188,8 @@ impl ScenarioId {
             ScenarioId::NetworkHell |
             ScenarioId::TimeTornado |
             ScenarioId::ZombieApocalypse |
-            ScenarioId::RapidFire
+            ScenarioId::RapidFire |
+            ScenarioId::BlackoutSurvival
         )
     }
 
@@ -184,7 +198,8 @@ impl ScenarioId {
         matches!(self,
             ScenarioId::EvoWar |
             ScenarioId::ResourceStarvation |
-            ScenarioId::ProtocolDrift
+            ScenarioId::ProtocolDrift |
+            ScenarioId::BlindLearning
         )
     }
 }
@@ -218,6 +233,8 @@ impl std::str::FromStr for ScenarioId {
             "evo_war" | "evowar" | "dst-014" => Ok(ScenarioId::EvoWar),
             "resource_starvation" | "resourcestarvation" | "dst-015" => Ok(ScenarioId::ResourceStarvation),
             "protocol_drift" | "protocoldrift" | "dst-016" => Ok(ScenarioId::ProtocolDrift),
+            "blind_learning" | "blindlearning" | "dst-017" => Ok(ScenarioId::BlindLearning),
+            "blackout_survival" | "blackoutsurvival" | "dst-018" => Ok(ScenarioId::BlackoutSurvival),
             // Groups
             "extreme" => Err("Use --scenario extreme (or all) for extreme scenarios".to_string()),
             "evolutionary" => Err("Use --scenario evolutionary (or all) for evolutionary scenarios".to_string()),

@@ -6,6 +6,7 @@
 
 use nalgebra::{DMatrix, DVector};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 /// Augmented State Extended Kalman Filter
 ///
@@ -37,6 +38,19 @@ pub struct AugmentedStateFilter {
     
     /// Measurement noise covariance (R matrix)
     pub measurement_noise: DMatrix<f64>,
+
+    /// History of Normalized Innovation Squared (NIS) values
+    /// Used for blind fitness evaluation
+    #[serde(skip, default)]
+    pub nis_history: VecDeque<f64>,
+
+    /// Maximum size of the NIS rolling window
+    #[serde(skip, default = "default_nis_window")]
+    pub nis_window_size: usize,
+}
+
+fn default_nis_window() -> usize {
+    30 // Default window size for NIS averaging
 }
 
 impl AugmentedStateFilter {
@@ -79,6 +93,8 @@ impl AugmentedStateFilter {
             max_lag_depth: lag_depth,
             process_noise,
             measurement_noise,
+            nis_history: VecDeque::with_capacity(30),
+            nis_window_size: 30,
         }
     }
     
@@ -172,6 +188,19 @@ impl AugmentedStateFilter {
                 return;
             }
         };
+
+        // --- Blind Fitness Instrumentation (NIS) ---
+        // Calculate Normalized Innovation Squared: NIS = y^T * S^-1 * y
+        // We solve S * x = y for x, so x = S^-1 * y. Then NIS = y^T * x.
+        let s_inv_innovation = S_chol.solve(&innovation);
+        let nis = innovation.dot(&s_inv_innovation);
+
+        if self.nis_history.len() >= self.nis_window_size {
+            self.nis_history.pop_front();
+        }
+        self.nis_history.push_back(nis);
+        // -------------------------------------------
+
         let K = &self.covariance * H_aug.transpose() * S_chol.inverse();
         
         // Step 5: Update state
@@ -208,6 +237,16 @@ impl AugmentedStateFilter {
         self.covariance
             .view((0, 0), (self.state_dim, self.state_dim))
             .clone_owned()
+    }
+
+    /// Get average Normalized Innovation Squared (NIS) over the rolling window.
+    /// Used for blind fitness evaluation.
+    pub fn get_average_nis(&self) -> f64 {
+        if self.nis_history.is_empty() {
+            return 0.0;
+        }
+        let sum: f64 = self.nis_history.iter().sum();
+        sum / self.nis_history.len() as f64
     }
     
     // ========== Private Helper Methods ==========
@@ -473,5 +512,47 @@ mod tests {
         
         // After OOSM, trace should be less than before (or at least not explode)
         assert!(after_update_trace < before_update_trace * 2.0, "OOSM should not explode covariance");
+    }
+
+    #[test]
+    fn test_nis_calculation() {
+        let state = DVector::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let cov = DMatrix::identity(6, 6);
+        let Q = DMatrix::identity(6, 6) * 0.01;
+        let R = DMatrix::identity(3, 3) * 0.1;
+
+        let mut filter = AugmentedStateFilter::new(state, cov, Q, R, 5);
+
+        // 1. Perfect match measurement -> NIS should be 0
+        let measurement = DVector::from_vec(vec![0.0, 0.0, 0.0]);
+        filter.update_oosm(measurement, 0.0);
+        
+        // Check latest NIS
+        let last_nis = *filter.nis_history.back().unwrap();
+        assert_relative_eq!(last_nis, 0.0, epsilon = 1e-6);
+        assert_eq!(filter.get_average_nis(), 0.0);
+
+        // 2. Off measurement -> NIS > 0
+        // Predict forward to establish some covariance growth
+        filter.predict(0.1, 0.1);
+        let measurement_off = DVector::from_vec(vec![1.0, 0.0, 0.0]);
+        filter.update_oosm(measurement_off, 0.1);
+
+        let last_nis_off = *filter.nis_history.back().unwrap();
+        assert!(last_nis_off > 0.0);
+        
+        // Average should be (0 + large) / 2
+        let avg = filter.get_average_nis();
+        assert_relative_eq!(avg, (0.0 + last_nis_off) / 2.0, epsilon = 1e-6);
+
+        // 3. Test windowing
+        // Fill up history with 0.0s (we already have 2 items)
+        for _ in 0..40 {
+            filter.update_oosm(DVector::from_vec(vec![0.1, 0.0, 0.0]), 0.1); 
+            // Note: measurement matches prev state roughly, so small NIS
+        }
+        
+        assert!(filter.nis_history.len() <= 30);
+        assert_eq!(filter.nis_history.len(), 30); // Default window size
     }
 }

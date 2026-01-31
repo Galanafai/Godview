@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "godview_core",
+    "godview_env",
+    "godview_sim",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"

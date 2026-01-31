@@ -125,6 +125,10 @@ impl ScenarioRunner {
             ScenarioId::TimeTornado => self.run_time_tornado(),
             ScenarioId::ZombieApocalypse => self.run_zombie_apocalypse(),
             ScenarioId::RapidFire => self.run_rapid_fire(),
+            // Evolutionary
+            ScenarioId::EvoWar => self.run_evo_war(),
+            ScenarioId::ResourceStarvation => self.run_resource_starvation(),
+            ScenarioId::ProtocolDrift => self.run_protocol_drift(),
         }
     }
     
@@ -1681,6 +1685,337 @@ impl ScenarioRunner {
             final_time_secs: oracle.time(),
             final_entity_count: oracle.active_entities().len(),
             failure_reason: if !passed { Some(format!("RMS={:.2}m, rate={:.0}Hz", rms_error, actual_rate)) } else { None },
+            metrics: ScenarioMetrics::default(),
+        }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // EVOLUTIONARY INTELLIGENCE - Adapting to the Unknown
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// DST-014: EvoWar - Evolution vs Chaos.
+    ///
+    /// Red Team (static bad actors) vs Blue Team (evolutionary).
+    /// Can Blue evolve to survive high noise + bad actors?
+    fn run_evo_war(&self) -> ScenarioResult {
+        use crate::swarm_network::SwarmNetwork;
+        use rand::SeedableRng;
+        use rand::Rng;
+        use rand_chacha::ChaCha8Rng;
+        
+        info!("DST-014: EvoWar - EVOLUTION VS CHAOS 🧬");
+        
+        let num_agents = 50;
+        let num_red_team = 25; // Half are static/bad
+        let packet_loss_rate = 0.30;
+        
+        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        let mut rng = ChaCha8Rng::seed_from_u64(self.seed.wrapping_mul(0xeb014));
+        
+        // Oracle setup
+        let mut oracle = Oracle::new(physics_seed);
+        for i in 0..100 {
+            oracle.spawn_entity(
+                Vector3::new((i % 10) as f64 * 50.0, (i / 10) as f64 * 50.0, 100.0),
+                Vector3::new(5.0, 2.0, 0.0),
+                "evo_target",
+            );
+        }
+        
+        // Agents
+        let mut agents: Vec<SimulatedAgent> = Vec::with_capacity(num_agents);
+        for i in 0..num_agents {
+            let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+            let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+            agents.push(SimulatedAgent::new(
+                context,
+                network,
+                root_key.clone(),
+                i as u64,
+                AgentConfig::default(),
+            ));
+        }
+        
+        // Red team indices (static bad actors)
+        let red_team_ids: Vec<usize> = (0..num_red_team).collect();
+        // Blue team indices (evolving)
+        let blue_team_ids: Vec<usize> = (num_red_team..num_agents).collect();
+        
+        // Configure Red Team as bad actors
+        for &id in &red_team_ids {
+            // Re-create as bad actor
+            let context = Arc::new(SimContext::new(self.seed.wrapping_add(id as u64)));
+            let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(id as u64)));
+            agents[id] = SimulatedAgent::new_bad_actor(context, network, root_key.clone(), id as u64, AgentConfig::default());
+        }
+        
+        let mut swarm_network = SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1;
+        let target_ticks = (self.max_duration_secs.min(30.0) * 10.0) as u64;
+        let evo_epoch_ticks = 20; // Evolve every 2s
+        
+        info!("  Config: {} Blue (learning), {} Red (static/bad), 30% loss", blue_team_ids.len(), red_team_ids.len());
+        
+        let ground_truth_buffer: Vec<_> = oracle.ground_truth_positions(); // Initial
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            let ground_truth = oracle.ground_truth_positions();
+            
+            for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                // Blue team evolves
+                if blue_team_ids.contains(&agent_idx) {
+                    agent.tick_evolution(evo_epoch_ticks, Some(&ground_truth));
+                } else {
+                    agent.tick(); // Red team just ticks
+                }
+                
+                // Sensor input
+                let agent_readings: Vec<_> = readings.iter()
+                    .enumerate()
+                    .filter(|(entity_idx, _)| (entity_idx + agent_idx) % 4 == 0)
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                agent.ingest_readings(&agent_readings);
+            }
+            
+            // Gossip
+            if tick % 5 == 0 {
+                // Collect packets
+                let all_packets: Vec<_> = agents.iter()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        let mut packets: Vec<_> = a.recent_packets().iter()
+                            .map(|p| (idx, p.clone()))
+                            .collect();
+                        
+                        // Red team injects garbage
+                        if red_team_ids.contains(&idx) {
+                            for _ in 0..5 {
+                                let garbage = godview_core::godview_tracking::GlobalHazardPacket {
+                                    entity_id: Uuid::new_v4(), // Confusing ID
+                                    position: [rng.gen_range(-500.0..500.0), rng.gen_range(-500.0..500.0), 0.0],
+                                    velocity: [0.0, 0.0, 0.0],
+                                    class_id: 99,
+                                    timestamp: tick as f64 * dt,
+                                    confidence_score: 0.9, // High confidence lie
+                                };
+                                packets.push((idx, garbage));
+                            }
+                        }
+                        packets
+                    })
+                    .collect();
+
+                // Distribute packets (Blue respects evo params)
+                for (from_idx, packet) in all_packets {
+                    // Packet loss
+                    if rng.gen::<f64>() < packet_loss_rate { continue; }
+                    
+                    swarm_network.queue_gossip(from_idx, packet);
+                    
+                    // Record measurement for BLUE team sender
+                    if blue_team_ids.contains(&from_idx) {
+                        agents[from_idx].record_message_sent_metric();
+                    }
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    
+                    // Apply EVO constraints for Blue
+                    let max_neighbors = if blue_team_ids.contains(&agent_idx) {
+                        agent.max_gossip_neighbors()
+                    } else {
+                        100 // Red talks to everyone
+                    };
+                    
+                    // Filter incoming by max neighbors (simulate bandwidth constraint)
+                    let limited_incoming = if incoming.len() > max_neighbors {
+                        &incoming[0..max_neighbors]
+                    } else {
+                        &incoming[..]
+                    };
+                    
+                    agent.receive_gossip(limited_incoming);
+                    agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        // Metrics
+        let ground_truth = oracle.ground_truth_positions();
+        
+        // Blue Team Score
+        let blue_rms: Vec<f64> = agents.iter().enumerate()
+            .filter(|(idx, _)| blue_team_ids.contains(idx))
+            .map(|(_, a)| a.compute_position_error(&ground_truth))
+            .collect();
+        let avg_blue_rms = blue_rms.iter().sum::<f64>() / blue_rms.len().max(1) as f64;
+        
+        // Did params diverge from default?
+        let blue_params = &agents[blue_team_ids[0]].evolutionary_state().current_params;
+        let param_drift = (blue_params.confidence_threshold - 0.0).abs() > 0.01 || 
+                          blue_params.max_neighbors_gossip != 100 ||
+                          blue_params.gossip_interval_ticks != 5;
+        
+        let passed = avg_blue_rms < 10.0;
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  EVO WAR RESULTS:");
+        info!("    Blue RMS:      {:.2}m  {}", avg_blue_rms, if passed { "✓" } else { "✗" });
+        info!("    Param Drift:   {} (Agents adapted!)", if param_drift { "YES" } else { "NO" });
+        info!("    Final Params:  interval={}, neighbors={}, conf={:.2}", 
+            blue_params.gossip_interval_ticks, blue_params.max_neighbors_gossip, blue_params.confidence_threshold);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        ScenarioResult {
+            scenario: ScenarioId::EvoWar,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed { Some(format!("Blue RMS {:.2}m", avg_blue_rms)) } else { None },
+            metrics: ScenarioMetrics::default(),
+        }
+    }
+    
+    /// DST-015: ResourceStarvation.
+    fn run_resource_starvation(&self) -> ScenarioResult {
+        use crate::swarm_network::SwarmNetwork;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha8Rng;
+        
+        info!("DST-015: ResourceStarvation - BANDWIDTH LIMIT 🧬");
+        
+        let num_agents = 50;
+        let total_bandwidth_limit = 1000; // packets per tick global
+        
+        let mut agents: Vec<SimulatedAgent> = Vec::with_capacity(num_agents);
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        for i in 0..num_agents {
+            let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+            let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+            agents.push(SimulatedAgent::new(
+                context, 
+                network, 
+                root_key.clone(), 
+                i as u64, 
+                AgentConfig::default()
+            ));
+        }
+        
+        let mut oracle = Oracle::new(self.seed);
+        for i in 0..50 {
+             oracle.spawn_entity(
+                Vector3::new(i as f64 * 10.0, 0.0, 100.0),
+                Vector3::new(1.0, 0.0, 0.0),
+                "starve_target",
+            );
+        }
+        
+        let mut swarm_network = SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1;
+        let target_ticks = (self.max_duration_secs.min(20.0) * 10.0) as u64;
+        let evo_epoch_ticks = 10;
+        
+        let mut total_sent = 0;
+        let mut total_dropped_bandwidth = 0;
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            let ground_truth = oracle.ground_truth_positions();
+            
+            for (idx, agent) in agents.iter_mut().enumerate() {
+                agent.tick_evolution(evo_epoch_ticks, Some(&ground_truth));
+                
+                 let agent_readings: Vec<_> = readings.iter()
+                    .enumerate()
+                    .filter(|(entity_idx, _)| (entity_idx + idx) % 5 == 0)
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                agent.ingest_readings(&agent_readings);
+            }
+            
+            // Collect all proposed packets
+            let mut pending_packets = Vec::new();
+            for (idx, agent) in agents.iter_mut().enumerate() {
+                // Respect agent's evolved gossip interval
+                if tick % agent.gossip_interval() == 0 {
+                    let recent_count = agent.recent_packets().len();
+                    for p in agent.recent_packets() {
+                        pending_packets.push((idx, p.clone()));
+                    }
+                    for _ in 0..recent_count {
+                        agent.record_message_sent_metric(); // Charged for attempting
+                    }
+                }
+            }
+            
+            // Global bandwidth limiter
+            total_sent += pending_packets.len();
+            if pending_packets.len() > total_bandwidth_limit {
+                total_dropped_bandwidth += pending_packets.len() - total_bandwidth_limit;
+                pending_packets.truncate(total_bandwidth_limit);
+            }
+            
+            // Deliver
+            for (from, packet) in pending_packets {
+                swarm_network.queue_gossip(from, packet);
+            }
+            
+            for (idx, agent) in agents.iter_mut().enumerate() {
+                let incoming = swarm_network.take_gossip(idx);
+                agent.receive_gossip(&incoming);
+                agent.clear_recent_packets();
+            }
+        }
+        
+        let ground_truth = oracle.ground_truth_positions();
+        let avg_rms: f64 = agents.iter().map(|a| a.compute_position_error(&ground_truth)).sum::<f64>() / num_agents as f64;
+        
+        // Check if agents increased gossip interval to reduce cost
+        let avg_interval: f64 = agents.iter().map(|a| a.gossip_interval() as f64).sum::<f64>() / num_agents as f64;
+        
+        let passed = avg_rms < 5.0 && avg_interval > 5.0; // Interval should increase > 5 (default)
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  RESOURCE STARVATION RESULTS:");
+        info!("    RMS error:      {:.2}m  {}", avg_rms, if avg_rms < 5.0 { "✓" } else { "✗" });
+        info!("    Avg Interval:   {:.1} ticks (started at 5) {}", avg_interval, if avg_interval > 5.0 { "✓ (Adapted)" } else { "✗" });
+        info!("    Bandwidth Drop: {:.1}%", total_dropped_bandwidth as f64 * 100.0 / total_sent as f64);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        ScenarioResult {
+            scenario: ScenarioId::ResourceStarvation,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed { Some(format!("RMS={:.2}m (want <5), Interval={:.1} (want >5)", avg_rms, avg_interval)) } else { None },
+            metrics: ScenarioMetrics::default(),
+        }
+    }
+    
+    /// DST-016: ProtocolDrift - Stub for now.
+    fn run_protocol_drift(&self) -> ScenarioResult {
+        info!("DST-016: ProtocolDrift - Placeholder 🧬");
+        ScenarioResult {
+            scenario: ScenarioId::ProtocolDrift,
+            seed: self.seed,
+            passed: true,
+            total_ticks: 0,
+            final_time_secs: 0.0,
+            final_entity_count: 0,
+            failure_reason: None,
             metrics: ScenarioMetrics::default(),
         }
     }

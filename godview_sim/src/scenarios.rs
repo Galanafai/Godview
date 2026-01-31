@@ -45,6 +45,19 @@ pub enum ScenarioId {
     
     /// DST-013: 100Hz tick rate
     RapidFire,
+    
+    // ═══════════════════════════════════════════════════
+    // EVOLUTIONARY SCENARIOS
+    // ═══════════════════════════════════════════════════
+    
+    /// DST-014: Evolution vs Chaos
+    EvoWar,
+    
+    /// DST-015: Bandwidth constrained evolution
+    ResourceStarvation,
+    
+    /// DST-016: Protocol divergence adaptation
+    ProtocolDrift,
 }
 
 impl ScenarioId {
@@ -65,6 +78,10 @@ impl ScenarioId {
             ScenarioId::TimeTornado,
             ScenarioId::ZombieApocalypse,
             ScenarioId::RapidFire,
+            // Evolutionary
+            ScenarioId::EvoWar,
+            ScenarioId::ResourceStarvation,
+            ScenarioId::ProtocolDrift,
         ]
     }
     
@@ -93,6 +110,15 @@ impl ScenarioId {
         ]
     }
     
+    /// Returns evolutionary scenarios.
+    pub fn evolutionary() -> Vec<ScenarioId> {
+        vec![
+            ScenarioId::EvoWar,
+            ScenarioId::ResourceStarvation,
+            ScenarioId::ProtocolDrift,
+        ]
+    }
+    
     /// Returns the scenario name.
     pub fn name(&self) -> &'static str {
         match self {
@@ -110,6 +136,10 @@ impl ScenarioId {
             ScenarioId::TimeTornado => "time_tornado",
             ScenarioId::ZombieApocalypse => "zombie_apocalypse",
             ScenarioId::RapidFire => "rapid_fire",
+            // Evolutionary
+            ScenarioId::EvoWar => "evo_war",
+            ScenarioId::ResourceStarvation => "resource_starvation",
+            ScenarioId::ProtocolDrift => "protocol_drift",
         }
     }
     
@@ -130,6 +160,10 @@ impl ScenarioId {
             ScenarioId::TimeTornado => "🔥 5-SECOND DELAYS: extreme OOSM stress",
             ScenarioId::ZombieApocalypse => "🔥 50% BAD ACTORS: can good agents survive?",
             ScenarioId::RapidFire => "🔥 100Hz TICK RATE: high-frequency stress test",
+            // Evolutionary
+            ScenarioId::EvoWar => "🧬 Evolution vs Chaos: agents adapt parameters to survive",
+            ScenarioId::ResourceStarvation => "🧬 Bandwidth Constrained: evolve efficiency",
+            ScenarioId::ProtocolDrift => "🧬 Protocol Divergence: one group changes logic",
         }
     }
     
@@ -142,6 +176,15 @@ impl ScenarioId {
             ScenarioId::TimeTornado |
             ScenarioId::ZombieApocalypse |
             ScenarioId::RapidFire
+        )
+    }
+
+    /// Returns true if this is an evolutionary scenario.
+    pub fn is_evolutionary(&self) -> bool {
+        matches!(self,
+            ScenarioId::EvoWar |
+            ScenarioId::ResourceStarvation |
+            ScenarioId::ProtocolDrift
         )
     }
 }
@@ -171,8 +214,13 @@ impl std::str::FromStr for ScenarioId {
             "time_tornado" | "timetornado" | "dst-011" => Ok(ScenarioId::TimeTornado),
             "zombie_apocalypse" | "zombieapocalypse" | "dst-012" => Ok(ScenarioId::ZombieApocalypse),
             "rapid_fire" | "rapidfire" | "dst-013" => Ok(ScenarioId::RapidFire),
+            // Evolutionary
+            "evo_war" | "evowar" | "dst-014" => Ok(ScenarioId::EvoWar),
+            "resource_starvation" | "resourcestarvation" | "dst-015" => Ok(ScenarioId::ResourceStarvation),
+            "protocol_drift" | "protocoldrift" | "dst-016" => Ok(ScenarioId::ProtocolDrift),
             // Groups
-            "extreme" => Err("Use --extreme flag for extreme scenarios".to_string()),
+            "extreme" => Err("Use --scenario extreme (or all) for extreme scenarios".to_string()),
+            "evolutionary" => Err("Use --scenario evolutionary (or all) for evolutionary scenarios".to_string()),
             _ => Err(format!("Unknown scenario: {}", s)),
         }
     }

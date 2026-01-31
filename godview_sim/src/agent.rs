@@ -8,6 +8,7 @@
 //! - Adaptive learning (neighbor reputation, track confidence)
 
 use crate::adaptive::AdaptiveState;
+use crate::evolution::EvolutionaryState;
 use crate::context::SimContext;
 use crate::network::SimNetwork;
 use crate::oracle::SensorReading;
@@ -18,6 +19,8 @@ use godview_env::NodeId;
 use nalgebra::Vector3;
 use std::sync::Arc;
 use uuid::Uuid;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
 /// A simulated agent running in the deterministic environment.
 pub struct SimulatedAgent {
@@ -44,6 +47,12 @@ pub struct SimulatedAgent {
     
     /// Adaptive intelligence state (learning)
     adaptive: AdaptiveState,
+    
+    /// Evolutionary state (parameter adaptation)
+    evolution: EvolutionaryState,
+    
+    /// RNG for evolutionary decisions
+    rng: ChaCha8Rng,
 }
 
 impl SimulatedAgent {
@@ -63,6 +72,7 @@ impl SimulatedAgent {
         config: AgentConfig,
     ) -> Self {
         let inner = GodViewAgent::new(context, network, config, root_public_key);
+        let rng = ChaCha8Rng::seed_from_u64(agent_index.wrapping_mul(0xeb0123));
         
         Self {
             inner,
@@ -73,6 +83,8 @@ impl SimulatedAgent {
             recent_packets: Vec::new(),
             gossip_received: 0,
             adaptive: AdaptiveState::new(),
+            evolution: EvolutionaryState::new(),
+            rng,
         }
     }
     
@@ -103,6 +115,28 @@ impl SimulatedAgent {
         self.adaptive.tick(current_time);
     }
     
+    /// Runs a tick of the evolutionary process.
+    ///
+    /// # Arguments
+    /// * `epoch_length_ticks` - How long each evolutionary epoch lasts
+    /// * `ground_truth` - (Optional) Ground truth for calculating error signal
+    ///
+    /// Returns true if parameters were updated (epoch ended).
+    pub fn tick_evolution(&mut self, epoch_length_ticks: u64, ground_truth: Option<&[(u64, Vector3<f64>)]>) -> bool {
+        // Record samples if ground truth is available
+        if let Some(gt) = ground_truth {
+            let error = self.compute_position_error(gt);
+            self.evolution.record_accuracy(error);
+        }
+        
+        // Check if epoch should end
+        if self.inner.tick_count() % epoch_length_ticks == 0 {
+            self.evolution.evolve(&mut self.rng);
+            return true;
+        }
+        false
+    }
+    
     /// Ingests sensor readings from the Oracle and processes through TrackManager.
     ///
     /// Converts each reading into a GlobalHazardPacket and processes it
@@ -121,7 +155,8 @@ impl SimulatedAgent {
                 confidence_score: 0.95,
             };
             
-            // Save for gossip
+            // Save for gossip (subject to evolution params?)
+            // For now, always save, but gossip logic determines sending frequency
             self.recent_packets.push(packet.clone());
             
             // Process through TrackManager
@@ -147,6 +182,11 @@ impl SimulatedAgent {
         }
         
         for packet in packets {
+            // Apply evolutionary confidence threshold
+            if packet.confidence_score < self.evolution.current_params.confidence_threshold {
+                continue;
+            }
+
             self.gossip_received += 1;
             
             // Check if we already have this track with high confidence
@@ -185,6 +225,21 @@ impl SimulatedAgent {
     /// Clears recent packets after gossip round.
     pub fn clear_recent_packets(&mut self) {
         self.recent_packets.clear();
+    }
+    
+    /// Records a message sent metric for evolution.
+    pub fn record_message_sent_metric(&mut self) {
+        self.evolution.record_message_sent();
+    }
+    
+    /// Returns current gossip interval in ticks (evolved).
+    pub fn gossip_interval(&self) -> u64 {
+        self.evolution.current_params.gossip_interval_ticks
+    }
+    
+    /// Returns max gossip neighbors (evolved).
+    pub fn max_gossip_neighbors(&self) -> usize {
+        self.evolution.current_params.max_neighbors_gossip
     }
     
     /// Returns total gossip packets received.
@@ -271,6 +326,11 @@ impl SimulatedAgent {
     /// Returns a reference to the adaptive state.
     pub fn adaptive_state(&self) -> &AdaptiveState {
         &self.adaptive
+    }
+    
+    /// Returns a reference to the evolutionary state.
+    pub fn evolutionary_state(&self) -> &EvolutionaryState {
+        &self.evolution
     }
 
     /// Computes position error against ground truth.

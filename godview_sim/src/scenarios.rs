@@ -17,6 +17,9 @@ pub enum ScenarioId {
     
     /// DST-005: High packet loss recovery
     SlowLoris,
+    
+    /// DST-006: 50-agent multi-agent scale test
+    Swarm,
 }
 
 impl ScenarioId {
@@ -28,6 +31,7 @@ impl ScenarioId {
             ScenarioId::Byzantine,
             ScenarioId::FlashMob,
             ScenarioId::SlowLoris,
+            ScenarioId::Swarm,
         ]
     }
     
@@ -39,6 +43,7 @@ impl ScenarioId {
             ScenarioId::Byzantine => "byzantine",
             ScenarioId::FlashMob => "flash_mob",
             ScenarioId::SlowLoris => "slow_loris",
+            ScenarioId::Swarm => "swarm",
         }
     }
     
@@ -50,6 +55,7 @@ impl ScenarioId {
             ScenarioId::Byzantine => "Malicious agent with delayed revocation propagation",
             ScenarioId::FlashMob => "1000 drones crossing H3 boundaries rapidly",
             ScenarioId::SlowLoris => "50% packet loss, verify protocol recovery",
+            ScenarioId::Swarm => "50 agents, 200 entities, P2P gossip, convergence test",
         }
     }
 }
@@ -70,7 +76,9 @@ impl std::str::FromStr for ScenarioId {
             "byzantine" | "dst-003" => Ok(ScenarioId::Byzantine),
             "flash_mob" | "flashmob" | "dst-004" => Ok(ScenarioId::FlashMob),
             "slow_loris" | "slowloris" | "dst-005" => Ok(ScenarioId::SlowLoris),
+            "swarm" | "dst-006" => Ok(ScenarioId::Swarm),
             _ => Err(format!("Unknown scenario: {}", s)),
         }
     }
 }
+

@@ -111,6 +111,7 @@ impl ScenarioRunner {
             ScenarioId::Byzantine => self.run_byzantine(),
             ScenarioId::FlashMob => self.run_flash_mob(),
             ScenarioId::SlowLoris => self.run_slow_loris(),
+            ScenarioId::Swarm => self.run_swarm(),
         }
     }
     
@@ -500,6 +501,174 @@ impl ScenarioRunner {
             final_entity_count: oracle.active_entities().len(),
             failure_reason: if !passed {
                 Some(format!("Unexpected loss rate: {:.1}%", actual_loss_rate * 100.0))
+            } else {
+                None
+            },
+            metrics,
+        }
+    }
+    
+    /// DST-006: Swarm - 50-agent multi-agent scale test.
+    ///
+    /// Tests multi-agent coordination with P2P gossip:
+    /// - 50 agents in 5x10 grid
+    /// - 200 entities moving through space
+    /// - P2P gossip between neighbors every 3 ticks
+    /// - Measures convergence: entity count variance, position error
+    fn run_swarm(&self) -> ScenarioResult {
+        use crate::swarm_network::SwarmNetwork;
+        
+        info!("DST-006: Swarm - 50-Agent Scale Test");
+        
+        let config = crate::swarm_network::SwarmConfig::default();
+        let num_agents = config.rows * config.cols; // 50
+        
+        // Setup shared components
+        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        // Create Oracle with 200 entities
+        let mut oracle = crate::oracle::Oracle::new(physics_seed);
+        for i in 0..config.num_entities {
+            let x = (i % 50) as f64 * 20.0;
+            let y = (i / 50) as f64 * 20.0;
+            let z = 100.0 + (i % 10) as f64 * 10.0;
+            let vx = 10.0 + (i % 5) as f64 * 2.0;
+            let vy = 5.0 * ((i % 3) as f64 - 1.0);
+            oracle.spawn_entity(Vector3::new(x, y, z), Vector3::new(vx, vy, 0.0), "target");
+        }
+        
+        // Create 50 agents
+        let mut agents: Vec<SimulatedAgent> = Vec::with_capacity(num_agents);
+        for i in 0..num_agents {
+            let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+            let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+            
+            let agent = SimulatedAgent::new(
+                context,
+                network,
+                root_key.clone(),
+                i as u64,
+                AgentConfig::default(),
+            );
+            agents.push(agent);
+        }
+        
+        // Create gossip network
+        let mut swarm_network = SwarmNetwork::new_grid(config.rows, config.cols);
+        
+        let dt = 1.0 / config.tick_rate_hz as f64;
+        let target_ticks = (self.max_duration_secs.min(config.duration_secs) * config.tick_rate_hz as f64) as u64;
+        
+        info!("  Agents: {} | Entities: {} | Ticks: {}", num_agents, config.num_entities, target_ticks);
+        
+        // Main simulation loop
+        for tick in 0..target_ticks {
+            // Physics step
+            oracle.step(dt);
+            
+            // Each agent observes entities (simplified: all agents see all entities)
+            // In a real sim, you'd filter by H3 cell proximity
+            let readings = oracle.generate_sensor_readings();
+            
+            // Distribute readings to agents (each gets a random subset based on position)
+            for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                // Each agent sees ~10% of entities (simulating limited sensor range)
+                let agent_readings: Vec<_> = readings.iter()
+                    .enumerate()
+                    .filter(|(entity_idx, _)| {
+                        // Simple visibility: agent i sees entities where (entity_id + agent_id) % 10 < 5
+                        (entity_idx + agent_idx) % 10 < 5
+                    })
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                
+                agent.tick();
+                agent.ingest_readings(&agent_readings);
+            }
+            
+            // Gossip round every N ticks
+            if tick % config.gossip_interval as u64 == 0 {
+                // Collect packets from all agents
+                let all_packets: Vec<_> = agents.iter()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        a.recent_packets().iter().map(move |p| (idx, p.clone()))
+                    })
+                    .collect();
+                
+                // Queue gossip
+                for (from_idx, packet) in all_packets {
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                // Deliver gossip
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    agent.receive_gossip(&incoming);
+                    agent.clear_recent_packets();
+                }
+            }
+            
+            // Progress log every second
+            if tick % config.tick_rate_hz as u64 == 0 && tick > 0 {
+                let avg_tracks: f64 = agents.iter().map(|a| a.track_count() as f64).sum::<f64>() / num_agents as f64;
+                debug!("  t={:.0}s | avg_tracks={:.1} | gossip_msgs={}", 
+                    tick as f64 / config.tick_rate_hz as f64,
+                    avg_tracks,
+                    swarm_network.messages_sent()
+                );
+            }
+        }
+        
+        // Compute convergence metrics
+        let track_counts: Vec<usize> = agents.iter().map(|a| a.track_count()).collect();
+        let mean_count = track_counts.iter().sum::<usize>() as f64 / num_agents as f64;
+        let variance = track_counts.iter()
+            .map(|&c| (c as f64 - mean_count).powi(2))
+            .sum::<f64>() / num_agents as f64;
+        let std_dev = variance.sqrt();
+        let coefficient_of_variation = if mean_count > 0.0 { std_dev / mean_count } else { 1.0 };
+        
+        // Compute average RMS error across agents
+        let ground_truth = oracle.ground_truth_positions();
+        let total_rms: f64 = agents.iter()
+            .map(|a| a.compute_position_error(&ground_truth))
+            .sum();
+        let avg_rms_error = total_rms / num_agents as f64;
+        
+        // Total gossip stats
+        let total_gossip: u64 = agents.iter().map(|a| a.gossip_received()).sum();
+        
+        // Check pass criteria
+        let variance_ok = coefficient_of_variation < config.max_variance;
+        let error_ok = avg_rms_error < config.max_position_error;
+        let passed = variance_ok && error_ok;
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  Agents: {} | Entities: {} | P2P Messages: {}", num_agents, config.num_entities, swarm_network.messages_sent());
+        info!("  CONVERGENCE METRICS:");
+        info!("    Track count (mean):     {:.1}", mean_count);
+        info!("    Track count (CV):       {:.1}%  {}", coefficient_of_variation * 100.0, if variance_ok { "✓" } else { "✗" });
+        info!("    Avg RMS error:          {:.2}m  {}", avg_rms_error, if error_ok { "✓" } else { "✗" });
+        info!("    Total gossip received:  {}", total_gossip);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        let mut metrics = ScenarioMetrics::default();
+        metrics.packets_sent = swarm_network.messages_sent();
+        
+        ScenarioResult {
+            scenario: ScenarioId::Swarm,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed {
+                Some(format!("CV={:.1}% (max {}%), RMS={:.2}m (max {})", 
+                    coefficient_of_variation * 100.0, config.max_variance * 100.0,
+                    avg_rms_error, config.max_position_error))
             } else {
                 None
             },

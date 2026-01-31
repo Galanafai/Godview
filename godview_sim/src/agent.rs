@@ -33,6 +33,12 @@ pub struct SimulatedAgent {
     
     /// Metrics: total tracks created
     tracks_created: u64,
+    
+    /// Recent packets for gossip (cleared each round)
+    recent_packets: Vec<GlobalHazardPacket>,
+    
+    /// Total gossip packets received
+    gossip_received: u64,
 }
 
 impl SimulatedAgent {
@@ -59,6 +65,8 @@ impl SimulatedAgent {
             entity_track_map: std::collections::HashMap::new(),
             readings_processed: 0,
             tracks_created: 0,
+            recent_packets: Vec::new(),
+            gossip_received: 0,
         }
     }
     
@@ -90,6 +98,9 @@ impl SimulatedAgent {
                 confidence_score: 0.95,
             };
             
+            // Save for gossip
+            self.recent_packets.push(packet.clone());
+            
             // Process through TrackManager
             match self.inner.track_manager.process_packet(&packet) {
                 Ok(_track_id) => {
@@ -100,6 +111,36 @@ impl SimulatedAgent {
                 }
             }
         }
+    }
+    
+    /// Receives gossip packets from neighbors and processes them.
+    pub fn receive_gossip(&mut self, packets: &[GlobalHazardPacket]) {
+        for packet in packets {
+            self.gossip_received += 1;
+            
+            // Process through TrackManager (from neighbor's observation)
+            match self.inner.track_manager.process_packet(packet) {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::trace!("Gossip packet error: {:?}", e);
+                }
+            }
+        }
+    }
+    
+    /// Returns recent packets for sharing (since last clear).
+    pub fn recent_packets(&self) -> &[GlobalHazardPacket] {
+        &self.recent_packets
+    }
+    
+    /// Clears recent packets after gossip round.
+    pub fn clear_recent_packets(&mut self) {
+        self.recent_packets.clear();
+    }
+    
+    /// Returns total gossip packets received.
+    pub fn gossip_received(&self) -> u64 {
+        self.gossip_received
     }
     
     /// Gets or creates a deterministic UUID for an entity.

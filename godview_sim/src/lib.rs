@@ -57,6 +57,7 @@ mod agent;
 mod runner;
 pub mod visualizer;
 pub mod exporter;
+pub mod swarm_network;
 
 pub use context::SimContext;
 pub use world::{SimWorld, SimConfig};
@@ -67,4 +68,6 @@ pub use agent::SimulatedAgent;
 pub use runner::{ScenarioRunner, ScenarioResult, ScenarioMetrics};
 pub use visualizer::RerunLogger;
 pub use exporter::{SimExport, SimFrame, EntityPosition, AgentFrame, TrackPosition, SimEvent};
+pub use swarm_network::{SwarmNetwork, SwarmConfig};
+
 

@@ -977,7 +977,7 @@ mod tests {
         let mut manager = TrackManager::with_defaults();
         let packet = sample_packet();
         
-        let result = manager.process_packet(&packet);
+        let result = manager.process_packet(&packet, None, None);
         assert!(result.is_ok());
         
         let track_id = result.unwrap();
@@ -998,7 +998,7 @@ mod tests {
             timestamp: 1703001600.0,
             confidence_score: 0.9,
         };
-        let track_id1 = manager.process_packet(&packet1).unwrap();
+        let track_id1 = manager.process_packet(&packet1, None, None).unwrap();
         
         // Second packet at very similar position should associate
         let packet2 = GlobalHazardPacket {
@@ -1009,7 +1009,7 @@ mod tests {
             timestamp: 1703001601.0,
             confidence_score: 0.85,
         };
-        let track_id2 = manager.process_packet(&packet2).unwrap();
+        let track_id2 = manager.process_packet(&packet2, None, None).unwrap();
         
         // Should still be 1 track (associated)
         assert_eq!(manager.track_count(), 1);
@@ -1037,7 +1037,7 @@ mod tests {
             timestamp: 1703001600.0,
             confidence_score: 0.9,
         };
-        manager.process_packet(&packet1).unwrap();
+        manager.process_packet(&packet1, None, None).unwrap();
         
         // Second packet: Pedestrian at same location
         let packet2 = GlobalHazardPacket {
@@ -1048,7 +1048,7 @@ mod tests {
             timestamp: 1703001600.0,
             confidence_score: 0.9,
         };
-        manager.process_packet(&packet2).unwrap();
+        manager.process_packet(&packet2, None, None).unwrap();
         
         // Should be 2 separate tracks (class mismatch prevents association)
         assert_eq!(manager.track_count(), 2);

@@ -106,6 +106,10 @@ impl ScenarioRunner {
     pub fn run(&self, scenario: ScenarioId) -> ScenarioResult {
         info!("Starting scenario: {} (seed={})", scenario.name(), self.seed);
         
+        if scenario.is_extreme() {
+            warn!("🔥 EXTREME SCENARIO - Pushing to the limit!");
+        }
+        
         match scenario {
             ScenarioId::TimeWarp => self.run_time_warp(),
             ScenarioId::SplitBrain => self.run_split_brain(),
@@ -114,6 +118,13 @@ impl ScenarioRunner {
             ScenarioId::SlowLoris => self.run_slow_loris(),
             ScenarioId::Swarm => self.run_swarm(),
             ScenarioId::AdaptiveSwarm => self.run_adaptive_swarm(),
+            // Extreme scenarios
+            ScenarioId::ChaosStorm => self.run_chaos_storm(),
+            ScenarioId::ScaleLimit => self.run_scale_limit(),
+            ScenarioId::NetworkHell => self.run_network_hell(),
+            ScenarioId::TimeTornado => self.run_time_tornado(),
+            ScenarioId::ZombieApocalypse => self.run_zombie_apocalypse(),
+            ScenarioId::RapidFire => self.run_rapid_fire(),
         }
     }
     
@@ -961,6 +972,716 @@ impl ScenarioRunner {
                 None
             },
             metrics,
+        }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // EXTREME CHAOS SCENARIOS - Push GodView to its absolute limits!
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// DST-008: ChaosStorm - Everything bad at once.
+    ///
+    /// Combines: jitter + 30% packet loss + bad actors + moving entities
+    fn run_chaos_storm(&self) -> ScenarioResult {
+        use crate::swarm_network::SwarmNetwork;
+        use rand::SeedableRng;
+        use rand::Rng;
+        use rand_chacha::ChaCha8Rng;
+        
+        info!("DST-008: ChaosStorm - EVERYTHING AT ONCE 🔥");
+        
+        let num_agents = 50;
+        let num_entities = 200;
+        let num_bad_actors = 5;
+        let packet_loss_rate = 0.30; // 30% loss
+        let max_jitter_ms = 500.0;
+        
+        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        let mut rng = ChaCha8Rng::seed_from_u64(self.seed.wrapping_mul(0xcafe8080));
+        
+        // Create Oracle with MOVING entities
+        let mut oracle = Oracle::new(physics_seed);
+        for i in 0..num_entities {
+            let x = (i % 50) as f64 * 20.0;
+            let y = (i / 50) as f64 * 20.0;
+            let z = 100.0 + (i % 10) as f64 * 10.0;
+            // Fast moving entities in random directions
+            let vx = (rng.gen::<f64>() - 0.5) * 40.0;
+            let vy = (rng.gen::<f64>() - 0.5) * 40.0;
+            let vz = (rng.gen::<f64>() - 0.5) * 10.0;
+            oracle.spawn_entity(Vector3::new(x, y, z), Vector3::new(vx, vy, vz), "chaos_target");
+        }
+        
+        // Create agents
+        let mut agents: Vec<SimulatedAgent> = Vec::with_capacity(num_agents);
+        for i in 0..num_agents {
+            let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+            let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+            agents.push(SimulatedAgent::new(
+                context,
+                network,
+                root_key.clone(),
+                i as u64,
+                AgentConfig::default(),
+            ));
+        }
+        
+        // Designate bad actors
+        let bad_actor_ids: Vec<usize> = (0..num_bad_actors).map(|i| i * 10).collect();
+        
+        let mut swarm_network = SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1; // 10 Hz
+        let target_ticks = (self.max_duration_secs.min(30.0) * 10.0) as u64;
+        
+        let mut packets_sent = 0u64;
+        let mut packets_dropped = 0u64;
+        
+        info!("  Config: {} agents, {} entities, {}% loss, {}ms jitter, {} bad actors",
+            num_agents, num_entities, (packet_loss_rate * 100.0) as u32, 
+            max_jitter_ms as u32, num_bad_actors);
+        
+        for tick in 0..target_ticks {
+            // Physics - entities are MOVING
+            oracle.step(dt);
+            
+            let readings = oracle.generate_sensor_readings();
+            
+            for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                // Apply jitter: some readings arrive with delay (simulated by not processing)
+                let jitter_skip = rng.gen::<f64>() < 0.2; // 20% delayed
+                
+                if !jitter_skip {
+                    let agent_readings: Vec<_> = readings.iter()
+                        .enumerate()
+                        .filter(|(entity_idx, _)| (entity_idx + agent_idx) % 4 < 2)
+                        .map(|(_, r)| r.clone())
+                        .collect();
+                    
+                    agent.tick();
+                    agent.ingest_readings(&agent_readings);
+                }
+            }
+            
+            // Gossip with packet loss
+            if tick % 5 == 0 {
+                let all_packets: Vec<_> = agents.iter()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        let mut packets: Vec<_> = a.recent_packets().iter()
+                            .map(|p| (idx, p.clone()))
+                            .collect();
+                        
+                        // Bad actors inject garbage
+                        if bad_actor_ids.contains(&idx) {
+                            for _ in 0..3 {
+                                let garbage = godview_core::godview_tracking::GlobalHazardPacket {
+                                    entity_id: Uuid::new_v4(),
+                                    position: [rng.gen_range(-500.0..500.0), rng.gen_range(-500.0..500.0), rng.gen_range(0.0..500.0)],
+                                    velocity: [0.0, 0.0, 0.0],
+                                    class_id: 99,
+                                    timestamp: tick as f64 * dt,
+                                    confidence_score: 0.1,
+                                };
+                                packets.push((idx, garbage));
+                            }
+                        }
+                        packets
+                    })
+                    .collect();
+                
+                for (from_idx, packet) in all_packets {
+                    packets_sent += 1;
+                    // Apply packet loss
+                    if rng.gen::<f64>() < packet_loss_rate {
+                        packets_dropped += 1;
+                        continue;
+                    }
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    let neighbors = swarm_network.neighbors(agent_idx);
+                    if !neighbors.is_empty() && !incoming.is_empty() {
+                        let per = incoming.len() / neighbors.len().max(1);
+                        for (i, neighbor_id) in neighbors.iter().enumerate() {
+                            let start = i * per;
+                            let end = ((i + 1) * per).min(incoming.len());
+                            if start < end {
+                                agent.receive_gossip_from(*neighbor_id, &incoming[start..end]);
+                            }
+                        }
+                    }
+                    agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        // Measure: Did we survive? What's the error?
+        let ground_truth = oracle.ground_truth_positions();
+        let good_agent_rms: Vec<f64> = agents.iter().enumerate()
+            .filter(|(idx, _)| !bad_actor_ids.contains(idx))
+            .map(|(_, a)| a.compute_position_error(&ground_truth))
+            .collect();
+        let avg_rms_error = good_agent_rms.iter().sum::<f64>() / good_agent_rms.len().max(1) as f64;
+        
+        let loss_rate = if packets_sent > 0 { packets_dropped as f64 / packets_sent as f64 } else { 0.0 };
+        let passed = avg_rms_error < 10.0; // Relaxed threshold for chaos
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  CHAOS STORM RESULTS:");
+        info!("    RMS error:     {:.2}m  {}", avg_rms_error, if passed { "✓" } else { "✗" });
+        info!("    Packet loss:   {:.0}%", loss_rate * 100.0);
+        info!("    Messages:      {} sent, {} dropped", packets_sent, packets_dropped);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        let mut metrics = ScenarioMetrics::default();
+        metrics.packets_sent = packets_sent;
+        metrics.packets_dropped = packets_dropped;
+        
+        ScenarioResult {
+            scenario: ScenarioId::ChaosStorm,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed { Some(format!("RMS {:.2}m > 10m limit", avg_rms_error)) } else { None },
+            metrics,
+        }
+    }
+    
+    /// DST-009: ScaleLimit - 200 agents, 1000 entities.
+    fn run_scale_limit(&self) -> ScenarioResult {
+        use crate::swarm_network::SwarmNetwork;
+        
+        info!("DST-009: ScaleLimit - 200 AGENTS, 1000 ENTITIES 🔥");
+        
+        let num_agents = 200;
+        let num_entities = 1000;
+        
+        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        let mut oracle = Oracle::new(physics_seed);
+        for i in 0..num_entities {
+            let x = (i % 100) as f64 * 10.0;
+            let y = (i / 100) as f64 * 10.0;
+            let z = 50.0 + (i % 20) as f64 * 5.0;
+            oracle.spawn_entity(Vector3::new(x, y, z), Vector3::new(5.0, 2.0, 0.0), "scale_target");
+        }
+        
+        // Create 200 agents in 10x20 grid
+        let mut agents: Vec<SimulatedAgent> = Vec::with_capacity(num_agents);
+        for i in 0..num_agents {
+            let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+            let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+            agents.push(SimulatedAgent::new(
+                context,
+                network,
+                root_key.clone(),
+                i as u64,
+                AgentConfig::default(),
+            ));
+        }
+        
+        let mut swarm_network = SwarmNetwork::new_grid(10, 20);
+        let dt = 0.1;
+        let target_ticks = (self.max_duration_secs.min(20.0) * 10.0) as u64;
+        
+        let start_time = std::time::Instant::now();
+        
+        info!("  Config: {} agents, {} entities, {}s", num_agents, num_entities, target_ticks as f64 * dt);
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            
+            for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                // Each agent sees ~20% of entities
+                let agent_readings: Vec<_> = readings.iter()
+                    .enumerate()
+                    .filter(|(entity_idx, _)| (entity_idx + agent_idx * 7) % 5 == 0)
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                
+                agent.tick();
+                agent.ingest_readings(&agent_readings);
+            }
+            
+            // Gossip every 10 ticks
+            if tick % 10 == 0 {
+                let all_packets: Vec<_> = agents.iter()
+                    .enumerate()
+                    .flat_map(|(idx, a)| a.recent_packets().iter().map(|p| (idx, p.clone())).collect::<Vec<_>>())
+                    .collect();
+                
+                for (from_idx, packet) in all_packets {
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    agent.receive_gossip(&incoming);
+                    agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        let elapsed = start_time.elapsed();
+        let ticks_per_sec = target_ticks as f64 / elapsed.as_secs_f64();
+        
+        let ground_truth = oracle.ground_truth_positions();
+        let avg_rms: f64 = agents.iter().map(|a| a.compute_position_error(&ground_truth)).sum::<f64>() / num_agents as f64;
+        
+        let passed = avg_rms < 5.0 && ticks_per_sec > 10.0; // Must run at >10 ticks/sec real-time
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  SCALE LIMIT RESULTS:");
+        info!("    RMS error:      {:.2}m  {}", avg_rms, if avg_rms < 5.0 { "✓" } else { "✗" });
+        info!("    Performance:    {:.1} ticks/sec  {}", ticks_per_sec, if ticks_per_sec > 10.0 { "✓" } else { "✗" });
+        info!("    Wall time:      {:.2}s", elapsed.as_secs_f64());
+        info!("    Messages:       {}", swarm_network.messages_sent());
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        let mut metrics = ScenarioMetrics::default();
+        metrics.packets_sent = swarm_network.messages_sent();
+        
+        ScenarioResult {
+            scenario: ScenarioId::ScaleLimit,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed { Some(format!("RMS={:.2}m, perf={:.1}tps", avg_rms, ticks_per_sec)) } else { None },
+            metrics,
+        }
+    }
+    
+    /// DST-010: NetworkHell - 90% packet loss.
+    fn run_network_hell(&self) -> ScenarioResult {
+        use crate::swarm_network::SwarmNetwork;
+        use rand::SeedableRng;
+        use rand::Rng;
+        use rand_chacha::ChaCha8Rng;
+        
+        info!("DST-010: NetworkHell - 90% PACKET LOSS 🔥");
+        
+        let num_agents = 50;
+        let packet_loss_rate = 0.90;
+        
+        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        let mut rng = ChaCha8Rng::seed_from_u64(self.seed.wrapping_mul(0xbe11be11));
+        
+        let mut oracle = Oracle::new(physics_seed);
+        for i in 0..200 {
+            oracle.spawn_entity(
+                Vector3::new((i % 20) as f64 * 50.0, (i / 20) as f64 * 50.0, 100.0),
+                Vector3::new(10.0, 5.0, 0.0),
+                "hell_target",
+            );
+        }
+        
+        let mut agents: Vec<SimulatedAgent> = (0..num_agents)
+            .map(|i| {
+                let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+                let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+                SimulatedAgent::new(context, network, root_key.clone(), i as u64, AgentConfig::default())
+            })
+            .collect();
+        
+        let mut swarm_network = SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1;
+        let target_ticks = (self.max_duration_secs.min(30.0) * 10.0) as u64;
+        
+        let mut packets_sent = 0u64;
+        let mut packets_dropped = 0u64;
+        
+        info!("  Config: {} agents, {}% packet loss", num_agents, (packet_loss_rate * 100.0) as u32);
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            
+            for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                let agent_readings: Vec<_> = readings.iter()
+                    .enumerate()
+                    .filter(|(entity_idx, _)| (entity_idx + agent_idx) % 4 == 0)
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                
+                agent.tick();
+                agent.ingest_readings(&agent_readings);
+            }
+            
+            if tick % 5 == 0 {
+                let all_packets: Vec<_> = agents.iter()
+                    .enumerate()
+                    .flat_map(|(idx, a)| a.recent_packets().iter().map(|p| (idx, p.clone())).collect::<Vec<_>>())
+                    .collect();
+                
+                for (from_idx, packet) in all_packets {
+                    packets_sent += 1;
+                    if rng.gen::<f64>() < packet_loss_rate {
+                        packets_dropped += 1;
+                        continue;
+                    }
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    agent.receive_gossip(&incoming);
+                    agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        let ground_truth = oracle.ground_truth_positions();
+        let avg_rms: f64 = agents.iter().map(|a| a.compute_position_error(&ground_truth)).sum::<f64>() / num_agents as f64;
+        
+        let actual_loss = packets_dropped as f64 / packets_sent.max(1) as f64;
+        
+        // With 90% loss, we're just testing survival and some coherence
+        let passed = avg_rms < 50.0; // Very relaxed - just don't go crazy
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  NETWORK HELL RESULTS:");
+        info!("    RMS error:     {:.2}m  {}", avg_rms, if passed { "✓ (survived!)" } else { "✗" });
+        info!("    Packet loss:   {:.0}% ({} / {})", actual_loss * 100.0, packets_dropped, packets_sent);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        let mut metrics = ScenarioMetrics::default();
+        metrics.packets_sent = packets_sent;
+        metrics.packets_dropped = packets_dropped;
+        
+        ScenarioResult {
+            scenario: ScenarioId::NetworkHell,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed { Some(format!("RMS {:.2}m too high", avg_rms)) } else { None },
+            metrics,
+        }
+    }
+    
+    /// DST-011: TimeTornado - 5-second OOSM delays.
+    fn run_time_tornado(&self) -> ScenarioResult {
+        use rand::SeedableRng;
+        use rand::Rng;
+        use rand_chacha::ChaCha8Rng;
+        
+        info!("DST-011: TimeTornado - 5-SECOND OOSM DELAYS 🔥");
+        
+        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        let mut rng = ChaCha8Rng::seed_from_u64(self.seed.wrapping_mul(0xabed0abed));
+        
+        let context = Arc::new(SimContext::new(self.seed));
+        let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(0)));
+        let mut agent = SimulatedAgent::new(context, network, root_key, 0, AgentConfig::default());
+        
+        let mut oracle = Oracle::new(physics_seed);
+        oracle.spawn_entity(Vector3::new(0.0, 0.0, 100.0), Vector3::new(20.0, 10.0, 0.0), "tornado_target");
+        
+        let dt = 0.1;
+        let max_delay_secs = 5.0;
+        let target_ticks = (self.max_duration_secs.min(60.0) * 10.0) as u64;
+        
+        // Buffer for delayed readings
+        let mut delayed_queue: Vec<(u64, crate::oracle::SensorReading)> = Vec::new();
+        let mut oosm_count = 0u64;
+        
+        info!("  Config: max delay {}s, duration {}s", max_delay_secs, target_ticks as f64 * dt);
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            
+            // Add current readings to queue with random delay
+            for reading in readings {
+                let delay_ticks = (rng.gen::<f64>() * max_delay_secs / dt) as u64;
+                let delivery_tick = tick + delay_ticks;
+                delayed_queue.push((delivery_tick, reading));
+            }
+            
+            // Deliver readings whose time has come (simulating OOSM)
+            delayed_queue.sort_by_key(|(t, _)| std::cmp::Reverse(*t));
+            while let Some((delivery_tick, _)) = delayed_queue.last() {
+                if *delivery_tick <= tick {
+                    let (_, reading) = delayed_queue.pop().unwrap();
+                    agent.tick();
+                    agent.ingest_readings(&[reading]);
+                    oosm_count += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        
+        // Drain remaining queue
+        for (_, reading) in delayed_queue.drain(..) {
+            agent.tick();
+            agent.ingest_readings(&[reading]);
+            oosm_count += 1;
+        }
+        
+        let ground_truth = oracle.ground_truth_positions();
+        let rms_error = agent.compute_position_error(&ground_truth);
+        
+        // With 5s delays on a moving target, some error is expected
+        let passed = rms_error < 100.0 && oosm_count > 0;
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  TIME TORNADO RESULTS:");
+        info!("    RMS error:      {:.2}m  {}", rms_error, if passed { "✓" } else { "✗" });
+        info!("    OOSM updates:   {}", oosm_count);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        let mut metrics = ScenarioMetrics::default();
+        metrics.oosm_updates = oosm_count;
+        
+        ScenarioResult {
+            scenario: ScenarioId::TimeTornado,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: 1,
+            failure_reason: if !passed { Some(format!("RMS {:.2}m", rms_error)) } else { None },
+            metrics,
+        }
+    }
+    
+    /// DST-012: ZombieApocalypse - 50% of agents are bad actors.
+    fn run_zombie_apocalypse(&self) -> ScenarioResult {
+        use crate::swarm_network::SwarmNetwork;
+        use rand::SeedableRng;
+        use rand::Rng;
+        use rand_chacha::ChaCha8Rng;
+        
+        info!("DST-012: ZombieApocalypse - 50% BAD ACTORS 🔥");
+        
+        let num_agents = 50;
+        let num_bad_actors = 25; // Half!
+        
+        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        let mut rng = ChaCha8Rng::seed_from_u64(self.seed.wrapping_mul(0xdead0dead));
+        
+        let mut oracle = Oracle::new(physics_seed);
+        for i in 0..200 {
+            oracle.spawn_entity(
+                Vector3::new((i % 20) as f64 * 50.0, (i / 20) as f64 * 50.0, 100.0),
+                Vector3::new(10.0, 5.0, 0.0),
+                "survivor_target",
+            );
+        }
+        
+        let mut agents: Vec<SimulatedAgent> = (0..num_agents)
+            .map(|i| {
+                let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+                let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+                SimulatedAgent::new(context, network, root_key.clone(), i as u64, AgentConfig::default())
+            })
+            .collect();
+        
+        // First half are zombies (bad actors)
+        let bad_actor_ids: Vec<usize> = (0..num_bad_actors).collect();
+        
+        let mut swarm_network = SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1;
+        let target_ticks = (self.max_duration_secs.min(30.0) * 10.0) as u64;
+        
+        info!("  Config: {} agents, {} zombies ({}%)", num_agents, num_bad_actors, num_bad_actors * 100 / num_agents);
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            
+            for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                let agent_readings: Vec<_> = readings.iter()
+                    .enumerate()
+                    .filter(|(entity_idx, _)| (entity_idx + agent_idx) % 4 < 2)
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                
+                agent.tick();
+                agent.ingest_readings(&agent_readings);
+            }
+            
+            if tick % 5 == 0 {
+                let all_packets: Vec<_> = agents.iter()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        let mut packets: Vec<_> = a.recent_packets().iter()
+                            .map(|p| (idx, p.clone()))
+                            .collect();
+                        
+                        // Zombies inject lots of garbage
+                        if bad_actor_ids.contains(&idx) {
+                            for _ in 0..10 { // 10 garbage packets each!
+                                let garbage = godview_core::godview_tracking::GlobalHazardPacket {
+                                    entity_id: Uuid::new_v4(),
+                                    position: [rng.gen_range(-1000.0..1000.0), rng.gen_range(-1000.0..1000.0), rng.gen_range(0.0..500.0)],
+                                    velocity: [rng.gen_range(-100.0..100.0), rng.gen_range(-100.0..100.0), 0.0],
+                                    class_id: 99,
+                                    timestamp: tick as f64 * dt,
+                                    confidence_score: rng.gen_range(0.0..0.5),
+                                };
+                                packets.push((idx, garbage));
+                            }
+                        }
+                        packets
+                    })
+                    .collect();
+                
+                for (from_idx, packet) in all_packets {
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    let neighbors = swarm_network.neighbors(agent_idx);
+                    if !neighbors.is_empty() && !incoming.is_empty() {
+                        let per = incoming.len() / neighbors.len().max(1);
+                        for (i, neighbor_id) in neighbors.iter().enumerate() {
+                            let start = i * per;
+                            let end = ((i + 1) * per).min(incoming.len());
+                            if start < end {
+                                agent.receive_gossip_from(*neighbor_id, &incoming[start..end]);
+                            }
+                        }
+                    }
+                    agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        // Only measure GOOD agents (survivors)
+        let ground_truth = oracle.ground_truth_positions();
+        let good_agent_rms: Vec<f64> = agents.iter().enumerate()
+            .filter(|(idx, _)| !bad_actor_ids.contains(idx))
+            .map(|(_, a)| a.compute_position_error(&ground_truth))
+            .collect();
+        let avg_rms = good_agent_rms.iter().sum::<f64>() / good_agent_rms.len().max(1) as f64;
+        
+        // Count zombies identified by survivors
+        let mut zombies_identified = 0;
+        let mut possible_detections = 0;
+        for (agent_idx, agent) in agents.iter().enumerate() {
+            if bad_actor_ids.contains(&agent_idx) { continue; }
+            let neighbors = swarm_network.neighbors(agent_idx);
+            for &zombie_id in &bad_actor_ids {
+                if neighbors.contains(&zombie_id) {
+                    possible_detections += 1;
+                    if let Some(rep) = agent.adaptive_state().neighbor_reputations.get(&zombie_id) {
+                        if rep.reliability_score < 0.3 {
+                            zombies_identified += 1;
+                        }
+                    }
+                }
+            }
+        }
+        
+        let detection_rate = if possible_detections > 0 { zombies_identified as f64 / possible_detections as f64 } else { 0.0 };
+        let passed = avg_rms < 10.0 && detection_rate > 0.2;
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  ZOMBIE APOCALYPSE RESULTS:");
+        info!("    Survivor RMS:    {:.2}m  {}", avg_rms, if avg_rms < 10.0 { "✓" } else { "✗" });
+        info!("    Zombie detection: {:.0}%  {}", detection_rate * 100.0, if detection_rate > 0.2 { "✓" } else { "✗" });
+        info!("    Zombies spotted: {} / {}", zombies_identified, possible_detections);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        let mut metrics = ScenarioMetrics::default();
+        metrics.packets_sent = swarm_network.messages_sent();
+        
+        ScenarioResult {
+            scenario: ScenarioId::ZombieApocalypse,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed { Some(format!("RMS={:.2}m, detection={:.0}%", avg_rms, detection_rate * 100.0)) } else { None },
+            metrics,
+        }
+    }
+    
+    /// DST-013: RapidFire - 100Hz tick rate.
+    fn run_rapid_fire(&self) -> ScenarioResult {
+        info!("DST-013: RapidFire - 100Hz TICK RATE 🔥");
+        
+        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        let context = Arc::new(SimContext::new(self.seed));
+        let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(0)));
+        let mut agent = SimulatedAgent::new(context, network, root_key, 0, AgentConfig::default());
+        
+        let mut oracle = Oracle::new(physics_seed);
+        for i in 0..10 {
+            oracle.spawn_entity(
+                Vector3::new(i as f64 * 100.0, 0.0, 100.0),
+                Vector3::new(50.0, 25.0 * ((i % 2) as f64 * 2.0 - 1.0), 0.0),
+                "rapid_target",
+            );
+        }
+        
+        let tick_rate = 100.0; // 100 Hz
+        let dt = 1.0 / tick_rate;
+        let sim_duration = self.max_duration_secs.min(10.0); // Max 10s for speed
+        let target_ticks = (sim_duration * tick_rate) as u64;
+        
+        let start_time = std::time::Instant::now();
+        
+        info!("  Config: {}Hz tick rate, {} ticks, {}s sim time", tick_rate, target_ticks, sim_duration);
+        
+        for _tick in 0..target_ticks {
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            agent.tick();
+            agent.ingest_readings(&readings);
+        }
+        
+        let elapsed = start_time.elapsed();
+        let actual_rate = target_ticks as f64 / elapsed.as_secs_f64();
+        
+        let ground_truth = oracle.ground_truth_positions();
+        let rms_error = agent.compute_position_error(&ground_truth);
+        
+        // Must run at least 50% of target rate and maintain accuracy
+        let passed = rms_error < 3.0 && actual_rate > tick_rate * 0.5;
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  RAPID FIRE RESULTS:");
+        info!("    RMS error:    {:.2}m  {}", rms_error, if rms_error < 3.0 { "✓" } else { "✗" });
+        info!("    Target rate:  {}Hz", tick_rate);
+        info!("    Actual rate:  {:.0}Hz  {}", actual_rate, if actual_rate > tick_rate * 0.5 { "✓" } else { "✗" });
+        info!("    Wall time:    {:.3}s", elapsed.as_secs_f64());
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        ScenarioResult {
+            scenario: ScenarioId::RapidFire,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed { Some(format!("RMS={:.2}m, rate={:.0}Hz", rms_error, actual_rate)) } else { None },
+            metrics: ScenarioMetrics::default(),
         }
     }
 }

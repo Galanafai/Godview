@@ -5,8 +5,146 @@
 use clap::Parser;
 use godview_sim::{ScenarioRunner, ScenarioResult};
 use godview_sim::scenarios::ScenarioId;
-use tracing::{info, error, Level};
+use godview_sim::{SimExport, SimFrame, EntityPosition, AgentFrame, TrackPosition};
+use godview_sim::{SimContext, SimNetwork, SimulatedAgent, Oracle, DeterministicKeyProvider, SensorReading};
+use godview_core::AgentConfig;
+use godview_env::NodeId;
+use nalgebra::Vector3;
+use std::sync::Arc;
+use std::time::Duration;
+use tracing::{info, error, debug, Level};
 use tracing_subscriber::FmtSubscriber;
+
+/// Run a scenario with frame-by-frame export for visualization.
+fn run_with_export(
+    seed: u64,
+    _num_agents: usize,
+    scenario: ScenarioId,
+    duration: f64,
+    export_path: &str,
+) -> ScenarioResult {
+    let context_seed = seed;
+    let physics_seed = seed.wrapping_mul(0x9e3779b97f4a7c15);
+    
+    let context = Arc::new(SimContext::new(context_seed));
+    let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(0)));
+    let key_provider = DeterministicKeyProvider::new(seed);
+    let root_key = key_provider.biscuit_root_key().public();
+    
+    let mut oracle = Oracle::new(physics_seed);
+    let mut agent = SimulatedAgent::new(
+        context.clone(),
+        network,
+        root_key,
+        0,
+        AgentConfig::default(),
+    );
+    
+    let mut export = SimExport::new(scenario.name(), seed);
+    
+    // Spawn entities based on scenario
+    let num_entities = match scenario {
+        ScenarioId::FlashMob => 100, // Reduced for visualization
+        _ => 10,
+    };
+    
+    for i in 0..num_entities {
+        let pos = Vector3::new(
+            (i as f64) * 50.0,
+            (i as f64 % 10.0) * 20.0,
+            100.0 + (i as f64) * 5.0,
+        );
+        let vel = Vector3::new(20.0, 5.0 * (i as f64 - 5.0), 0.0);
+        oracle.spawn_entity(pos, vel, "drone");
+    }
+    
+    let tick_rate_hz = 30;
+    let dt = 1.0 / tick_rate_hz as f64;
+    let target_ticks = (duration * tick_rate_hz as f64) as u64;
+    
+    // Export every 10 ticks (3 FPS in Rerun)
+    let export_interval = 10;
+    
+    for tick in 0..target_ticks {
+        oracle.step(dt);
+        context.advance_time(Duration::from_secs_f64(dt));
+        agent.tick();
+        
+        let readings = oracle.generate_sensor_readings();
+        agent.ingest_readings(&readings);
+        
+        // Export frame periodically
+        if tick % export_interval == 0 {
+            let ground_truth: Vec<EntityPosition> = oracle.ground_truth_positions()
+                .into_iter()
+                .map(|(id, pos)| EntityPosition::new(id, pos))
+                .collect();
+            
+            let tracks: Vec<TrackPosition> = agent.track_positions()
+                .into_iter()
+                .map(|(uuid, pos)| TrackPosition {
+                    track_id: uuid.to_string(),
+                    x: pos.x,
+                    y: pos.y,
+                    z: pos.z,
+                })
+                .collect();
+            
+            let gt_for_error = oracle.ground_truth_positions();
+            let rms_error = agent.compute_position_error(&gt_for_error);
+            
+            let frame = SimFrame {
+                time_sec: oracle.time(),
+                ground_truth,
+                agents: vec![AgentFrame {
+                    agent_id: 0,
+                    tracks,
+                    rms_error: Some(rms_error),
+                }],
+                events: vec![],
+            };
+            
+            export.add_frame(frame);
+        }
+        
+        if tick % 30 == 0 {
+            debug!("  t={:.1}s | entities={} | tracks={}", 
+                oracle.time(), 
+                oracle.active_entities().len(),
+                agent.track_count()
+            );
+        }
+    }
+    
+    let ground_truth = oracle.ground_truth_positions();
+    let rms_error = agent.compute_position_error(&ground_truth);
+    let passed = rms_error < 5.0;
+    
+    export.finalize(passed, Some(rms_error));
+    
+    if let Err(e) = export.write_to_file(export_path) {
+        error!("Failed to write export: {:?}", e);
+    } else {
+        info!("Exported {} frames to {}", export.frames.len(), export_path);
+    }
+    
+    ScenarioResult {
+        scenario,
+        seed,
+        passed,
+        total_ticks: target_ticks,
+        final_time_secs: oracle.time(),
+        final_entity_count: oracle.active_entities().len(),
+        failure_reason: if !passed {
+            Some(format!("RMS error {:.2}m exceeds threshold", rms_error))
+        } else {
+            None
+        },
+        metrics: godview_sim::ScenarioMetrics::default(),
+    }
+}
+
+
 
 /// GodView Deterministic Simulation Testing CLI
 #[derive(Parser, Debug)]
@@ -40,6 +178,10 @@ struct Args {
     /// JSON output for CI parsing
     #[arg(long)]
     json: bool,
+    
+    /// Export simulation data to JSON file for Rerun visualization
+    #[arg(long)]
+    export: Option<String>,
 }
 
 fn main() {
@@ -82,6 +224,41 @@ fn main() {
     // Track results
     let mut all_results: Vec<ScenarioResult> = Vec::new();
     let mut failed_count = 0;
+    
+    // Handle --export mode for visualization
+    if let Some(export_path) = &args.export {
+        if scenarios.len() > 1 {
+            eprintln!("Error: --export only supports a single scenario, not 'all'");
+            std::process::exit(1);
+        }
+        
+        info!("Running with export to: {}", export_path);
+        
+        // Run specialized export simulation
+        let result = run_with_export(
+            base_seed, 
+            args.agents, 
+            scenarios[0], 
+            args.duration,
+            export_path,
+        );
+        
+        if result.passed {
+            info!("✓ {} (seed={}) PASSED - exported to {}", 
+                scenarios[0].name(), base_seed, export_path);
+            info!("Visualize with: python godview_sim/visualize.py {}", export_path);
+        } else {
+            error!("✗ {} FAILED: {}", 
+                scenarios[0].name(),
+                result.failure_reason.as_deref().unwrap_or("unknown")
+            );
+        }
+        
+        if !result.passed {
+            std::process::exit(1);
+        }
+        return;
+    }
     
     // Run simulations
     for seed_offset in 0..args.seeds {

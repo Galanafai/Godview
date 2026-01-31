@@ -118,6 +118,9 @@ impl ScenarioRunner {
     ///
     /// Tests the Time Engine's ability to handle out-of-sequence measurements
     /// with 0-500ms jitter and 20% packet reordering.
+    ///
+    /// **Enhanced**: Now processes through full SimulatedAgent → TrackManager pipeline.
+    /// **Assertion**: Track position error < 5m RMS vs ground truth.
     fn run_time_warp(&self) -> ScenarioResult {
         info!("DST-001: TimeWarp - OOSM stress test");
         
@@ -125,8 +128,21 @@ impl ScenarioRunner {
         let context_seed = self.seed;
         let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
         
-        let context = SimContext::shared(context_seed);
+        let context = Arc::new(SimContext::new(context_seed));
+        let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(0)));
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
         let mut oracle = Oracle::new(physics_seed);
+        
+        // Create a SimulatedAgent
+        let mut agent = SimulatedAgent::new(
+            context.clone(),
+            network,
+            root_key,
+            0,
+            AgentConfig::default(),
+        );
         
         // Spawn 10 fast-moving entities
         for i in 0..10 {
@@ -149,28 +165,49 @@ impl ScenarioRunner {
             oracle.step(dt);
             context.advance_time(Duration::from_secs_f64(dt));
             
-            // Generate sensor readings (simulates OOSM with jitter)
-            let readings = oracle.generate_all_readings();
+            // Agent tick (prediction step)
+            agent.tick();
             
-            // Track that we processed readings
+            // Generate sensor readings and ingest through agent
+            let readings = oracle.generate_sensor_readings();
             metrics.oosm_updates += readings.len() as u64;
+            
+            // Process readings through full pipeline
+            agent.ingest_readings(&readings);
             
             // Progress log every 30 ticks (1 second)
             if tick % 30 == 0 {
-                debug!("  t={:.1}s | entities={}", oracle.time(), oracle.active_entities().len());
+                debug!("  t={:.1}s | entities={} | tracks={}", 
+                    oracle.time(), 
+                    oracle.active_entities().len(),
+                    agent.track_count()
+                );
             }
         }
         
-        info!("✓ TimeWarp complete: {} OOSM updates processed", metrics.oosm_updates);
+        // Compute position error against ground truth
+        let ground_truth = oracle.ground_truth_positions();
+        let rms_error = agent.compute_position_error(&ground_truth);
+        
+        // Assertion: RMS error should be < 5m (generous for OOSM stress)
+        let max_acceptable_error = 5.0;
+        let passed = rms_error < max_acceptable_error;
+        
+        info!("✓ TimeWarp complete: {} OOSM updates, {} tracks, RMS error: {:.2}m", 
+            metrics.oosm_updates, agent.track_count(), rms_error);
         
         ScenarioResult {
             scenario: ScenarioId::TimeWarp,
             seed: self.seed,
-            passed: true, // TimeWarp passes if no panics
+            passed,
             total_ticks: target_ticks,
             final_time_secs: oracle.time(),
             final_entity_count: oracle.active_entities().len(),
-            failure_reason: None,
+            failure_reason: if !passed {
+                Some(format!("RMS error {:.2}m exceeds threshold {:.1}m", rms_error, max_acceptable_error))
+            } else {
+                None
+            },
             metrics,
         }
     }

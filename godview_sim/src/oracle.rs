@@ -68,6 +68,19 @@ impl GroundTruthEntity {
     }
 }
 
+/// A sensor reading generated from ground truth with noise.
+#[derive(Debug, Clone)]
+pub struct SensorReading {
+    /// Entity ID this reading corresponds to
+    pub entity_id: u64,
+    
+    /// Noisy position measurement
+    pub position: Vector3<f64>,
+    
+    /// Velocity (typically from derivative or sensor)
+    pub velocity: Vector3<f64>,
+}
+
 /// The Oracle - maintains ground truth and generates sensor readings.
 pub struct Oracle {
     /// Master seed (separate from network to avoid interference)
@@ -193,6 +206,39 @@ impl Oracle {
             .filter_map(|id| {
                 self.generate_sensor_reading(id).map(|pos| (id, pos))
             })
+            .collect()
+    }
+    
+    /// Generates SensorReading structs for all active entities.
+    ///
+    /// This is the preferred method for agent consumption.
+    pub fn generate_sensor_readings(&mut self) -> Vec<SensorReading> {
+        let entity_ids: Vec<(u64, Vector3<f64>)> = self.entities
+            .values()
+            .filter(|e| e.active)
+            .map(|e| (e.id, e.velocity))
+            .collect();
+        
+        entity_ids
+            .into_iter()
+            .filter_map(|(id, velocity)| {
+                self.generate_sensor_reading(id).map(|position| {
+                    SensorReading {
+                        entity_id: id,
+                        position,
+                        velocity,
+                    }
+                })
+            })
+            .collect()
+    }
+    
+    /// Returns ground truth positions for error calculation.
+    pub fn ground_truth_positions(&self) -> Vec<(u64, Vector3<f64>)> {
+        self.entities
+            .values()
+            .filter(|e| e.active)
+            .map(|e| (e.id, e.position))
             .collect()
     }
 }

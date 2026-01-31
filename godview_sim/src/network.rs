@@ -39,6 +39,17 @@ impl SimNetwork {
             rx: Arc::new(tokio::sync::Mutex::new(rx)),
         }
     }
+    
+    /// Creates a stub network for testing (doesn't actually send/receive).
+    pub fn new_stub(local_id: NodeId) -> Self {
+        let (tx, _) = mpsc::channel(1);
+        let (_, rx) = mpsc::channel(1);
+        Self {
+            local_id,
+            tx,
+            rx: Arc::new(tokio::sync::Mutex::new(rx)),
+        }
+    }
 }
 
 #[async_trait]

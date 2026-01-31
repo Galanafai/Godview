@@ -55,11 +55,13 @@ mod keys;
 pub mod scenarios;
 mod agent;
 mod runner;
+pub mod visualizer;
 
 pub use context::SimContext;
 pub use world::{SimWorld, SimConfig};
-pub use oracle::{Oracle, GroundTruthEntity};
+pub use oracle::{Oracle, GroundTruthEntity, SensorReading};
 pub use network::{SimNetwork, SimNetworkController};
 pub use keys::DeterministicKeyProvider;
 pub use agent::SimulatedAgent;
 pub use runner::{ScenarioRunner, ScenarioResult, ScenarioMetrics};
+pub use visualizer::RerunLogger;

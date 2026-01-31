@@ -47,6 +47,19 @@ impl DeterministicKeyProvider {
         self.root_key.verifying_key()
     }
     
+    /// Returns the root key as a biscuit-auth KeyPair.
+    ///
+    /// This is needed because biscuit-auth has its own key type that's incompatible
+    /// with ed25519-dalek keys. We derive a separate biscuit key from the seed.
+    pub fn biscuit_root_key(&self) -> biscuit_auth::KeyPair {
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha8Rng;
+        // Use a different salt for biscuit keys to avoid collision
+        let biscuit_seed = self.master_seed.wrapping_mul(0x3c6ef372fe94f82b);
+        let mut rng = ChaCha8Rng::seed_from_u64(biscuit_seed);
+        biscuit_auth::KeyPair::new_with_rng(&mut rng)
+    }
+    
     /// Generates or retrieves the signing key for an agent.
     ///
     /// The key is derived deterministically from:

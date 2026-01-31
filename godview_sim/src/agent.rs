@@ -5,7 +5,9 @@
 //! - Automatic sensor reading ingestion from Oracle
 //! - Packet processing loop
 //! - Metric collection
+//! - Adaptive learning (neighbor reputation, track confidence)
 
+use crate::adaptive::AdaptiveState;
 use crate::context::SimContext;
 use crate::network::SimNetwork;
 use crate::oracle::SensorReading;
@@ -39,6 +41,9 @@ pub struct SimulatedAgent {
     
     /// Total gossip packets received
     gossip_received: u64,
+    
+    /// Adaptive intelligence state (learning)
+    adaptive: AdaptiveState,
 }
 
 impl SimulatedAgent {
@@ -67,7 +72,21 @@ impl SimulatedAgent {
             tracks_created: 0,
             recent_packets: Vec::new(),
             gossip_received: 0,
+            adaptive: AdaptiveState::new(),
         }
+    }
+    
+    /// Creates a new simulated agent configured as a bad actor (for testing).
+    pub fn new_bad_actor(
+        context: Arc<SimContext>,
+        network: Arc<SimNetwork>,
+        root_public_key: biscuit_auth::PublicKey,
+        agent_index: u64,
+        config: AgentConfig,
+    ) -> Self {
+        let mut agent = Self::new(context, network, root_public_key, agent_index, config);
+        agent.adaptive = AdaptiveState::new_bad_actor();
+        agent
     }
     
     /// Returns the agent's node ID.
@@ -75,9 +94,13 @@ impl SimulatedAgent {
         self.inner.node_id
     }
     
-    /// Processes a single tick - updates filters and ages tracks.
+    /// Processes a single tick - updates filters, ages tracks, and decays confidence.
     pub fn tick(&mut self) {
         self.inner.tick();
+        
+        // Update adaptive state with current time
+        let current_time = self.inner.now_secs();
+        self.adaptive.tick(current_time);
     }
     
     /// Ingests sensor readings from the Oracle and processes through TrackManager.
@@ -113,19 +136,45 @@ impl SimulatedAgent {
         }
     }
     
-    /// Receives gossip packets from neighbors and processes them.
-    pub fn receive_gossip(&mut self, packets: &[GlobalHazardPacket]) {
+    /// Receives gossip packets from neighbors and processes them with learning.
+    ///
+    /// Tracks which neighbors provide useful vs redundant/wrong data.
+    pub fn receive_gossip_from(&mut self, neighbor_id: usize, packets: &[GlobalHazardPacket]) {
+        // Check if we should accept gossip from this neighbor
+        if !self.adaptive.should_accept_gossip(neighbor_id) {
+            self.adaptive.gossip_filtered += packets.len() as u64;
+            return;
+        }
+        
         for packet in packets {
             self.gossip_received += 1;
             
-            // Process through TrackManager (from neighbor's observation)
-            match self.inner.track_manager.process_packet(packet) {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::trace!("Gossip packet error: {:?}", e);
-                }
-            }
+            // Check if we already have this track with high confidence
+            let existing_confidence = self.adaptive.track_confidences
+                .get(&packet.entity_id)
+                .map(|tc| tc.confidence)
+                .unwrap_or(0.0);
+            
+            // Process through TrackManager
+            let was_useful = match self.inner.track_manager.process_packet(packet) {
+                Ok(_) => existing_confidence < 0.5, // Useful if we didn't have it
+                Err(_) => false,
+            };
+            
+            // Update neighbor reputation
+            self.adaptive.process_gossip(
+                neighbor_id,
+                packet,
+                was_useful,
+                false, // TODO: detect contradictions
+            );
         }
+    }
+    
+    /// Legacy receive_gossip without neighbor tracking (for backward compat).
+    pub fn receive_gossip(&mut self, packets: &[GlobalHazardPacket]) {
+        // Use a dummy neighbor ID for non-tracked gossip
+        self.receive_gossip_from(usize::MAX, packets);
     }
     
     /// Returns recent packets for sharing (since last clear).
@@ -209,6 +258,21 @@ impl SimulatedAgent {
         self.agent_index
     }
     
+    /// Returns whether this agent is configured as a bad actor.
+    pub fn is_bad_actor(&self) -> bool {
+        self.adaptive.is_bad_actor
+    }
+    
+    /// Returns adaptive learning metrics.
+    pub fn adaptive_metrics(&self) -> crate::adaptive::AdaptiveMetrics {
+        self.adaptive.metrics()
+    }
+    
+    /// Returns a reference to the adaptive state.
+    pub fn adaptive_state(&self) -> &AdaptiveState {
+        &self.adaptive
+    }
+
     /// Computes position error against ground truth.
     pub fn compute_position_error(&self, ground_truth: &[(u64, Vector3<f64>)]) -> f64 {
         let mut total_error = 0.0;

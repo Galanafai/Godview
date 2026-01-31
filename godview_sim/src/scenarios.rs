@@ -20,6 +20,9 @@ pub enum ScenarioId {
     
     /// DST-006: 50-agent multi-agent scale test
     Swarm,
+    
+    /// DST-007: 50-agent with learning + bad actors
+    AdaptiveSwarm,
 }
 
 impl ScenarioId {
@@ -32,6 +35,7 @@ impl ScenarioId {
             ScenarioId::FlashMob,
             ScenarioId::SlowLoris,
             ScenarioId::Swarm,
+            ScenarioId::AdaptiveSwarm,
         ]
     }
     
@@ -44,6 +48,7 @@ impl ScenarioId {
             ScenarioId::FlashMob => "flash_mob",
             ScenarioId::SlowLoris => "slow_loris",
             ScenarioId::Swarm => "swarm",
+            ScenarioId::AdaptiveSwarm => "adaptive_swarm",
         }
     }
     
@@ -56,6 +61,7 @@ impl ScenarioId {
             ScenarioId::FlashMob => "1000 drones crossing H3 boundaries rapidly",
             ScenarioId::SlowLoris => "50% packet loss, verify protocol recovery",
             ScenarioId::Swarm => "50 agents, 200 entities, P2P gossip, convergence test",
+            ScenarioId::AdaptiveSwarm => "50 agents + 5 bad actors, learning to identify them",
         }
     }
 }
@@ -77,8 +83,10 @@ impl std::str::FromStr for ScenarioId {
             "flash_mob" | "flashmob" | "dst-004" => Ok(ScenarioId::FlashMob),
             "slow_loris" | "slowloris" | "dst-005" => Ok(ScenarioId::SlowLoris),
             "swarm" | "dst-006" => Ok(ScenarioId::Swarm),
+            "adaptive_swarm" | "adaptiveswarm" | "dst-007" => Ok(ScenarioId::AdaptiveSwarm),
             _ => Err(format!("Unknown scenario: {}", s)),
         }
     }
 }
+
 

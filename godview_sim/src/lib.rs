@@ -58,6 +58,7 @@ mod runner;
 pub mod visualizer;
 pub mod exporter;
 pub mod swarm_network;
+pub mod adaptive;
 
 pub use context::SimContext;
 pub use world::{SimWorld, SimConfig};
@@ -69,5 +70,6 @@ pub use runner::{ScenarioRunner, ScenarioResult, ScenarioMetrics};
 pub use visualizer::RerunLogger;
 pub use exporter::{SimExport, SimFrame, EntityPosition, AgentFrame, TrackPosition, SimEvent};
 pub use swarm_network::{SwarmNetwork, SwarmConfig};
+pub use adaptive::{AdaptiveState, AdaptiveMetrics, NeighborReputation, TrackConfidence};
 
 

@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{info, warn, debug};
+use uuid::Uuid;
 
 /// Results from running a scenario.
 #[derive(Debug, Clone)]
@@ -112,6 +113,7 @@ impl ScenarioRunner {
             ScenarioId::FlashMob => self.run_flash_mob(),
             ScenarioId::SlowLoris => self.run_slow_loris(),
             ScenarioId::Swarm => self.run_swarm(),
+            ScenarioId::AdaptiveSwarm => self.run_adaptive_swarm(),
         }
     }
     
@@ -669,6 +671,292 @@ impl ScenarioRunner {
                 Some(format!("CV={:.1}% (max {}%), RMS={:.2}m (max {})", 
                     coefficient_of_variation * 100.0, config.max_variance * 100.0,
                     avg_rms_error, config.max_position_error))
+            } else {
+                None
+            },
+            metrics,
+        }
+    }
+    
+    /// DST-007: AdaptiveSwarm - Learning agents with bad actor detection.
+    ///
+    /// Tests adaptive intelligence:
+    /// - 50 agents (45 good, 5 bad actors injected at t=10s)
+    /// - Agents learn to identify and ignore bad actors
+    /// - Measures: bad actors detected, accuracy maintained
+    fn run_adaptive_swarm(&self) -> ScenarioResult {
+        use crate::swarm_network::SwarmNetwork;
+        use crate::adaptive::AdaptiveMetrics;
+        use rand::SeedableRng;
+        use rand::Rng;
+        use rand_chacha::ChaCha8Rng;
+        
+        info!("DST-007: AdaptiveSwarm - Learning Agents");
+        
+        let config = crate::swarm_network::SwarmConfig::default();
+        let num_agents = config.rows * config.cols; // 50
+        let num_bad_actors = 5;
+        let bad_actor_inject_time = 10.0; // Inject at t=10s
+        
+        // Setup shared components
+        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        // Random number generator for bad actor behavior
+        let mut rng = ChaCha8Rng::seed_from_u64(self.seed.wrapping_mul(0xdeadbeef));
+        
+        // Create Oracle with 200 entities
+        let mut oracle = crate::oracle::Oracle::new(physics_seed);
+        for i in 0..config.num_entities {
+            let x = (i % 50) as f64 * 20.0;
+            let y = (i / 50) as f64 * 20.0;
+            let z = 100.0 + (i % 10) as f64 * 10.0;
+            let vx = 10.0 + (i % 5) as f64 * 2.0;
+            let vy = 5.0 * ((i % 3) as f64 - 1.0);
+            oracle.spawn_entity(Vector3::new(x, y, z), Vector3::new(vx, vy, 0.0), "target");
+        }
+        
+        // Create 50 agents (all start as good)
+        let mut agents: Vec<SimulatedAgent> = Vec::with_capacity(num_agents);
+        for i in 0..num_agents {
+            let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+            let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+            
+            let agent = SimulatedAgent::new(
+                context,
+                network,
+                root_key.clone(),
+                i as u64,
+                AgentConfig::default(),
+            );
+            agents.push(agent);
+        }
+        
+        // Track which agents become bad actors
+        let mut bad_actor_ids: Vec<usize> = Vec::new();
+        let mut bad_actors_converted = false;
+        
+        // Create gossip network
+        let mut swarm_network = SwarmNetwork::new_grid(config.rows, config.cols);
+        
+        let dt = 1.0 / config.tick_rate_hz as f64;
+        let target_ticks = (self.max_duration_secs.min(config.duration_secs) * config.tick_rate_hz as f64) as u64;
+        
+        info!("  Agents: {} ({} will become bad actors at t={}s)", 
+            num_agents, num_bad_actors, bad_actor_inject_time);
+        
+        // Main simulation loop
+        for tick in 0..target_ticks {
+            let current_time = tick as f64 * dt;
+            
+            // INJECT BAD ACTORS at t=10s
+            if current_time >= bad_actor_inject_time && !bad_actors_converted {
+                // Pick 5 random agents to become bad actors
+                for _ in 0..num_bad_actors {
+                    let bad_idx = rng.gen_range(0..num_agents);
+                    if !bad_actor_ids.contains(&bad_idx) {
+                        bad_actor_ids.push(bad_idx);
+                    }
+                }
+                info!("  ⚠️  Injecting {} bad actors at t={:.1}s: {:?}", 
+                    bad_actor_ids.len(), current_time, bad_actor_ids);
+                bad_actors_converted = true;
+            }
+            
+            // Physics step
+            oracle.step(dt);
+            
+            // Each agent observes entities
+            let readings = oracle.generate_sensor_readings();
+            
+            for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                // Each agent sees ~50% of entities
+                let agent_readings: Vec<_> = readings.iter()
+                    .enumerate()
+                    .filter(|(entity_idx, _)| {
+                        (entity_idx + agent_idx) % 10 < 5
+                    })
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                
+                agent.tick();
+                agent.ingest_readings(&agent_readings);
+            }
+            
+            // Gossip round every N ticks
+            if tick % config.gossip_interval as u64 == 0 {
+                // Collect packets from all agents
+                let all_packets: Vec<_> = agents.iter()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        let mut packets: Vec<_> = a.recent_packets().iter()
+                            .map(|p| (idx, p.clone()))
+                            .collect();
+                        
+                        // BAD ACTORS: inject garbage packets
+                        if bad_actor_ids.contains(&idx) {
+                            for _ in 0..3 {
+                                let garbage = godview_core::godview_tracking::GlobalHazardPacket {
+                                    entity_id: Uuid::new_v4(), // Random fake entity
+                                    position: [
+                                        rng.gen_range(-1000.0..1000.0),
+                                        rng.gen_range(-1000.0..1000.0),
+                                        rng.gen_range(-1000.0..1000.0),
+                                    ],
+                                    velocity: [0.0, 0.0, 0.0],
+                                    class_id: 99, // Fake class
+                                    timestamp: current_time,
+                                    confidence_score: 0.1,
+                                };
+                                packets.push((idx, garbage));
+                            }
+                        }
+                        
+                        packets
+                    })
+                    .collect();
+                
+                // Queue gossip with source tracking
+                for (from_idx, packet) in all_packets {
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                // Deliver gossip WITH neighbor tracking
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    // Get gossip from network
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    
+                    // In a real implementation, we'd track which neighbor sent each packet
+                    // For now, simulate by using the agent's position in grid
+                    let neighbors = swarm_network.neighbors(agent_idx);
+                    if !neighbors.is_empty() {
+                        // Distribute incoming packets among neighbors
+                        let packets_per_neighbor = incoming.len() / neighbors.len().max(1);
+                        for (i, neighbor_id) in neighbors.iter().enumerate() {
+                            let start = i * packets_per_neighbor;
+                            let end = ((i + 1) * packets_per_neighbor).min(incoming.len());
+                            if start < end {
+                                agent.receive_gossip_from(*neighbor_id, &incoming[start..end]);
+                            }
+                        }
+                    }
+                    
+                    agent.clear_recent_packets();
+                }
+            }
+            
+            // Progress log every 5 seconds
+            if tick % (config.tick_rate_hz * 5) as u64 == 0 && tick > 0 {
+                let good_agents: Vec<_> = agents.iter().enumerate()
+                    .filter(|(idx, _)| !bad_actor_ids.contains(idx))
+                    .collect();
+                
+                let (sum, count): (f64, i32) = good_agents.iter()
+                    .flat_map(|(_, a)| {
+                        bad_actor_ids.iter().filter_map(|&bad_id| {
+                            a.adaptive_state().neighbor_reputations.get(&bad_id)
+                                .map(|r| r.reliability_score)
+                        })
+                    })
+                    .fold((0.0, 0), |(sum, count), r| (sum + r, count + 1));
+                let avg_bad = if count > 0 { sum / count as f64 } else { 0.5 };
+                
+                debug!("  t={:.0}s | bad_actor_reliability={:.2}", 
+                    current_time, avg_bad);
+            }
+        }
+        
+        // Compute convergence metrics
+        let track_counts: Vec<usize> = agents.iter().map(|a| a.track_count()).collect();
+        let mean_count = track_counts.iter().sum::<usize>() as f64 / num_agents as f64;
+        let variance = track_counts.iter()
+            .map(|&c| (c as f64 - mean_count).powi(2))
+            .sum::<f64>() / num_agents as f64;
+        let std_dev = variance.sqrt();
+        let coefficient_of_variation = if mean_count > 0.0 { std_dev / mean_count } else { 1.0 };
+        
+        // Compute RMS error for GOOD agents only
+        let ground_truth = oracle.ground_truth_positions();
+        let good_agent_rms: Vec<f64> = agents.iter().enumerate()
+            .filter(|(idx, _)| !bad_actor_ids.contains(idx))
+            .map(|(_, a)| a.compute_position_error(&ground_truth))
+            .collect();
+        let avg_rms_error = if good_agent_rms.is_empty() {
+            0.0
+        } else {
+            good_agent_rms.iter().sum::<f64>() / good_agent_rms.len() as f64
+        };
+        
+        // Count how many good agents identified bad actors (only among neighbors)
+        let mut bad_actors_identified = 0;
+        let mut possible_detections = 0;
+        
+        for (agent_idx, agent) in agents.iter().enumerate() {
+            if bad_actor_ids.contains(&agent_idx) {
+                continue; // Skip bad actors
+            }
+            
+            // Only check bad actors that are neighbors of this agent
+            let neighbors = swarm_network.neighbors(agent_idx);
+            for &bad_id in &bad_actor_ids {
+                if neighbors.contains(&bad_id) {
+                    possible_detections += 1;
+                    if let Some(rep) = agent.adaptive_state().neighbor_reputations.get(&bad_id) {
+                        if rep.reliability_score < 0.3 {
+                            bad_actors_identified += 1;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Aggregate adaptive metrics
+        let total_gossip_filtered: u64 = agents.iter()
+            .map(|a| a.adaptive_metrics().gossip_filtered)
+            .sum();
+        let total_tracks_dropped: u64 = agents.iter()
+            .map(|a| a.adaptive_metrics().tracks_dropped)
+            .sum();
+        let avg_efficiency: f64 = agents.iter()
+            .map(|a| a.adaptive_metrics().gossip_efficiency)
+            .sum::<f64>() / num_agents as f64;
+        
+        // Check pass criteria
+        let detection_rate = if possible_detections > 0 {
+            bad_actors_identified as f64 / possible_detections as f64
+        } else {
+            0.0
+        };
+        
+        let detection_ok = detection_rate >= 0.3 || possible_detections == 0;
+        let error_ok = avg_rms_error < 5.0;
+        let passed = detection_ok && error_ok;
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  Agents: {} ({} bad actors)", num_agents, bad_actor_ids.len());
+        info!("  P2P Messages: {}", swarm_network.messages_sent());
+        info!("  ADAPTIVE METRICS:");
+        info!("    Detection rate:      {:.0}%  {}", detection_rate * 100.0, if detection_ok { "✓" } else { "✗" });
+        info!("    Good agent RMS:      {:.2}m  {}", avg_rms_error, if error_ok { "✓" } else { "✗" });
+        info!("    Gossip filtered:     {}", total_gossip_filtered);
+        info!("    Tracks auto-dropped: {}", total_tracks_dropped);
+        info!("    Gossip efficiency:   {:.0}%", avg_efficiency * 100.0);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        let mut metrics = ScenarioMetrics::default();
+        metrics.packets_sent = swarm_network.messages_sent();
+        
+        ScenarioResult {
+            scenario: ScenarioId::AdaptiveSwarm,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: oracle.active_entities().len(),
+            failure_reason: if !passed {
+                Some(format!("Detection={:.0}% (min 30%), RMS={:.2}m (max 5)", 
+                    detection_rate * 100.0, avg_rms_error))
             } else {
                 None
             },

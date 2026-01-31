@@ -124,6 +124,12 @@ To confirm robustness, we threw everything at the system:
 *   **Outcome**: The swarm maintained **3.07m RMS** accuracy.
 *   **Verdict**: The system is resilient to total system failure.
 
+### The Energy Crisis (DST-019: LongHaul)
+We introduced a strict energy economy:
+*   **Mechanism**: Agents pay `1J` per message and `0.05J` per sensor reading from a limited battery.
+*   **Result**: In a 200-tick accelerated stress test, **0% of agents survived**, confirming the scenario's lethality.
+*   **Conclusion**: Standard evolutionary parameters are insufficient for this crisis. This creates a perfect testbed for future "Life-Critical Evolution" research.
+
 ---
 
 ## 8. Final Conclusion

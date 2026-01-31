@@ -56,6 +56,9 @@ pub struct SimulatedAgent {
 
     /// RNG for evolutionary decisions
     rng: ChaCha8Rng,
+    
+    /// Current energy level (Joules)
+    energy: f64,
 }
 
 impl SimulatedAgent {
@@ -89,6 +92,7 @@ impl SimulatedAgent {
             evolution: EvolutionaryState::new(),
             fitness_provider: Box::new(OracleFitness::new()), // Default to Oracle
             rng,
+            energy: 1000.0, // 1000 Joules capacity
         }
     }
     
@@ -115,13 +119,36 @@ impl SimulatedAgent {
         self.inner.node_id
     }
     
+    /// Consumes energy if available. Returns true if agent is alive (energy > 0).
+    pub fn consume_energy(&mut self, amount: f64) -> bool {
+        if self.energy > 0.0 {
+            self.energy -= amount;
+            if self.energy < 0.0 {
+                self.energy = 0.0;
+            }
+        }
+        self.energy > 0.0
+    }
+    
+    /// Returns true if the agent has energy remaining.
+    pub fn is_alive(&self) -> bool {
+        self.energy > 0.0
+    }
+    
     /// Processes a single tick - updates filters, ages tracks, and decays confidence.
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> bool {
+        // Idle cost
+        if !self.consume_energy(0.01) {
+            return false; // Dead
+        }
+
         self.inner.tick();
         
         // Update adaptive state with current time
         let current_time = self.inner.now_secs();
         self.adaptive.tick(current_time);
+        
+        true
     }
     
     /// Runs a tick of the evolutionary process.
@@ -149,7 +176,7 @@ impl SimulatedAgent {
         let pa_cost = self.inner.track_manager.get_peer_agreement_cost();
         
         // Record all raw metrics to evolutionary state
-        self.evolution.record_metrics(error, nis, pa_cost);
+        self.evolution.record_metrics(error, nis, pa_cost, self.energy);
         
         // Check if epoch should end
         if self.inner.tick_count() % epoch_length_ticks == 0 {
@@ -166,6 +193,9 @@ impl SimulatedAgent {
     /// Converts each reading into a GlobalHazardPacket and processes it
     /// through the full tracking pipeline (association, fusion, Highlander).
     pub fn ingest_readings(&mut self, readings: &[SensorReading]) {
+        // Sensor/CPU cost
+        self.consume_energy(0.05 * readings.len() as f64);
+
         let current_time = self.inner.now_secs();
         
         for reading in readings {

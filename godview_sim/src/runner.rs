@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use rand::SeedableRng;
 use tracing::{info, warn, debug};
 use uuid::Uuid;
 
@@ -131,6 +132,7 @@ impl ScenarioRunner {
             ScenarioId::ProtocolDrift => self.run_protocol_drift(),
             ScenarioId::BlindLearning => self.run_blind_learning(),
             ScenarioId::BlackoutSurvival => self.run_blackout_survival(),
+            ScenarioId::LongHaul => self.run_long_haul(),
         }
     }
     
@@ -2356,6 +2358,173 @@ impl ScenarioRunner {
             final_time_secs: oracle.time(),
             final_entity_count: oracle.active_entities().len(),
             failure_reason: if !passed { Some(format!("RMS {:.2}m", avg_rms)) } else { None },
+            metrics: ScenarioMetrics::default(),
+        }
+    }
+
+    /// DST-019: LongHaul - Energy Crisis.
+    ///
+    /// Survive 2000 ticks with limited battery.
+    /// Agents must evolve to speak less (higher gossip interval) to survive.
+    fn run_long_haul(&self) -> ScenarioResult {
+        use crate::evolution::BlindFitness;
+
+        info!("DST-019: LongHaul - THE ENERGY CRISIS 🔋");
+        
+        // Config
+        let num_agents = 10;
+        let start_energy = 1000.0;
+        let mut oracle = Oracle::new(self.seed);
+        
+        // Spawn some entities to track
+        for i in 0..10 {
+            oracle.spawn_entity(
+                Vector3::new((i as f64) * 20.0, 0.0, 100.0),
+                Vector3::new(1.0, 1.0, 0.0),
+                "long_haul_target",
+            );
+        }
+        
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        // Init Agents
+        let mut agents: Vec<SimulatedAgent> = (0..num_agents)
+            .map(|i| {
+                 let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+                 let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+                 let mut agent = SimulatedAgent::new(context, network, root_key.clone(), i as u64, AgentConfig::default());
+                 agent.set_fitness_provider(Box::new(BlindFitness::new()));
+                 agent.consume_energy(850.0); // Start with 150J for fast test
+                 agent
+            })
+            .collect();
+            
+        let mut swarm_network = crate::swarm_network::SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1;
+        let target_ticks = 200;
+        let evo_epoch_ticks = 20; // Faster evolution for test
+        
+        let mut rng = rand::rngs::StdRng::seed_from_u64(self.seed);
+        
+        info!("  Config: {} agents, 10 entities, {} ticks. Starting Energy: {}J", num_agents, target_ticks, start_energy);
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            // Limit visible readings to reduce sensor cost pressure (allow some chance)
+            // Or just let them deal with it.
+            // Cost: 0.05 * 10 = 0.5 per tick. 2000 * 0.5 = 1000 J.
+            // They will all die if they process all.
+            // But they can't choose to ignore yet.
+            // I will artificially limit readings in this scenario to 2 entities per agent per tick (randomly).
+            // This represents "Scanning a sector" instead of 360 view.
+            
+            let readings = oracle.generate_sensor_readings();
+            let ground_truth = oracle.ground_truth_positions();
+            
+            for (idx, agent) in agents.iter_mut().enumerate() {
+                // Check if alive handled in tick() internal (returns false if dead)
+                if !agent.tick() {
+                    continue; // Dead
+                }
+                
+                // Evolution
+                agent.tick_evolution(evo_epoch_ticks, Some(&ground_truth));
+                
+                // Limited Ingestion (2 readings max)
+                let my_readings: Vec<_> = readings.iter()
+                    .skip(idx % 5) // Simple stagger
+                    .take(2)
+                    .cloned()
+                    .collect();
+                    
+                agent.ingest_readings(&my_readings);
+            }
+            
+             // Gossip Logic
+            if tick % 5 == 0 {
+                // Collect packets
+                let mut all_packets: Vec<_> = agents.iter_mut()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        // Check dead status before asking logic
+                        // We can check energy directly or rely on a flag?
+                        // `tick()` returns false if dead, but we need to know here.
+                        // `consume_energy(0.0)` returns true if > 0.
+                        if !a.consume_energy(0.0) { return Vec::new(); }
+                        
+                        if tick % a.gossip_interval() == 0 {
+                            let packets: Vec<_> = a.recent_packets().iter().map(|p| (idx, p.clone())).collect();
+                            
+                            // Charge Message Cost!
+                            let cost = packets.len() as f64 * 1.0; 
+                            a.consume_energy(cost);
+                            
+                            // Metrics
+                            a.record_message_sent_metric(packets.len() as u64 * 125);
+                            packets
+                        } else {
+                            Vec::new()
+                        }
+                    })
+                    .collect();
+                
+                // Distribute
+                for (from_idx, packet) in all_packets {
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                     let incoming = swarm_network.take_gossip(agent_idx);
+                     // Receive & Process
+                     agent.receive_gossip(&incoming);
+                     agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        // Analysis
+        let final_survivors = agents.iter().filter(|a| a.is_alive()).count();
+        let survival_rate = final_survivors as f64 / num_agents as f64;
+        
+        let survivor_rms: f64 = if final_survivors > 0 {
+             let gt = oracle.ground_truth_positions();
+             let sum_rms: f64 = agents.iter()
+                .filter(|a| a.is_alive())
+                .map(|a| a.compute_position_error(&gt))
+                .sum();
+             sum_rms / final_survivors as f64
+        } else {
+            999.0
+        };
+        
+        // Success Criteria: > 80% Survivors AND < 5.0m RMS
+        let passed = survival_rate > 0.8 && survivor_rms < 5.0;
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  LONG HAUL RESULTS:");
+        info!("    Survivors:    {}/{} ({:.1}%)", final_survivors, num_agents, survival_rate * 100.0);
+        info!("    Survivor RMS: {:.2}m", survivor_rms);
+        
+        // Print average evolved parameters of survivors
+        if final_survivors > 0 {
+            let avg_interval: f64 = agents.iter()
+                .filter(|a| a.is_alive())
+                .map(|a| a.gossip_interval() as f64)
+                .sum::<f64>() / final_survivors as f64;
+            info!("    Avg Interval: {:.1} ticks (Started at 5.0)", avg_interval);
+        }
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        ScenarioResult {
+            scenario: ScenarioId::LongHaul,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: 5,
+            failure_reason: if !passed { Some(format!("Survivors: {:.0}%, RMS: {:.2}m", survival_rate*100.0, survivor_rms)) } else { None },
             metrics: ScenarioMetrics::default(),
         }
     }

@@ -64,6 +64,9 @@ pub enum ScenarioId {
     
     /// DST-018: Total system failure survival
     BlackoutSurvival,
+    
+    /// DST-019: Energy Conserved Survival
+    LongHaul,
 }
 
 impl ScenarioId {
@@ -90,6 +93,7 @@ impl ScenarioId {
             ScenarioId::ProtocolDrift,
             ScenarioId::BlindLearning,
             ScenarioId::BlackoutSurvival,
+            ScenarioId::LongHaul,
         ]
     }
     
@@ -151,6 +155,7 @@ impl ScenarioId {
             ScenarioId::ProtocolDrift => "protocol_drift",
             ScenarioId::BlindLearning => "blind_learning",
             ScenarioId::BlackoutSurvival => "blackout_survival",
+            ScenarioId::LongHaul => "long_haul",
         }
     }
     
@@ -177,6 +182,7 @@ impl ScenarioId {
             ScenarioId::ProtocolDrift => "🧬 Protocol Divergence: one group changes logic",
             ScenarioId::BlindLearning => "🧬 Blind Learning: adapt without ground truth",
             ScenarioId::BlackoutSurvival => "💀 BLACKOUT: Loss + Faults + Bad Actors + Bandwidth Limit",
+            ScenarioId::LongHaul => "🔋 LONG HAUL: Energy Crisis Survival",
         }
     }
     
@@ -235,6 +241,7 @@ impl std::str::FromStr for ScenarioId {
             "protocol_drift" | "protocoldrift" | "dst-016" => Ok(ScenarioId::ProtocolDrift),
             "blind_learning" | "blindlearning" | "dst-017" => Ok(ScenarioId::BlindLearning),
             "blackout_survival" | "blackoutsurvival" | "dst-018" => Ok(ScenarioId::BlackoutSurvival),
+            "long_haul" | "longhaul" | "dst-019" => Ok(ScenarioId::LongHaul),
             // Groups
             "extreme" => Err("Use --scenario extreme (or all) for extreme scenarios".to_string()),
             "evolutionary" => Err("Use --scenario evolutionary (or all) for evolutionary scenarios".to_string()),

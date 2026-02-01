@@ -297,6 +297,17 @@ impl SimulatedAgent {
         self.evolution.current_params.gossip_interval_ticks
     }
     
+    /// Emergency Protocol (v0.6.0): Returns whether the agent should broadcast.
+    /// Returns false if energy is critically low (< 50J) to prevent messaging death.
+    pub fn should_broadcast(&self, current_tick: u64) -> bool {
+        // Emergency Protocol: Enter conservation mode at 50J
+        if self.energy < 50.0 {
+            return false;
+        }
+        // Normal gossip interval check
+        current_tick % self.gossip_interval() == 0
+    }
+    
     /// Returns max gossip neighbors (evolved).
     pub fn max_gossip_neighbors(&self) -> usize {
         self.evolution.current_params.max_neighbors_gossip

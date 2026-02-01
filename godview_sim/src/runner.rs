@@ -2448,12 +2448,10 @@ impl ScenarioRunner {
                     .enumerate()
                     .flat_map(|(idx, a)| {
                         // Check dead status before asking logic
-                        // We can check energy directly or rely on a flag?
-                        // `tick()` returns false if dead, but we need to know here.
-                        // `consume_energy(0.0)` returns true if > 0.
-                        if !a.consume_energy(0.0) { return Vec::new(); }
+                        if !a.is_alive() { return Vec::new(); }
                         
-                        if tick % a.gossip_interval() == 0 {
+                        // Use new should_broadcast() with Emergency Protocol
+                        if a.should_broadcast(tick) {
                             let packets: Vec<_> = a.recent_packets().iter().map(|p| (idx, p.clone())).collect();
                             
                             // Charge Message Cost!

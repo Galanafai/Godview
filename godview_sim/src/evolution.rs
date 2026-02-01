@@ -170,6 +170,16 @@ pub struct EvolutionaryState {
     
     // Energy tracking
     epoch_energy_remaining_sum: f64,
+    
+    // --- Adaptive Mutation State (v0.6.0) ---
+    /// Consecutive epochs with no fitness improvement.
+    consecutive_failures: u32,
+    
+    /// Mutation step multiplier (grows on stagnation, decays on success).
+    step_multiplier: f64,
+    
+    /// Whether the last mutation attempt was multi-parameter.
+    was_multi_param: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -197,6 +207,10 @@ impl EvolutionaryState {
             epoch_pa_sum: 0.0,
             epoch_bytes_sent: 0,
             epoch_energy_remaining_sum: 0.0,
+            // Adaptive mutation defaults
+            consecutive_failures: 0,
+            step_multiplier: 1.0,
+            was_multi_param: false,
         }
     }
     
@@ -254,20 +268,36 @@ impl EvolutionaryState {
         self.prev_fitness = self.current_fitness;
         self.current_fitness = fitness;
         
-        // 3. Evaluate last mutation
-        if let Some(mutation) = self.active_mutation {
+        // 3. Evaluate last mutation with adaptive step tracking
+        if let Some(_mutation) = self.active_mutation {
             if self.current_fitness >= self.prev_fitness {
-                // Good mutation! Keep it.
+                // Good mutation! Keep it and reduce step multiplier.
+                self.consecutive_failures = 0;
+                self.step_multiplier = (self.step_multiplier * 0.8).max(1.0);
             } else {
-                // Bad mutation. Revert.
+                // Bad mutation. Revert and increase step multiplier.
                 self.current_params = self.prev_params;
+                self.consecutive_failures += 1;
+                
+                // After 5 consecutive failures, start increasing step size
+                if self.consecutive_failures > 5 {
+                    self.step_multiplier = (self.step_multiplier * 1.5).min(10.0);
+                }
             }
         }
         
-        // 4. Propose new mutation
+        // 4. Propose new mutation (with 10% chance of multi-param)
         self.prev_params = self.current_params;
-        self.active_mutation = Some(self.pick_mutation(rng));
-        self.apply_mutation();
+        self.was_multi_param = rng.gen::<f64>() < 0.10;
+        
+        if self.was_multi_param {
+            // Multi-parameter mutation: mutate ALL genes at once
+            self.apply_multi_mutation(rng);
+        } else {
+            // Single-parameter mutation (original behavior)
+            self.active_mutation = Some(self.pick_mutation(rng));
+            self.apply_mutation();
+        }
         
         // Reset accumulators
         self.epoch_error_sum = 0.0;
@@ -292,31 +322,68 @@ impl EvolutionaryState {
     
     fn apply_mutation(&mut self) {
         let mutation = self.active_mutation.unwrap();
+        let step = self.step_multiplier;
+        
         match mutation {
             MutationType::IncreaseGossipInterval => {
-                self.current_params.gossip_interval_ticks += 1;
+                // Adaptive step: 1 * multiplier, rounded up
+                let delta = (1.0 * step).ceil() as u64;
+                self.current_params.gossip_interval_ticks += delta;
             }
             MutationType::DecreaseGossipInterval => {
-                if self.current_params.gossip_interval_ticks > 1 {
-                    self.current_params.gossip_interval_ticks -= 1;
+                let delta = (1.0 * step).ceil() as u64;
+                if self.current_params.gossip_interval_ticks > delta {
+                    self.current_params.gossip_interval_ticks -= delta;
+                } else {
+                    self.current_params.gossip_interval_ticks = 1;
                 }
             }
             MutationType::IncreaseMaxNeighbors => {
-                self.current_params.max_neighbors_gossip = self.current_params.max_neighbors_gossip.saturating_add(5);
+                let delta = (5.0 * step).ceil() as usize;
+                self.current_params.max_neighbors_gossip = self.current_params.max_neighbors_gossip.saturating_add(delta);
             }
             MutationType::DecreaseMaxNeighbors => {
-                if self.current_params.max_neighbors_gossip > 5 {
-                    self.current_params.max_neighbors_gossip -= 5;
+                let delta = (5.0 * step).ceil() as usize;
+                if self.current_params.max_neighbors_gossip > delta {
+                    self.current_params.max_neighbors_gossip -= delta;
+                } else {
+                    self.current_params.max_neighbors_gossip = 1;
                 }
             }
             MutationType::IncreaseConfidence => {
-                self.current_params.confidence_threshold += 0.05;
+                self.current_params.confidence_threshold += 0.05 * step;
             }
             MutationType::DecreaseConfidence => {
-                if self.current_params.confidence_threshold > 0.05 {
-                    self.current_params.confidence_threshold -= 0.05;
+                let delta = 0.05 * step;
+                if self.current_params.confidence_threshold > delta {
+                    self.current_params.confidence_threshold -= delta;
+                } else {
+                    self.current_params.confidence_threshold = 0.0;
                 }
             }
         }
+    }
+    
+    /// Multi-parameter mutation: randomly perturb ALL genes at once.
+    /// Used 10% of the time to discover synergistic combinations.
+    fn apply_multi_mutation<R: Rng>(&mut self, rng: &mut R) {
+        let step = self.step_multiplier;
+        
+        // Gossip interval: random walk with adaptive step
+        let gossip_delta = (rng.gen_range(-2..=2) as f64 * step).ceil() as i64;
+        let new_gossip = (self.current_params.gossip_interval_ticks as i64 + gossip_delta).max(1);
+        self.current_params.gossip_interval_ticks = new_gossip as u64;
+        
+        // Max neighbors: random walk with adaptive step
+        let neighbor_delta = (rng.gen_range(-10..=10) as f64 * step).ceil() as i64;
+        let new_neighbors = (self.current_params.max_neighbors_gossip as i64 + neighbor_delta).max(1);
+        self.current_params.max_neighbors_gossip = new_neighbors as usize;
+        
+        // Confidence threshold: random walk
+        let conf_delta = rng.gen_range(-0.1..=0.1) * step;
+        self.current_params.confidence_threshold = (self.current_params.confidence_threshold + conf_delta).clamp(0.0, 1.0);
+        
+        // Mark as multi-param (no single active_mutation)
+        self.active_mutation = None;
     }
 }

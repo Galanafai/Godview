@@ -70,6 +70,12 @@ pub enum ScenarioId {
     
     /// DST-020: Common GPS Bias Detection (v0.6.0)
     CommonBias,
+    
+    /// DST-021: Heavy-Tailed Noise (v0.6.0)
+    HeavyTail,
+    
+    /// DST-022: Sensor Drift (v0.6.0)
+    SensorDrift,
 }
 
 impl ScenarioId {
@@ -98,6 +104,8 @@ impl ScenarioId {
             ScenarioId::BlackoutSurvival,
             ScenarioId::LongHaul,
             ScenarioId::CommonBias,
+            ScenarioId::HeavyTail,
+            ScenarioId::SensorDrift,
         ]
     }
     
@@ -134,6 +142,8 @@ impl ScenarioId {
             ScenarioId::ResourceStarvation,
             ScenarioId::ProtocolDrift,
             ScenarioId::CommonBias,
+            ScenarioId::HeavyTail,
+            ScenarioId::SensorDrift,
         ]
     }
     
@@ -162,6 +172,8 @@ impl ScenarioId {
             ScenarioId::BlackoutSurvival => "blackout_survival",
             ScenarioId::LongHaul => "long_haul",
             ScenarioId::CommonBias => "common_bias",
+            ScenarioId::HeavyTail => "heavy_tail",
+            ScenarioId::SensorDrift => "sensor_drift",
         }
     }
     
@@ -190,6 +202,8 @@ impl ScenarioId {
             ScenarioId::BlackoutSurvival => "💀 BLACKOUT: Loss + Faults + Bad Actors + Bandwidth Limit",
             ScenarioId::LongHaul => "🔋 LONG HAUL: Energy Crisis Survival",
             ScenarioId::CommonBias => "🎯 COMMON BIAS: All agents get +5m GPS offset, evolve compensation",
+            ScenarioId::HeavyTail => "📉 HEAVY TAIL: Cauchy noise tests Gaussian-evolved parameters",
+            ScenarioId::SensorDrift => "📈 SENSOR DRIFT: Gradual sensor degradation over time",
         }
     }
     
@@ -250,6 +264,8 @@ impl std::str::FromStr for ScenarioId {
             "blackout_survival" | "blackoutsurvival" | "dst-018" => Ok(ScenarioId::BlackoutSurvival),
             "long_haul" | "longhaul" | "dst-019" => Ok(ScenarioId::LongHaul),
             "common_bias" | "commonbias" | "dst-020" => Ok(ScenarioId::CommonBias),
+            "heavy_tail" | "heavytail" | "dst-021" => Ok(ScenarioId::HeavyTail),
+            "sensor_drift" | "sensordrift" | "dst-022" => Ok(ScenarioId::SensorDrift),
             // Groups
             "extreme" => Err("Use --scenario extreme (or all) for extreme scenarios".to_string()),
             "evolutionary" => Err("Use --scenario evolutionary (or all) for evolutionary scenarios".to_string()),

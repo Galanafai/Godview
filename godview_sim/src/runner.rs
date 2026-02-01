@@ -134,6 +134,8 @@ impl ScenarioRunner {
             ScenarioId::BlackoutSurvival => self.run_blackout_survival(),
             ScenarioId::LongHaul => self.run_long_haul(),
             ScenarioId::CommonBias => self.run_common_bias(),
+            ScenarioId::HeavyTail => self.run_heavy_tail(),
+            ScenarioId::SensorDrift => self.run_sensor_drift(),
         }
     }
     
@@ -2660,6 +2662,245 @@ impl ScenarioRunner {
         
         ScenarioResult {
             scenario: ScenarioId::CommonBias,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: 5,
+            failure_reason: if !passed { Some(format!("RMS: {:.2}m", avg_rms)) } else { None },
+            metrics: ScenarioMetrics::default(),
+        }
+    }
+    
+    /// DST-021: HeavyTail - Cauchy noise stress test (v0.6.0)
+    /// 
+    /// Tests agents evolved on Gaussian noise against heavy-tailed Cauchy noise.
+    /// Cauchy has occasional extreme outliers that challenge tracking filters.
+    /// 
+    /// **Success Criteria**: RMS < 10.0m (more lenient due to outliers)
+    fn run_heavy_tail(&self) -> ScenarioResult {
+        use crate::evolution::BlindFitness;
+        use crate::oracle::NoiseModel;
+        
+        info!("DST-021: HeavyTail - Cauchy Noise Stress Test 📉");
+        
+        let num_agents = 10;
+        let mut oracle = Oracle::new(self.seed);
+        
+        // Use Cauchy (heavy-tailed) noise
+        oracle.set_noise_model(NoiseModel::Cauchy);
+        oracle.set_position_noise(1.0); // 1m scale parameter
+        
+        // Spawn 5 stationary targets
+        for i in 0..5 {
+            oracle.spawn_entity(
+                Vector3::new((i as f64) * 30.0, 0.0, 100.0),
+                Vector3::zeros(),
+                "heavy_target",
+            );
+        }
+        
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        let mut agents: Vec<SimulatedAgent> = (0..num_agents)
+            .map(|i| {
+                let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+                let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+                let mut agent = SimulatedAgent::new(context, network, root_key.clone(), i as u64, AgentConfig::default());
+                agent.set_fitness_provider(Box::new(BlindFitness::new()));
+                agent
+            })
+            .collect();
+        
+        let mut swarm_network = crate::swarm_network::SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1;
+        let target_ticks = 300;
+        let evo_epoch_ticks = 30;
+        
+        info!("  Config: {} agents, 5 entities, {} ticks. Noise: Cauchy (heavy-tailed)", num_agents, target_ticks);
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            let ground_truth = oracle.ground_truth_positions();
+            
+            for (idx, agent) in agents.iter_mut().enumerate() {
+                if !agent.tick() { continue; }
+                
+                let my_readings: Vec<_> = readings.iter()
+                    .skip(idx % 5)
+                    .take(2)
+                    .cloned()
+                    .collect();
+                
+                agent.ingest_readings(&my_readings);
+                agent.tick_evolution(evo_epoch_ticks, Some(&ground_truth));
+            }
+            
+            // Gossip
+            if tick % 5 == 0 {
+                let all_packets: Vec<_> = agents.iter_mut()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        if !a.is_alive() { return Vec::new(); }
+                        if a.should_broadcast(tick) {
+                            a.recent_packets().iter().map(|p| (idx, p.clone())).collect()
+                        } else {
+                            Vec::new()
+                        }
+                    })
+                    .collect();
+                
+                for (from_idx, packet) in all_packets {
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    agent.receive_gossip(&incoming);
+                    agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        let gt = oracle.ground_truth_positions();
+        let avg_rms: f64 = agents.iter()
+            .map(|a| a.compute_position_error(&gt))
+            .sum::<f64>() / num_agents as f64;
+        
+        // More lenient threshold due to occasional extreme Cauchy outliers
+        let passed = avg_rms < 10.0;
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  HEAVY TAIL RESULTS:");
+        info!("    Final RMS: {:.2}m (target < 10.0m)", avg_rms);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        ScenarioResult {
+            scenario: ScenarioId::HeavyTail,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: 5,
+            failure_reason: if !passed { Some(format!("RMS: {:.2}m", avg_rms)) } else { None },
+            metrics: ScenarioMetrics::default(),
+        }
+    }
+    
+    /// DST-022: SensorDrift - Gradual degradation (v0.6.0)
+    /// 
+    /// Sensor noise increases over time, simulating degradation or environmental changes.
+    /// Tests whether agents can adapt to non-stationary noise.
+    /// 
+    /// **Success Criteria**: RMS < 8.0m despite 5x noise increase by end
+    fn run_sensor_drift(&self) -> ScenarioResult {
+        use crate::evolution::BlindFitness;
+        
+        info!("DST-022: SensorDrift - Sensor Degradation Over Time 📈");
+        
+        let num_agents = 10;
+        let mut oracle = Oracle::new(self.seed);
+        
+        let initial_noise = 0.5;
+        let final_noise = 2.5; // 5x degradation
+        oracle.set_position_noise(initial_noise);
+        
+        // Spawn 5 stationary targets
+        for i in 0..5 {
+            oracle.spawn_entity(
+                Vector3::new((i as f64) * 30.0, 0.0, 100.0),
+                Vector3::zeros(),
+                "drift_target",
+            );
+        }
+        
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        let mut agents: Vec<SimulatedAgent> = (0..num_agents)
+            .map(|i| {
+                let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+                let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+                let mut agent = SimulatedAgent::new(context, network, root_key.clone(), i as u64, AgentConfig::default());
+                agent.set_fitness_provider(Box::new(BlindFitness::new()));
+                agent
+            })
+            .collect();
+        
+        let mut swarm_network = crate::swarm_network::SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1;
+        let target_ticks = 400;
+        let evo_epoch_ticks = 40;
+        
+        info!("  Config: {} agents, 5 entities, {} ticks. Noise: {:.1}m → {:.1}m", 
+              num_agents, target_ticks, initial_noise, final_noise);
+        
+        for tick in 0..target_ticks {
+            // Linearly increase noise over time
+            let progress = tick as f64 / target_ticks as f64;
+            let current_noise = initial_noise + (final_noise - initial_noise) * progress;
+            oracle.set_position_noise(current_noise);
+            
+            oracle.step(dt);
+            let readings = oracle.generate_sensor_readings();
+            let ground_truth = oracle.ground_truth_positions();
+            
+            for (idx, agent) in agents.iter_mut().enumerate() {
+                if !agent.tick() { continue; }
+                
+                let my_readings: Vec<_> = readings.iter()
+                    .skip(idx % 5)
+                    .take(2)
+                    .cloned()
+                    .collect();
+                
+                agent.ingest_readings(&my_readings);
+                agent.tick_evolution(evo_epoch_ticks, Some(&ground_truth));
+            }
+            
+            // Gossip
+            if tick % 5 == 0 {
+                let all_packets: Vec<_> = agents.iter_mut()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        if !a.is_alive() { return Vec::new(); }
+                        if a.should_broadcast(tick) {
+                            a.recent_packets().iter().map(|p| (idx, p.clone())).collect()
+                        } else {
+                            Vec::new()
+                        }
+                    })
+                    .collect();
+                
+                for (from_idx, packet) in all_packets {
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                    let incoming = swarm_network.take_gossip(agent_idx);
+                    agent.receive_gossip(&incoming);
+                    agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        let gt = oracle.ground_truth_positions();
+        let avg_rms: f64 = agents.iter()
+            .map(|a| a.compute_position_error(&gt))
+            .sum::<f64>() / num_agents as f64;
+        
+        let passed = avg_rms < 8.0;
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  SENSOR DRIFT RESULTS:");
+        info!("    Final RMS: {:.2}m (target < 8.0m)", avg_rms);
+        info!("    Final Noise: {:.1}m (5x degradation)", final_noise);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        ScenarioResult {
+            scenario: ScenarioId::SensorDrift,
             seed: self.seed,
             passed,
             total_ticks: target_ticks,

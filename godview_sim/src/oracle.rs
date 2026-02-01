@@ -7,10 +7,24 @@
 
 use nalgebra::{Vector3, Vector6};
 use rand::SeedableRng;
+use rand::Rng;
 use rand_chacha::ChaCha8Rng;
-use rand_distr::{Distribution, Normal};
+use rand_distr::{Distribution, Normal, Cauchy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// Noise model for sensor readings (v0.6.0)
+/// Agents evolved on Gaussian may fail on heavy-tailed distributions.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum NoiseModel {
+    /// Standard Gaussian (normal) noise - well-behaved with light tails
+    #[default]
+    Gaussian,
+    /// Cauchy noise - heavy-tailed, occasional large outliers
+    Cauchy,
+    /// Lévy noise - extremely heavy-tailed, rare but extreme outliers
+    Levy,
+}
 
 /// A ground truth entity in the simulation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +114,9 @@ pub struct Oracle {
     
     /// Position noise standard deviation (meters)
     position_noise_std: f64,
+    
+    /// Noise model (v0.6.0): Gaussian, Cauchy, or Levy
+    noise_model: NoiseModel,
 }
 
 impl Oracle {
@@ -115,7 +132,13 @@ impl Oracle {
             next_id: 0,
             current_time: 0.0,
             position_noise_std: 0.5, // 50cm noise by default
+            noise_model: NoiseModel::Gaussian,
         }
+    }
+    
+    /// Sets the noise model (v0.6.0).
+    pub fn set_noise_model(&mut self, model: NoiseModel) {
+        self.noise_model = model;
     }
     
     /// Sets the position noise standard deviation.
@@ -175,20 +198,53 @@ impl Oracle {
     
     /// Generates a noisy sensor reading for an entity.
     ///
-    /// Uses Box-Muller transform to add Gaussian noise.
+    /// Uses configured noise model (Gaussian, Cauchy, or Levy).
     pub fn generate_sensor_reading(&mut self, entity_id: u64) -> Option<Vector3<f64>> {
         let entity = self.entities.get(&entity_id)?;
         if !entity.active {
             return None;
         }
         
-        // Add Gaussian noise to position
-        let normal = Normal::new(0.0, self.position_noise_std).unwrap();
-        let noise = Vector3::new(
-            normal.sample(&mut self.physics_rng),
-            normal.sample(&mut self.physics_rng),
-            normal.sample(&mut self.physics_rng),
-        );
+        // Generate noise based on configured model
+        let noise = match self.noise_model {
+            NoiseModel::Gaussian => {
+                let normal = Normal::new(0.0, self.position_noise_std).unwrap();
+                Vector3::new(
+                    normal.sample(&mut self.physics_rng),
+                    normal.sample(&mut self.physics_rng),
+                    normal.sample(&mut self.physics_rng),
+                )
+            }
+            NoiseModel::Cauchy => {
+                // Cauchy: heavy tails, mean=0, scale=std_dev
+                let cauchy = Cauchy::new(0.0, self.position_noise_std).unwrap();
+                Vector3::new(
+                    cauchy.sample(&mut self.physics_rng),
+                    cauchy.sample(&mut self.physics_rng),
+                    cauchy.sample(&mut self.physics_rng),
+                )
+            }
+            NoiseModel::Levy => {
+                // Lévy: extremely heavy tails (simulated via inverse CDF)
+                // Sample u ~ Uniform(0,1), then X = scale / u^2
+                let scale = self.position_noise_std;
+                
+                // Sample inline to avoid closure borrow issues
+                let u1: f64 = self.physics_rng.gen_range(0.01..1.0);
+                let s1 = if self.physics_rng.gen::<bool>() { 1.0 } else { -1.0 };
+                let x = s1 * scale / (u1 * u1);
+                
+                let u2: f64 = self.physics_rng.gen_range(0.01..1.0);
+                let s2 = if self.physics_rng.gen::<bool>() { 1.0 } else { -1.0 };
+                let y = s2 * scale / (u2 * u2);
+                
+                let u3: f64 = self.physics_rng.gen_range(0.01..1.0);
+                let s3 = if self.physics_rng.gen::<bool>() { 1.0 } else { -1.0 };
+                let z = s3 * scale / (u3 * u3);
+                
+                Vector3::new(x, y, z)
+            }
+        };
         
         Some(entity.position + noise)
     }

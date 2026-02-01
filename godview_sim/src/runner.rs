@@ -133,6 +133,7 @@ impl ScenarioRunner {
             ScenarioId::BlindLearning => self.run_blind_learning(),
             ScenarioId::BlackoutSurvival => self.run_blackout_survival(),
             ScenarioId::LongHaul => self.run_long_haul(),
+            ScenarioId::CommonBias => self.run_common_bias(),
         }
     }
     
@@ -2523,6 +2524,148 @@ impl ScenarioRunner {
             final_time_secs: oracle.time(),
             final_entity_count: 5,
             failure_reason: if !passed { Some(format!("Survivors: {:.0}%, RMS: {:.2}m", survival_rate*100.0, survivor_rms)) } else { None },
+            metrics: ScenarioMetrics::default(),
+        }
+    }
+    
+    /// DST-020: CommonBias - GPS bias detection via evolution (v0.6.0)
+    /// 
+    /// All agents receive a +5m GPS offset on sensor readings.
+    /// Tests if agents can evolve `sensor_bias_estimate` to compensate.
+    /// 
+    /// **Success Criteria**: Swarm RMS < 5.0m after evolution.
+    fn run_common_bias(&self) -> ScenarioResult {
+        use crate::evolution::BlindFitness;
+        info!("DST-020: CommonBias - GPS Bias Detection 🎯");
+        
+        let num_agents = 10;
+        let gps_bias = 5.0; // +5m bias on all readings
+        
+        // Create Oracle with 5 stationary targets
+        let mut oracle = Oracle::new(self.seed);
+        for i in 0..5 {
+            oracle.spawn_entity(
+                Vector3::new((i as f64) * 30.0, 0.0, 100.0),
+                Vector3::zeros(),
+                "bias_target",
+            );
+        }
+        
+        let key_provider = DeterministicKeyProvider::new(self.seed);
+        let root_key = key_provider.biscuit_root_key().public();
+        
+        // Init Agents with BlindFitness
+        let mut agents: Vec<SimulatedAgent> = (0..num_agents)
+            .map(|i| {
+                 let context = Arc::new(SimContext::new(self.seed.wrapping_add(i as u64)));
+                 let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(i as u64)));
+                 let mut agent = SimulatedAgent::new(context, network, root_key.clone(), i as u64, AgentConfig::default());
+                 agent.set_fitness_provider(Box::new(BlindFitness::new()));
+                 agent
+            })
+            .collect();
+            
+        let mut swarm_network = crate::swarm_network::SwarmNetwork::new_grid(5, 10);
+        let dt = 0.1;
+        let target_ticks = 500; // Longer run for evolution to find bias
+        let evo_epoch_ticks = 50;
+        
+        info!("  Config: {} agents, 5 entities, {} ticks. GPS Bias: +{}m", num_agents, target_ticks, gps_bias);
+        
+        for tick in 0..target_ticks {
+            oracle.step(dt);
+            
+            // Get base readings from Oracle
+            let base_readings = oracle.generate_sensor_readings();
+            let ground_truth = oracle.ground_truth_positions();
+            
+            for (idx, agent) in agents.iter_mut().enumerate() {
+                if !agent.tick() { continue; } // Dead
+                
+                // Get a subset of readings for this agent
+                let my_readings: Vec<_> = base_readings.iter()
+                    .skip(idx % 5)
+                    .take(2)
+                    .cloned()
+                    .collect();
+                
+                // Apply GPS bias to readings
+                let mut biased_readings: Vec<_> = my_readings.into_iter()
+                    .map(|mut r| {
+                        r.position.x += gps_bias;
+                        r.position.y += gps_bias;
+                        r.position.z += gps_bias;
+                        r
+                    })
+                    .collect();
+                
+                // Apply agent's evolved bias compensation
+                let bias_compensation = agent.sensor_bias_estimate();
+                for reading in &mut biased_readings {
+                    reading.position.x -= bias_compensation;
+                    reading.position.y -= bias_compensation;
+                    reading.position.z -= bias_compensation;
+                }
+                
+                agent.ingest_readings(&biased_readings);
+                
+                // Evolution tick
+                agent.tick_evolution(evo_epoch_ticks, Some(&ground_truth));
+            }
+            
+            // Gossip
+            if tick % 5 == 0 {
+                let all_packets: Vec<_> = agents.iter_mut()
+                    .enumerate()
+                    .flat_map(|(idx, a)| {
+                        if !a.is_alive() { return Vec::new(); }
+                        if a.should_broadcast(tick) {
+                            a.recent_packets().iter().map(|p| (idx, p.clone())).collect()
+                        } else {
+                            Vec::new()
+                        }
+                    })
+                    .collect();
+                
+                for (from_idx, packet) in all_packets {
+                    swarm_network.queue_gossip(from_idx, packet);
+                }
+                
+                for (agent_idx, agent) in agents.iter_mut().enumerate() {
+                     let incoming = swarm_network.take_gossip(agent_idx);
+                     agent.receive_gossip(&incoming);
+                     agent.clear_recent_packets();
+                }
+            }
+        }
+        
+        // Measure final accuracy
+        let gt: Vec<_> = oracle.ground_truth_positions();
+        let avg_rms: f64 = agents.iter()
+            .map(|a| a.compute_position_error(&gt))
+            .sum::<f64>() / num_agents as f64;
+        
+        // Check evolved bias estimates
+        let avg_bias_estimate: f64 = agents.iter()
+            .map(|a| a.sensor_bias_estimate())
+            .sum::<f64>() / num_agents as f64;
+        
+        let passed = avg_rms < 5.0;
+        
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("  COMMON BIAS RESULTS:");
+        info!("    Final RMS: {:.2}m (target < 5.0m)", avg_rms);
+        info!("    Avg Bias Estimate: {:.2}m (true bias: {}m)", avg_bias_estimate, gps_bias);
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        ScenarioResult {
+            scenario: ScenarioId::CommonBias,
+            seed: self.seed,
+            passed,
+            total_ticks: target_ticks,
+            final_time_secs: oracle.time(),
+            final_entity_count: 5,
+            failure_reason: if !passed { Some(format!("RMS: {:.2}m", avg_rms)) } else { None },
             metrics: ScenarioMetrics::default(),
         }
     }

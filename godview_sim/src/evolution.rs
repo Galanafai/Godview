@@ -11,6 +11,10 @@ pub struct EvoParams {
     
     /// Minimum confidence to accept a track.
     pub confidence_threshold: f64,
+    
+    /// Sensor bias estimate (v0.6.0): calibration offset for systematic errors.
+    /// Agents evolve this to compensate for GPS bias.
+    pub sensor_bias_estimate: f64,
 }
 
 impl Default for EvoParams {
@@ -19,6 +23,7 @@ impl Default for EvoParams {
             gossip_interval_ticks: 5,
             max_neighbors_gossip: 100, // Effectively infinite (all neighbors)
             confidence_threshold: 0.0,
+            sensor_bias_estimate: 0.0, // No bias compensation by default
         }
     }
 }
@@ -39,6 +44,10 @@ pub struct FitnessContext {
     
     /// Bandwidth usage (bytes sent / tick).
     pub bandwidth_usage_per_tick: f64,
+    
+    /// Average covariance trace (uncertainty metric, v0.6.0).
+    /// High values = agent is very uncertain. Low NIS + High Cov = groupthink risk.
+    pub avg_covariance_trace: f64,
     
     // --- Common Metrics ---
     /// Messages sent per tick (spam metric).
@@ -127,13 +136,23 @@ impl Default for BlindFitness {
 impl FitnessProvider for BlindFitness {
     fn calculate_fitness(&self, ctx: &FitnessContext) -> f64 {
         // We want to MINIMIZE the cost J
-        let cost = (self.w_nis * ctx.avg_nis) + 
+        let base_cost = (self.w_nis * ctx.avg_nis) + 
                    (self.w_pa * ctx.peer_agreement_cost) + 
                    (self.w_bw * ctx.bandwidth_usage_per_tick) +
                    (self.w_energy * ctx.energy_penalty);
         
-        // Convert loss to fitness (Higher is better)
-        100.0 / (cost + 1.0)
+        // v0.6.0: Covariance Inflation Penalty (Anti-Groupthink)
+        // Penalize if NIS is low but covariance is suspiciously high.
+        // This prevents "ignorance is bliss" - inflating uncertainty to fake consistency.
+        let sharpness_penalty = if ctx.avg_nis < 0.5 && ctx.avg_covariance_trace > 100.0 {
+            // 20% penalty for suspicious low-NIS/high-uncertainty combination
+            0.8
+        } else {
+            1.0
+        };
+        
+        // Convert loss to fitness (Higher is better), then apply sharpness penalty
+        (100.0 / (base_cost + 1.0)) * sharpness_penalty
     }
     
     fn name(&self) -> &str {
@@ -167,6 +186,7 @@ pub struct EvolutionaryState {
     epoch_nis_sum: f64,
     epoch_pa_sum: f64,
     epoch_bytes_sent: u64,
+    epoch_cov_trace_sum: f64, // v0.6.0: Covariance trace accumulator
     
     // Energy tracking
     epoch_energy_remaining_sum: f64,
@@ -190,6 +210,8 @@ enum MutationType {
     DecreaseMaxNeighbors,
     IncreaseConfidence,
     DecreaseConfidence,
+    IncreaseBias,   // v0.6.0: Sensor bias calibration
+    DecreaseBias,
 }
 
 impl EvolutionaryState {
@@ -206,6 +228,7 @@ impl EvolutionaryState {
             epoch_nis_sum: 0.0,
             epoch_pa_sum: 0.0,
             epoch_bytes_sent: 0,
+            epoch_cov_trace_sum: 0.0,
             epoch_energy_remaining_sum: 0.0,
             // Adaptive mutation defaults
             consecutive_failures: 0,
@@ -221,17 +244,19 @@ impl EvolutionaryState {
         nis: f64, 
         pa_cost: f64,
         energy_remaining: f64,
+        cov_trace: f64,
     ) {
         self.epoch_error_sum += error;
         self.epoch_nis_sum += nis;
         self.epoch_pa_sum += pa_cost;
         self.epoch_energy_remaining_sum += energy_remaining;
+        self.epoch_cov_trace_sum += cov_trace;
         self.epoch_samples += 1;
     }
     
     /// Legacy: Record only accuracy (for backward compat if needed).
     pub fn record_accuracy(&mut self, error: f64) {
-        self.record_metrics(error, 0.0, 0.0, 1000.0);
+        self.record_metrics(error, 0.0, 0.0, 1000.0, 0.0);
     }
     
     pub fn record_message_sent(&mut self, bytes: u64) {
@@ -258,6 +283,7 @@ impl EvolutionaryState {
             peer_agreement_cost: self.epoch_pa_sum / samples,
             // Assuming samples equiv to ticks roughly for this rate calc
             bandwidth_usage_per_tick: self.epoch_bytes_sent as f64 / samples,
+            avg_covariance_trace: self.epoch_cov_trace_sum / samples,
             msgs_per_tick: self.epoch_msgs_sent as f64 / samples,
             energy_penalty,
         };
@@ -306,17 +332,20 @@ impl EvolutionaryState {
         self.epoch_nis_sum = 0.0;
         self.epoch_pa_sum = 0.0;
         self.epoch_bytes_sent = 0;
+        self.epoch_cov_trace_sum = 0.0;
         self.epoch_energy_remaining_sum = 0.0;
     }
     
     fn pick_mutation<R: Rng>(&self, rng: &mut R) -> MutationType {
-        match rng.gen_range(0..6) {
+        match rng.gen_range(0..8) {
             0 => MutationType::IncreaseGossipInterval,
             1 => MutationType::DecreaseGossipInterval,
             2 => MutationType::IncreaseMaxNeighbors,
             3 => MutationType::DecreaseMaxNeighbors,
             4 => MutationType::IncreaseConfidence,
-            _ => MutationType::DecreaseConfidence,
+            5 => MutationType::DecreaseBias,
+            6 => MutationType::IncreaseBias,
+            _ => MutationType::DecreaseBias,
         }
     }
     
@@ -361,6 +390,13 @@ impl EvolutionaryState {
                     self.current_params.confidence_threshold = 0.0;
                 }
             }
+            MutationType::IncreaseBias => {
+                // Bias can go positive or negative (calibration offset)
+                self.current_params.sensor_bias_estimate += 0.5 * step;
+            }
+            MutationType::DecreaseBias => {
+                self.current_params.sensor_bias_estimate -= 0.5 * step;
+            }
         }
     }
     
@@ -382,6 +418,10 @@ impl EvolutionaryState {
         // Confidence threshold: random walk
         let conf_delta = rng.gen_range(-0.1..=0.1) * step;
         self.current_params.confidence_threshold = (self.current_params.confidence_threshold + conf_delta).clamp(0.0, 1.0);
+        
+        // Sensor bias: random walk (can be negative or positive)
+        let bias_delta = rng.gen_range(-1.0..=1.0) * step;
+        self.current_params.sensor_bias_estimate += bias_delta;
         
         // Mark as multi-param (no single active_mutation)
         self.active_mutation = None;

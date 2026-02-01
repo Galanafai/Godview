@@ -175,8 +175,11 @@ impl SimulatedAgent {
         // 3. Consensus (Peer Agreement) via Tracking Engine
         let pa_cost = self.inner.track_manager.get_peer_agreement_cost();
         
+        // 4. Uncertainty (Covariance Trace) for anti-groupthink penalty (v0.6.0)
+        let cov_trace = self.inner.time_engine.get_current_covariance().trace();
+        
         // Record all raw metrics to evolutionary state
-        self.evolution.record_metrics(error, nis, pa_cost, self.energy);
+        self.evolution.record_metrics(error, nis, pa_cost, self.energy, cov_trace);
         
         // Check if epoch should end
         if self.inner.tick_count() % epoch_length_ticks == 0 {
@@ -311,6 +314,12 @@ impl SimulatedAgent {
     /// Returns max gossip neighbors (evolved).
     pub fn max_gossip_neighbors(&self) -> usize {
         self.evolution.current_params.max_neighbors_gossip
+    }
+    
+    /// Returns the current evolved sensor bias estimate (v0.6.0).
+    /// Agents evolve this to compensate for systematic GPS errors.
+    pub fn sensor_bias_estimate(&self) -> f64 {
+        self.evolution.current_params.sensor_bias_estimate
     }
     
     /// Returns total gossip packets received.

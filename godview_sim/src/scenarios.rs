@@ -67,6 +67,9 @@ pub enum ScenarioId {
     
     /// DST-019: Energy Conserved Survival
     LongHaul,
+    
+    /// DST-020: Common GPS Bias Detection (v0.6.0)
+    CommonBias,
 }
 
 impl ScenarioId {
@@ -94,6 +97,7 @@ impl ScenarioId {
             ScenarioId::BlindLearning,
             ScenarioId::BlackoutSurvival,
             ScenarioId::LongHaul,
+            ScenarioId::CommonBias,
         ]
     }
     
@@ -129,6 +133,7 @@ impl ScenarioId {
             ScenarioId::EvoWar,
             ScenarioId::ResourceStarvation,
             ScenarioId::ProtocolDrift,
+            ScenarioId::CommonBias,
         ]
     }
     
@@ -156,6 +161,7 @@ impl ScenarioId {
             ScenarioId::BlindLearning => "blind_learning",
             ScenarioId::BlackoutSurvival => "blackout_survival",
             ScenarioId::LongHaul => "long_haul",
+            ScenarioId::CommonBias => "common_bias",
         }
     }
     
@@ -183,6 +189,7 @@ impl ScenarioId {
             ScenarioId::BlindLearning => "🧬 Blind Learning: adapt without ground truth",
             ScenarioId::BlackoutSurvival => "💀 BLACKOUT: Loss + Faults + Bad Actors + Bandwidth Limit",
             ScenarioId::LongHaul => "🔋 LONG HAUL: Energy Crisis Survival",
+            ScenarioId::CommonBias => "🎯 COMMON BIAS: All agents get +5m GPS offset, evolve compensation",
         }
     }
     
@@ -242,6 +249,7 @@ impl std::str::FromStr for ScenarioId {
             "blind_learning" | "blindlearning" | "dst-017" => Ok(ScenarioId::BlindLearning),
             "blackout_survival" | "blackoutsurvival" | "dst-018" => Ok(ScenarioId::BlackoutSurvival),
             "long_haul" | "longhaul" | "dst-019" => Ok(ScenarioId::LongHaul),
+            "common_bias" | "commonbias" | "dst-020" => Ok(ScenarioId::CommonBias),
             // Groups
             "extreme" => Err("Use --scenario extreme (or all) for extreme scenarios".to_string()),
             "evolutionary" => Err("Use --scenario evolutionary (or all) for evolutionary scenarios".to_string()),

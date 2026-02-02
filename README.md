@@ -7,6 +7,7 @@
 [![Tests](https://img.shields.io/badge/Tests-61%2B%20Passing-brightgreen.svg)](#-test-results)
 [![DST](https://img.shields.io/badge/DST-20%2F22%20Scenarios-blue.svg)](godview_sim/README.md)
 [![Rerun](https://img.shields.io/badge/Rerun-0.28-blue.svg)](https://rerun.io/)
+[![Status](https://img.shields.io/badge/Status-Completed-success.svg)](#)
 
 > *A Self-Evolving Distributed Perception Protocol for Multi-Agent Autonomous Systems*
 

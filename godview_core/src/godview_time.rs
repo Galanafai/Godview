@@ -4,6 +4,8 @@
 //! a history of past states and their correlations, enabling retrodiction
 //! without rewinding the entire simulation.
 
+#![allow(non_snake_case)]  // Kalman filter notation: F, K, P, H, S, etc.
+
 use nalgebra::{DMatrix, DVector};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;

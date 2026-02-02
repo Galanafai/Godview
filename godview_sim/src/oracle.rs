@@ -97,9 +97,6 @@ pub struct SensorReading {
 
 /// The Oracle - maintains ground truth and generates sensor readings.
 pub struct Oracle {
-    /// Master seed (separate from network to avoid interference)
-    physics_seed: u64,
-    
     /// RNG for physics (noise, random events)
     physics_rng: ChaCha8Rng,
     
@@ -126,7 +123,6 @@ impl Oracle {
     /// so that changing network topology doesn't affect entity trajectories.
     pub fn new(physics_seed: u64) -> Self {
         Self {
-            physics_seed,
             physics_rng: ChaCha8Rng::seed_from_u64(physics_seed),
             entities: HashMap::new(),
             next_id: 0,

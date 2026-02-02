@@ -8,7 +8,7 @@
 //!
 //! These metrics drive the "Ghost Hunter" visualization mode.
 
-use nalgebra::{Matrix6, Vector6};
+use nalgebra::Matrix6;
 use std::f64::consts::PI;
 
 /// Metrics calculated for each track during inspection
@@ -72,7 +72,7 @@ impl Default for GhostScoreConfig {
 /// - `Trace(P)` = covariance trace (uncertainty magnitude)
 pub fn calculate_ghost_score(
     track_position: &[f64; 3],
-    track_velocity: &[f64; 3],
+    _track_velocity: &[f64; 3],
     track_covariance: &Matrix6<f64>,
     supporting_agents: usize,
     total_agents: usize,
@@ -84,7 +84,7 @@ pub fn calculate_ghost_score(
     let mut nearest_idx = None;
     let mut nearest_dist = f64::MAX;
 
-    for (idx, (n_pos, n_vel, n_cov)) in neighbors.iter().enumerate() {
+    for (idx, (n_pos, _n_vel, n_cov)) in neighbors.iter().enumerate() {
         let mahal_dist = mahalanobis_distance_3d(track_position, n_pos, track_covariance, n_cov);
 
         if mahal_dist < nearest_dist {

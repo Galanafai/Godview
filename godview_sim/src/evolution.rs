@@ -343,7 +343,7 @@ impl EvolutionaryState {
             2 => MutationType::IncreaseMaxNeighbors,
             3 => MutationType::DecreaseMaxNeighbors,
             4 => MutationType::IncreaseConfidence,
-            5 => MutationType::DecreaseBias,
+            5 => MutationType::DecreaseConfidence,
             6 => MutationType::IncreaseBias,
             _ => MutationType::DecreaseBias,
         }

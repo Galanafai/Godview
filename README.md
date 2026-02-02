@@ -1,13 +1,14 @@
-# 👁️ GodView v0.3.0
+# 👁️ GodView v0.6.0
 
 ## The HTTP of Spatial Computing
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-37%2F37%20Passing-brightgreen.svg)](#-test-results)
+[![Tests](https://img.shields.io/badge/Tests-61%2B%20Passing-brightgreen.svg)](#-test-results)
+[![DST](https://img.shields.io/badge/DST-20%2F22%20Scenarios-blue.svg)](godview_sim/README.md)
 [![Rerun](https://img.shields.io/badge/Rerun-0.28-blue.svg)](https://rerun.io/)
 
-> *A Distributed Gaussian Perception Protocol for Multi-Agent Autonomous Systems*
+> *A Self-Evolving Distributed Perception Protocol for Multi-Agent Autonomous Systems*
 
 **GodView** solves the fundamental problems of distributed spatial computing: time synchronization across networks, 3D spatial indexing at global scale, and Byzantine fault tolerance in untrusted agent meshes.
 
@@ -387,7 +388,7 @@ fn test_highlander_merge_id() {
 }
 ```
 
-### All Bugs Fixed (v0.3.0)
+### All Bugs Fixed (v0.3.0 → v0.6.0)
 
 | Engine | Issue | Status |
 |:-------|:------|:-------|
@@ -411,6 +412,65 @@ fn test_highlander_merge_id() {
 | Ed25519 | Sign/Verify | O(1) | 15/40 µs |
 
 *Benchmarked on AMD Ryzen 9 5950X*
+
+---
+
+## 🧪 Deterministic Simulation Testing (v0.4.0+)
+
+**Crate:** [`godview_sim`](godview_sim/README.md)
+
+Inspired by [FoundationDB's simulation testing](https://www.youtube.com/watch?v=4fFDFbi3toc), we built a chaos engineering framework that proves correctness across thousands of seeds.
+
+### Key Scenarios
+
+| Scenario | Challenge | Result |
+|----------|-----------|--------|
+| DST-010: NetworkHell | 90% packet loss | ✅ 0.82m RMS |
+| DST-011: TimeTornado | 5-second OOSM delays | ✅ <200m RMS |
+| DST-012: ZombieApocalypse | 50% malicious actors | ✅ 100% detection |
+| DST-019: LongHaul | Energy starvation | ✅ 100% survival |
+
+```bash
+# Run all scenarios with seed
+cargo run -p godview_sim --release -- --scenario all --seed 42
+```
+
+---
+
+## 🧬 Evolutionary Intelligence (v0.5.0+)
+
+Agents evolve their own parameters in real-time without human tuning:
+
+```rust
+struct EvoParams {
+    gossip_interval_ticks: u64,   // Communication frequency
+    max_neighbors_gossip: usize,  // Redundancy level
+    confidence_threshold: f64,    // Accuracy vs Recall
+    sensor_bias_estimate: f64,    // Self-calibration
+}
+```
+
+**Adaptive Mutation**: Step size scales 1.5× after 5 consecutive failures (cap 10×).
+
+**Emergency Protocol**: Agents stop messaging when energy < 50J to survive.
+
+---
+
+## 👁️ Blind Fitness (v0.5.0+)
+
+The key breakthrough: **agents learn without ground truth**.
+
+```
+BlindFitness = 0.5×(1/NIS) + 0.3×(1/PeerAgreement) + 0.2×(1/Bandwidth)
+```
+
+| Metric | Source | What It Measures |
+|--------|--------|------------------|
+| **NIS** | Kalman filter | Internal consistency |
+| **Peer Agreement** | Neighbor consensus | External validation |
+| **Bandwidth** | Message count | Resource efficiency |
+
+**Anti-Groupthink**: 20% fitness penalty if NIS < 0.5 AND covariance > 100.
 
 ---
 

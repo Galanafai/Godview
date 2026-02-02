@@ -4,7 +4,6 @@
 //! in an H3 spatial grid.
 
 use godview_core::godview_tracking::GlobalHazardPacket;
-use godview_env::NodeId;
 use std::collections::HashMap;
 
 /// Represents the P2P network topology for a swarm of agents.

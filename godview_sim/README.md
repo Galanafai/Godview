@@ -244,13 +244,36 @@ controller.set_latency(node_a, node_b, 100);
 controller.set_loss(node_a, node_b, 0.5);
 ```
 
+---
+
+## v0.6.0 Scenarios
+
+| Scenario | Purpose | Status |
+|----------|---------|--------|
+| DST-020: CommonBias | GPS bias detection via evolution | 🔬 Research |
+| DST-021: HeavyTail | Cauchy/Lévy noise robustness | ✅ Passed |
+| DST-022: SensorDrift | Time-varying noise adaptation | ✅ Passed |
+
+### Scenario Categories
+
+```rust
+// For strict CI enforcement (17 scenarios)
+ScenarioId::stable_ci()
+
+// For research/experimental (3 scenarios)
+ScenarioId::research()  // ScaleLimit, CommonBias, ProtocolDrift
+```
+
+---
+
 ## Future Work
 
 - [ ] Rerun visualization integration for debugging
 - [ ] Property-based testing with Proptest
 - [ ] Fuzzing integration with AFL/libFuzzer
-- [ ] Clock drift simulation for NTP edge cases
-- [ ] Byzantine fault injection (not just revocation)
+- [x] ~~Clock drift simulation~~ → SensorDrift scenario
+- [x] ~~Byzantine fault injection~~ → ZombieApocalypse scenario
+- [ ] Cross-scenario genome generalization
 
 ## References
 

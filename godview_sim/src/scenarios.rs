@@ -147,6 +147,45 @@ impl ScenarioId {
         ]
     }
     
+    /// Returns scenarios suitable for strict CI enforcement.
+    /// Excludes: performance-dependent (ScaleLimit), research (CommonBias).
+    pub fn stable_ci() -> Vec<ScenarioId> {
+        vec![
+            // Baseline
+            ScenarioId::TimeWarp,
+            ScenarioId::SplitBrain,
+            ScenarioId::Byzantine,
+            ScenarioId::FlashMob,
+            ScenarioId::SlowLoris,
+            ScenarioId::Swarm,
+            ScenarioId::AdaptiveSwarm,
+            // Extreme (not perf-dependent)
+            ScenarioId::ChaosStorm,
+            ScenarioId::NetworkHell,
+            ScenarioId::TimeTornado,
+            ScenarioId::ZombieApocalypse,
+            ScenarioId::RapidFire,
+            // Evolutionary (stable)
+            ScenarioId::EvoWar,
+            ScenarioId::ResourceStarvation,
+            ScenarioId::BlindLearning,
+            ScenarioId::BlackoutSurvival,
+            ScenarioId::LongHaul,
+            ScenarioId::HeavyTail,
+            ScenarioId::SensorDrift,
+        ]
+    }
+    
+    /// Returns research scenarios (allowed to fail in CI).
+    pub fn research() -> Vec<ScenarioId> {
+        vec![
+            ScenarioId::ScaleLimit,     // Performance-dependent
+            ScenarioId::CommonBias,     // Evolving bias (needs more epochs)
+            ScenarioId::ProtocolDrift,  // Experimental
+            ScenarioId::SensorDrift,
+        ]
+    }
+    
     /// Returns the scenario name.
     pub fn name(&self) -> &'static str {
         match self {

@@ -6,7 +6,7 @@ use clap::Parser;
 use godview_sim::{ScenarioRunner, ScenarioResult};
 use godview_sim::scenarios::ScenarioId;
 use godview_sim::{SimExport, SimFrame, EntityPosition, AgentFrame, TrackPosition};
-use godview_sim::{SimContext, SimNetwork, SimulatedAgent, Oracle, DeterministicKeyProvider, SensorReading};
+use godview_sim::{SimContext, SimNetwork, SimulatedAgent, Oracle, DeterministicKeyProvider};
 use godview_core::AgentConfig;
 use godview_env::NodeId;
 use nalgebra::Vector3;

@@ -4,7 +4,7 @@
 
 ## System Identity
 
-You are the **lead architect for GodView**, a high-precision distributed spatial computing protocol written in Rust.
+
 
 GodView solves the **Four Horsemen** of distributed sensor fusion:
 1. **Time Travel Problem** → Out-of-Sequence Measurements via Augmented State EKF

@@ -416,6 +416,31 @@ fn test_highlander_merge_id() {
 
 ---
 
+## 🛰️ Running nodes over Zenoh
+
+**Crate:** `godview_node` (binary `godview-node`)
+
+Each node runs the perception-sharing pipeline in its own process and talks
+to peers over Zenoh. Reports travel on one topic per H3 cell
+(`godview/v1/reports/<res>/<cell>`), and a node subscribes only to the cells
+around itself, so what it receives depends on what is near it, not on fleet
+size. Detections come from a seeded synthetic scene or from JSON lines on
+stdin (the hook for an external detector). Faults can be injected on
+outgoing traffic.
+
+```bash
+START=$(( $(date +%s%3N) + 3000 ))
+godview-node --listen tcp/127.0.0.1:7447 --synthetic-index 0 --key-seed 1 --start-unix-ms $START &
+godview-node --listen tcp/127.0.0.1:7448 --connect tcp/127.0.0.1:7447 \
+  --synthetic-index 1 --key-seed 2 --start-unix-ms $START --loss 0.2 --jitter-ms 60
+# Multi-process tests (real processes, real Zenoh, injected faults):
+cargo test --release -p godview_node
+```
+
+Details in [docs/PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md#9-running-nodes-over-zenoh-godview_node).
+
+---
+
 ## 🧪 Deterministic Simulation Testing (v0.4.0+)
 
 **Crate:** [`godview_sim`](godview_sim/README.md)
@@ -536,6 +561,8 @@ godview/
 │   └── examples/
 │       ├── rerun_demo.rs          # Synthetic multi-agent demo
 │       └── kitti_demo.rs          # Real KITTI dataset demo
+├── godview_node/              # Node binary: Zenoh transport, H3 cell topics
+├── godview_sim/               # Deterministic simulation testing
 ├── carla_bridge/              # CARLA simulator integration
 ├── agent/                     # Rust detection agent
 ├── viewer/                    # Three.js web viewer

@@ -21,16 +21,18 @@
 
 use crate::consistency::{ConsistencyConfig, ConsistencyMonitor};
 use crate::filter::CvState;
-use crate::frames::add_clock_uncertainty;
+use crate::frames::{add_clock_uncertainty, Ecef};
 use crate::local_tracker::{Detection, LocalTrack, LocalTracker, LocalTrackerConfig, ScanOutcome};
 use crate::localization::{LocalizationStatus, PoseEstimate};
 use crate::report::{
     quantize_covariance, AgentId, FrameRef, ReportBatch, ReportError, TrackLifecycle, TrackReport,
 };
 use crate::report_store::{InsertOutcome, ReportStore};
+use crate::topics::topic_cell;
 use crate::world_model::{TrustView, WorldModel, WorldModelConfig, WorldSnapshot};
 use ed25519_dalek::SigningKey;
 use godview_env::Timestamp;
+use h3o::{CellIndex, Resolution};
 use nalgebra::{Matrix6, Vector3, Vector6};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -114,6 +116,8 @@ pub struct ReceiveSummary {
     pub below_floor: usize,
     /// The batch was this node's own (echoed back by a relay) and was ignored.
     pub own_echo: bool,
+    /// The verified source of the batch.
+    pub source: Option<AgentId>,
 }
 
 /// Counters for diagnosis.
@@ -139,6 +143,15 @@ pub struct NodeStats {
     pub own_echoes: u64,
     /// Rejected batches by reason.
     pub rejected: BTreeMap<RejectReason, u64>,
+}
+
+/// One signed batch for one topic cell (see [`PerceptionNode::publish_by_cell`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellBatch {
+    /// Topic cell of every report in the batch; `None` for local-frame reports.
+    pub cell: Option<CellIndex>,
+    /// Signed batch bytes.
+    pub bytes: Vec<u8>,
 }
 
 /// An agent's perception-sharing node.
@@ -249,6 +262,49 @@ impl PerceptionNode {
     /// go into its own store exactly as peers will decode them.
     /// Returns `None` when there is nothing to report.
     pub fn publish(&mut self, t_valid: Timestamp, pose: Option<&PoseEstimate>) -> Option<Vec<u8>> {
+        let reports = self.build_reports(t_valid, pose);
+        self.sign_and_store(t_valid, reports)
+    }
+
+    /// Like [`PerceptionNode::publish`], but signs one batch per topic cell.
+    ///
+    /// Each global report is filed under the H3 cell (at `resolution`) that
+    /// contains its position, so a transport can carry it on that cell's
+    /// topic and only nodes near it receive it. Local-frame reports have no
+    /// global position; they are returned under `cell: None`. Every batch is
+    /// independently signed and verifiable.
+    pub fn publish_by_cell(
+        &mut self,
+        t_valid: Timestamp,
+        pose: Option<&PoseEstimate>,
+        resolution: Resolution,
+    ) -> Vec<CellBatch> {
+        let mut groups: BTreeMap<Option<CellIndex>, Vec<TrackReport>> = BTreeMap::new();
+        for r in self.build_reports(t_valid, pose) {
+            let cell = match r.frame {
+                FrameRef::Ecef => {
+                    topic_cell(&Ecef::new(r.pos[0], r.pos[1], r.pos[2]), resolution).ok()
+                }
+                FrameRef::Local { .. } => None,
+            };
+            groups.entry(cell).or_default().push(r);
+        }
+        groups
+            .into_iter()
+            .filter_map(|(cell, reports)| {
+                self.sign_and_store(t_valid, reports)
+                    .map(|bytes| CellBatch { cell, bytes })
+            })
+            .collect()
+    }
+
+    /// The reports for one publish cycle (live tracks and tombstones), each
+    /// with a fresh sequence number.
+    fn build_reports(
+        &mut self,
+        t_valid: Timestamp,
+        pose: Option<&PoseEstimate>,
+    ) -> Vec<TrackReport> {
         let global = pose.filter(|p| p.status == LocalizationStatus::Global);
         let valid_for_ms = (self.config.tracker.terminate_after_s * 1000.0) as u32;
         let mut entries: Vec<(LocalTrack, CvState)> = self
@@ -271,7 +327,7 @@ impl PerceptionNode {
             entries.push((t.clone(), t.predicted(t_valid)));
         }
         if entries.is_empty() {
-            return None;
+            return Vec::new();
         }
         entries.sort_by_key(|(t, _)| t.id);
 
@@ -325,6 +381,12 @@ impl PerceptionNode {
             }
             reports.push(report);
         }
+        reports
+    }
+
+    /// Signs `reports` as one batch, inserts them into the own store exactly
+    /// as peers will decode them, and returns the bytes.
+    fn sign_and_store(&mut self, t_valid: Timestamp, reports: Vec<TrackReport>) -> Option<Vec<u8>> {
         if reports.is_empty() {
             return None;
         }
@@ -362,7 +424,10 @@ impl PerceptionNode {
         now: Timestamp,
     ) -> Result<ReceiveSummary, RejectReason> {
         let batch = ReportBatch::verify_and_decode(bytes).map_err(RejectReason::Invalid)?;
-        let mut summary = ReceiveSummary::default();
+        let mut summary = ReceiveSummary {
+            source: Some(batch.source),
+            ..ReceiveSummary::default()
+        };
         if batch.source == self.id {
             summary.own_echo = true;
             self.stats.own_echoes += 1;
@@ -505,6 +570,68 @@ mod tests {
         assert_eq!(wa.digest(), wb.digest(), "same reports, same world");
         let err = wa.objects[0].position().distance(&site().to_ecef(&truth));
         assert!(err < 0.5, "fused error {err} m");
+    }
+
+    #[test]
+    fn per_cell_batches_carry_the_same_reports_as_one_batch() {
+        // Two objects 3 km apart fall in different topic cells. Receiving every
+        // per-cell batch must give exactly the store (and world) that the single
+        // batch of an identical twin gives.
+        let res = crate::topics::DEFAULT_TOPIC_RESOLUTION;
+        let objects = [
+            Vector3::new(20.0, 5.0, 1.0),
+            Vector3::new(3000.0, -40.0, 1.0),
+        ];
+        let mut split = Rig::new(5, Vector3::zeros(), 0.7);
+        let mut whole = Rig::new(5, Vector3::zeros(), 0.7);
+        let (mut rx_split, mut rx_whole) = (
+            Rig::new(6, Vector3::zeros(), 0.0),
+            Rig::new(6, Vector3::zeros(), 0.0),
+        );
+        let mut cells_seen = BTreeSet::new();
+        let mut t = Timestamp::ZERO;
+        for k in 0..6 {
+            t = Timestamp::from_millis(k * 100);
+            split.see(t, &objects);
+            whole.see(t, &objects);
+            for b in split.node.publish_by_cell(t, Some(&split.pose(t)), res) {
+                let cell = b.cell.expect("global reports have a cell");
+                let decoded = ReportBatch::verify_and_decode(&b.bytes).unwrap();
+                for r in &decoded.reports {
+                    let at = topic_cell(&Ecef::new(r.pos[0], r.pos[1], r.pos[2]), res).unwrap();
+                    assert_eq!(at, cell, "report filed under its own cell");
+                }
+                cells_seen.insert(cell);
+                rx_split.node.receive(&b.bytes, t).unwrap();
+            }
+            if let Some(bytes) = whole.node.publish(t, Some(&whole.pose(t))) {
+                rx_whole.node.receive(&bytes, t).unwrap();
+            }
+        }
+        assert_eq!(cells_seen.len(), 2, "one topic per object here");
+        assert_eq!(
+            rx_split.node.store().digest(),
+            rx_whole.node.store().digest()
+        );
+        assert_eq!(
+            rx_split.node.world_neutral(t).digest(),
+            rx_whole.node.world_neutral(t).digest()
+        );
+        assert_eq!(rx_split.node.world_neutral(t).objects.len(), 2);
+    }
+
+    #[test]
+    fn local_frame_reports_have_no_cell() {
+        let res = crate::topics::DEFAULT_TOPIC_RESOLUTION;
+        let mut a = Rig::new(7, Vector3::zeros(), 0.0);
+        let mut out = Vec::new();
+        for k in 0..5 {
+            let t = Timestamp::from_millis(k * 100);
+            a.see(t, &[Vector3::new(5.0, 5.0, 0.0)]);
+            out = a.node.publish_by_cell(t, None, res);
+        }
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].cell, None);
     }
 
     #[test]

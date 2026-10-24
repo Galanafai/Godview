@@ -111,8 +111,7 @@ impl<K: Ord + Copy> SpatialIndex<K> {
     /// vary across the globe (pentagons and icosahedron distortion), so the
     /// average edge length is scaled down by a factor of two before dividing.
     pub fn ring_count(&self, radius_m: f64) -> u32 {
-        let min_edge = self.resolution.edge_length_m() * 0.5;
-        ((radius_m.max(0.0) / (min_edge * 3f64.sqrt())).ceil() as u32) + 1
+        ring_count(self.resolution, radius_m)
     }
 
     fn detach(&mut self, cell: CellIndex, key: &K) {
@@ -133,6 +132,14 @@ impl<K: Ord + Copy> SpatialIndex<K> {
                 .iter()
                 .all(|(k, (_, c))| self.cells.get(c).is_some_and(|s| s.contains(k)))
     }
+}
+
+/// Number of H3 rings around a point's cell at `resolution` such that every
+/// point within `radius_m` of it lies in the disk. See
+/// [`SpatialIndex::ring_count`] for the bound.
+pub fn ring_count(resolution: Resolution, radius_m: f64) -> u32 {
+    let min_edge = resolution.edge_length_m() * 0.5;
+    ((radius_m.max(0.0) / (min_edge * 3f64.sqrt())).ceil() as u32) + 1
 }
 
 #[cfg(test)]

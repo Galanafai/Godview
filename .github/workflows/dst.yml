@@ -158,3 +158,6 @@ jobs:
           cargo test -p godview_env
           cargo test -p godview_core
           cargo test -p godview_sim
+
+      - name: Run multi-process node tests (real processes over Zenoh)
+        run: cargo test --release -p godview_node

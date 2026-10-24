@@ -5,6 +5,7 @@ members = [
     "godview_core",
     "godview_env",
     "godview_sim",
+    "godview_node",
 ]
 
 [workspace.package]

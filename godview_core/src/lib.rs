@@ -11,6 +11,7 @@ pub mod filter;
 pub mod godview_time;
 pub mod godview_space;
 pub mod spatial_index;
+pub mod topics;
 pub mod report;
 pub mod assignment;
 pub mod localization;

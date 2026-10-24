@@ -12,7 +12,7 @@ by the module documentation in `godview_core` (`frames`, `report`,
 | L0 localization | `localization` | odometry to ECEF pose with 6x6 covariance | no |
 | L1 observations | `local_tracker::Detection` | sensor / odometry | no |
 | L2 local tracks | `local_tracker`, `filter` | odometry | as reports |
-| Wire | `report` (`TrackReport`, `ReportBatch`) | ECEF (or source local, flagged) | yes, signed |
+| Wire | `report` (`TrackReport`, `ReportBatch`), `topics` | ECEF (or source local, flagged) | yes, signed, per H3 topic cell |
 | Store | `report_store` | as received | per agent |
 | L3 world model | `world_model`, `consistency` | ECEF, ENU for consumers | derived, never sent |
 
@@ -152,7 +152,81 @@ batch to `PerceptionNode::receive`; rejections are returned as errors and
 counted, not dropped silently. The legacy `TrackManager` (Highlander) path is
 unchanged and still used by the CARLA agent and the legacy DST scenarios.
 
-## 9. Deterministic simulation (DST)
+## 9. Running nodes over Zenoh (`godview_node`)
+
+`godview_node` runs one `PerceptionNode` per process with real I/O. Zenoh
+stays out of `godview_core`: the perception math is synchronous and owned by
+one loop, and only the node's I/O is async.
+
+**Cell topics.** `PerceptionNode::publish_by_cell` signs one batch per H3
+cell at the topic resolution (default 8, about 530 m edges), and the node
+publishes each on `godview/v1/reports/<res>/<cell>`. A node subscribes to
+`topics::cover_cells(position, interest radius)`, every cell that can hold a
+point within its radius of interest (default 200 m), and follows itself as
+it moves. A property test checks the cover never misses a cell. The traffic a
+node receives therefore depends on what is around it, not on fleet size: a
+node 5 km away in the same Zenoh mesh receives nothing. Subscribers ignore
+their own publications. Local-frame reports (no global pose) are not sent,
+since no peer could fuse them.
+
+**Loop.** At a fixed rate (default 10 Hz): drain received batches (each is
+verified and validated before it touches state), ingest detections, maintain
+tracks, publish per cell. A tick that falls more than a period behind is
+skipped rather than run late, so lag never accumulates; the report records
+lag, skipped ticks and work per tick.
+
+**Inputs.**
+* `--synthetic-index N`: agent N of a seeded synthetic scene that every
+  process rebuilds identically from `--seed`, with its own sensor noise and
+  localization error.
+* Otherwise, JSON lines on stdin, one frame per line: detections in the
+  agent's odometry frame and the placement of that frame on the Earth (like
+  ROS `odom` and `map -> odom`), each with its uncertainty. This is the
+  integration point for an external perception stack. Bad lines are counted
+  and skipped. See `godview_node/src/input.rs` for the format.
+
+**Faults.** `--loss`, `--duplicate`, `--delay-ms` and `--jitter-ms` apply a
+seeded fault stream to outgoing batches, so the network can be made hostile
+on purpose even on localhost.
+
+**Report.** On exit a node writes JSON: traffic and rejection counts per
+source, fault counts, timing, tracking quality against truth (synthetic),
+and the final world with provenance of every object.
+
+```
+# Four synthetic nodes on one machine (run each in its own shell):
+START=$(( $(date +%s%3N) + 3000 ))
+godview-node --listen tcp/127.0.0.1:7447 --synthetic-index 0 --key-seed 1 --start-unix-ms $START
+godview-node --listen tcp/127.0.0.1:7448 --connect tcp/127.0.0.1:7447 --synthetic-index 1 --key-seed 2 --start-unix-ms $START
+# ... and so on; add --loss 0.2 --duplicate 0.2 --jitter-ms 60 for a hostile network.
+
+# A node fed by an external detector:
+my_detector | godview-node --connect tcp/<peer>:7447
+```
+
+**Multi-process tests** (`godview_node/tests/multi_process.rs`) start real
+node processes on localhost:
+* Four nodes with 20% loss, 20% duplication and 10 to 70 ms delays. Every
+  node must hear every peer with nothing rejected; during the run, at most
+  5% of ticks after warm-up may show a miss or a ghost, and never more than
+  3 in a row; after a final fault-free publish, every node must have all
+  four objects fused from all four sources, with no ghosts, and all nodes
+  must compute a bit-identical world.
+* A node 5 km away, connected to the same mesh, receives nothing and shares
+  no topic cell.
+* A node fed JSON lines on stdin, including junk lines, fuses with a
+  synthetic peer that watches the same scene.
+
+These runs are real time and therefore not bit-for-bit reproducible; they
+check the end-to-end path under faults with a stated tolerance. The
+deterministic, many-seed guarantees are the DST suite's. Run them in
+release for realistic timing (`cargo test --release -p godview_node`).
+Debug builds verify signatures about a hundred times slower, so the tests
+run at 2 Hz there instead of 10 Hz. In release on a two-core machine, four
+nodes with four objects each spent about 2.5 ms per tick (at most about
+8 ms) and never fell behind schedule; scale has not been benchmarked.
+
+## 10. Deterministic simulation (DST)
 
 `godview_sim::perception` contains a deterministic harness: ground truth
 objects, agents with odometry frames, per-agent localization error drawn from
@@ -215,6 +289,7 @@ The statistical checks pool independent sub-runs and use conservative bounds
 so that 100 CI seeds should not raise false alarms; they can detect gross
 covariance errors, not small miscalibration. Not covered: real sensor models
 (occlusion, clutter beyond fabricated objects, misclassification), map-relative
-drift over long missions, more than about 40 objects per agent, a real
-transport (Zenoh), Biscuit capabilities per batch, and colluding adversaries
-that coordinate consistent false reports.
+drift over long missions, more than about 40 objects per agent, the Zenoh
+transport (covered by the multi-process tests in section 9), Biscuit
+capabilities per batch, and colluding adversaries that coordinate consistent
+false reports.

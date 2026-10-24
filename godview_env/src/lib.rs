@@ -36,10 +36,12 @@ mod network;
 mod types;
 mod error;
 mod tokio_impl;
+mod time;
 
 pub use context::GodViewContext;
 pub use network::{NetworkTransport, NetworkController};
 pub use types::{NodeId, SignedPacketEnvelope};
 pub use error::EnvError;
 pub use tokio_impl::TokioContext;
+pub use time::Timestamp;
 

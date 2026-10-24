@@ -2,7 +2,7 @@
 
 use crate::context::SimContext;
 use crate::keys::DeterministicKeyProvider;
-use crate::network::{SimNetwork, SimNetworkController};
+use crate::network::SimNetwork;
 use crate::oracle::Oracle;
 use crate::scenarios::ScenarioId;
 use crate::agent::SimulatedAgent;
@@ -11,7 +11,6 @@ use godview_core::AgentConfig;
 use godview_env::{GodViewContext, NodeId};
 use nalgebra::Vector3;
 use std::sync::Arc;
-use std::time::Duration;
 use rand::SeedableRng;
 use tracing::{info, warn, debug};
 use uuid::Uuid;
@@ -89,6 +88,13 @@ impl ScenarioRunner {
         }
     }
     
+    /// Number of agents requested on the command line.
+    ///
+    /// Perception and legacy scenarios define their own agent counts.
+    pub fn num_agents(&self) -> usize {
+        self.num_agents
+    }
+
     /// Sets the tick rate.
     pub fn with_tick_rate(mut self, hz: u32) -> Self {
         self.tick_rate_hz = hz;
@@ -102,431 +108,90 @@ impl ScenarioRunner {
     }
     
     /// Runs a scenario and returns the result.
+    ///
+    /// Perception scenarios run in the perception DST harness with their own
+    /// fixed durations (`with_duration` applies to legacy scenarios only).
     pub fn run(&self, scenario: ScenarioId) -> ScenarioResult {
         info!("Starting scenario: {} (seed={})", scenario.name(), self.seed);
+
+        if let Some(name) = scenario.catalog_name() {
+            return self.run_perception(scenario, name);
+        }
         
         if scenario.is_extreme() {
             warn!("🔥 EXTREME SCENARIO - Pushing to the limit!");
         }
+        warn!(
+            "{} is a legacy scenario (SimulatedAgent/TrackManager path); it does not validate perception sharing",
+            scenario.name()
+        );
         
         match scenario {
-            ScenarioId::TimeWarp => self.run_time_warp(),
-            ScenarioId::SplitBrain => self.run_split_brain(),
-            ScenarioId::Byzantine => self.run_byzantine(),
-            ScenarioId::FlashMob => self.run_flash_mob(),
-            ScenarioId::SlowLoris => self.run_slow_loris(),
             ScenarioId::Swarm => self.run_swarm(),
             ScenarioId::AdaptiveSwarm => self.run_adaptive_swarm(),
             // Extreme scenarios
             ScenarioId::ChaosStorm => self.run_chaos_storm(),
             ScenarioId::ScaleLimit => self.run_scale_limit(),
             ScenarioId::NetworkHell => self.run_network_hell(),
-            ScenarioId::TimeTornado => self.run_time_tornado(),
             ScenarioId::ZombieApocalypse => self.run_zombie_apocalypse(),
             ScenarioId::RapidFire => self.run_rapid_fire(),
             // Evolutionary
             ScenarioId::EvoWar => self.run_evo_war(),
             ScenarioId::ResourceStarvation => self.run_resource_starvation(),
-            ScenarioId::ProtocolDrift => self.run_protocol_drift(),
+            ScenarioId::ProtocolDrift => self.not_implemented(scenario),
             ScenarioId::BlindLearning => self.run_blind_learning(),
             ScenarioId::BlackoutSurvival => self.run_blackout_survival(),
             ScenarioId::LongHaul => self.run_long_haul(),
             ScenarioId::CommonBias => self.run_common_bias(),
             ScenarioId::HeavyTail => self.run_heavy_tail(),
             ScenarioId::SensorDrift => self.run_sensor_drift(),
+            _ => unreachable!("perception scenarios are dispatched above"),
         }
     }
-    
-    /// DST-001: TimeWarp - OOSM stress test with extreme jitter.
-    ///
-    /// Tests the Time Engine's ability to handle out-of-sequence measurements
-    /// with 0-500ms jitter and 20% packet reordering.
-    ///
-    /// **Enhanced**: Now processes through full SimulatedAgent → TrackManager pipeline.
-    /// **Assertion**: Track position error < 5m RMS vs ground truth.
-    fn run_time_warp(&self) -> ScenarioResult {
-        info!("DST-001: TimeWarp - OOSM stress test");
-        
-        // Setup
-        let context_seed = self.seed;
-        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
-        
-        let context = Arc::new(SimContext::new(context_seed));
-        let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(0)));
-        let key_provider = DeterministicKeyProvider::new(self.seed);
-        let root_key = key_provider.biscuit_root_key().public();
-        
-        let mut oracle = Oracle::new(physics_seed);
-        
-        // Create a SimulatedAgent
-        let mut agent = SimulatedAgent::new(
-            context.clone(),
-            network,
-            root_key,
-            0,
-            AgentConfig::default(),
-        );
-        
-        // Spawn 10 fast-moving entities
-        for i in 0..10 {
-            let pos = Vector3::new(
-                (i as f64) * 100.0,
-                0.0,
-                100.0 + (i as f64) * 10.0,
-            );
-            let vel = Vector3::new(50.0, 10.0 * (i as f64 - 5.0), 0.0);
-            oracle.spawn_entity(pos, vel, "drone");
+
+    /// Runs a perception catalog scenario and converts its outcome.
+    fn run_perception(&self, scenario: ScenarioId, name: &str) -> ScenarioResult {
+        let entry = crate::perception::catalog::find(name).expect("catalog entry for perception scenario");
+        info!("  invariant: {}", entry.invariant);
+        info!("  tracking criterion: {}", crate::perception::catalog::TRACKING_CRITERION);
+        let outcome = (entry.run)(self.seed);
+        for (k, v) in &outcome.metrics {
+            info!("  {k}: {v}");
         }
-        
-        let mut metrics = ScenarioMetrics::default();
-        let dt = 1.0 / self.tick_rate_hz as f64;
-        let target_ticks = (self.max_duration_secs * self.tick_rate_hz as f64) as u64;
-        
-        // Run simulation
-        for tick in 0..target_ticks {
-            // Advance physics
-            oracle.step(dt);
-            context.advance_time(Duration::from_secs_f64(dt));
-            
-            // Agent tick (prediction step)
-            agent.tick();
-            
-            // Generate sensor readings and ingest through agent
-            let readings = oracle.generate_sensor_readings();
-            metrics.oosm_updates += readings.len() as u64;
-            
-            // Process readings through full pipeline
-            agent.ingest_readings(&readings);
-            
-            // Progress log every 30 ticks (1 second)
-            if tick % 30 == 0 {
-                debug!("  t={:.1}s | entities={} | tracks={}", 
-                    oracle.time(), 
-                    oracle.active_entities().len(),
-                    agent.track_count()
-                );
-            }
+        for f in &outcome.failures {
+            warn!("  {f}");
         }
-        
-        // Compute position error against ground truth
-        let ground_truth = oracle.ground_truth_positions();
-        let rms_error = agent.compute_position_error(&ground_truth);
-        
-        // Assertion: RMS error should be < 5m (generous for OOSM stress)
-        let max_acceptable_error = 5.0;
-        let passed = rms_error < max_acceptable_error;
-        
-        info!("✓ TimeWarp complete: {} OOSM updates, {} tracks, RMS error: {:.2}m", 
-            metrics.oosm_updates, agent.track_count(), rms_error);
-        
+        let passed = outcome.passed();
         ScenarioResult {
-            scenario: ScenarioId::TimeWarp,
+            scenario,
             seed: self.seed,
             passed,
-            total_ticks: target_ticks,
-            final_time_secs: oracle.time(),
-            final_entity_count: oracle.active_entities().len(),
-            failure_reason: if !passed {
-                Some(format!("RMS error {:.2}m exceeds threshold {:.1}m", rms_error, max_acceptable_error))
-            } else {
-                None
-            },
-            metrics,
+            total_ticks: 0,
+            final_time_secs: outcome.duration_s,
+            final_entity_count: 0,
+            failure_reason: (!passed).then(|| {
+                format!(
+                    "{} | reproduce: godview-sim --scenario {} --seed {}",
+                    outcome.failures.join("; "),
+                    name,
+                    self.seed
+                )
+            }),
+            metrics: ScenarioMetrics::default(),
         }
     }
-    
-    /// DST-002: SplitBrain - Network partition and CRDT convergence.
-    ///
-    /// Tests that agents converge to consistent state after a network partition heals.
-    fn run_split_brain(&self) -> ScenarioResult {
-        info!("DST-002: SplitBrain - Network partition test");
-        
-        let context_seed = self.seed;
-        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
-        
-        let context = SimContext::shared(context_seed);
-        let mut oracle = Oracle::new(physics_seed);
-        let network_controller = SimNetworkController::new();
-        
-        // Spawn entity that will be observed by both partitions
-        let _entity_id = oracle.spawn_entity(
-            Vector3::new(0.0, 0.0, 100.0),
-            Vector3::new(10.0, 0.0, 0.0),
-            "shared_target",
-        );
-        
-        let mut metrics = ScenarioMetrics::default();
-        let dt = 1.0 / self.tick_rate_hz as f64;
-        let target_ticks = (self.max_duration_secs * self.tick_rate_hz as f64) as u64;
-        
-        // Create node IDs for partitioning
-        let group_a: Vec<NodeId> = (0..self.num_agents/2)
-            .map(|i| NodeId::from_seed(i as u64))
-            .collect();
-        let group_b: Vec<NodeId> = (self.num_agents/2..self.num_agents)
-            .map(|i| NodeId::from_seed(i as u64))
-            .collect();
-        
-        // Phase 1: Normal operation (first 20 seconds)
-        let partition_start = (20.0 * self.tick_rate_hz as f64) as u64;
-        let partition_end = (30.0 * self.tick_rate_hz as f64) as u64;
-        
-        for tick in 0..target_ticks {
-            // Create partition at 20 seconds
-            if tick == partition_start {
-                info!("  ⚡ Creating network partition at t=20s");
-                network_controller.partition(group_a.clone(), group_b.clone());
-                metrics.packets_dropped += 1; // Mark partition event
-            }
-            
-            // Heal partition at 30 seconds
-            if tick == partition_end {
-                info!("  ✓ Healing network partition at t=30s");
-                network_controller.heal_all();
-            }
-            
-            // Advance physics
-            oracle.step(dt);
-            context.advance_time(Duration::from_secs_f64(dt));
-            
-            // Count packets dropped due to partition
-            if tick >= partition_start && tick < partition_end {
-                // During partition, cross-group packets would be dropped
-                if !group_a.is_empty() && !group_b.is_empty() {
-                    let can_talk = network_controller.can_communicate(group_a[0], group_b[0]);
-                    if !can_talk {
-                        metrics.packets_dropped += 1;
-                    }
-                }
-            }
-            
-            if tick % 30 == 0 {
-                debug!("  t={:.1}s | partitioned={}", 
-                    oracle.time(), 
-                    tick >= partition_start && tick < partition_end
-                );
-            }
-        }
-        
-        // SplitBrain passes if we survived the partition/heal cycle
-        info!("✓ SplitBrain complete: {} packets dropped during partition", metrics.packets_dropped);
-        
+
+    /// Placeholder scenarios report failure instead of passing silently.
+    fn not_implemented(&self, scenario: ScenarioId) -> ScenarioResult {
         ScenarioResult {
-            scenario: ScenarioId::SplitBrain,
+            scenario,
             seed: self.seed,
-            passed: true,
-            total_ticks: target_ticks,
-            final_time_secs: oracle.time(),
-            final_entity_count: oracle.active_entities().len(),
-            failure_reason: None,
-            metrics,
-        }
-    }
-    
-    /// DST-003: Byzantine - Malicious agent with delayed revocation.
-    ///
-    /// Tests Trust Engine's ability to revoke a malicious agent's credentials.
-    fn run_byzantine(&self) -> ScenarioResult {
-        info!("DST-003: Byzantine - Malicious agent test");
-        
-        let context_seed = self.seed;
-        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
-        
-        let context = SimContext::shared(context_seed);
-        let mut oracle = Oracle::new(physics_seed);
-        
-        // The "malicious" agent ID
-        let malicious_agent = NodeId::from_seed(0);
-        
-        let mut metrics = ScenarioMetrics::default();
-        let dt = 1.0 / self.tick_rate_hz as f64;
-        let target_ticks = (self.max_duration_secs * self.tick_rate_hz as f64) as u64;
-        
-        // Revocation happens at 15 seconds
-        let revocation_tick = (15.0 * self.tick_rate_hz as f64) as u64;
-        let mut revoked = false;
-        
-        for tick in 0..target_ticks {
-            if tick == revocation_tick {
-                info!("  🔒 Revoking malicious agent {} at t=15s", malicious_agent);
-                revoked = true;
-            }
-            
-            oracle.step(dt);
-            context.advance_time(Duration::from_secs_f64(dt));
-            
-            // After revocation, packets from malicious agent would be rejected
-            if revoked {
-                metrics.packets_dropped += 1;
-            }
-            
-            if tick % 30 == 0 {
-                debug!("  t={:.1}s | revoked={}", oracle.time(), revoked);
-            }
-        }
-        
-        info!("✓ Byzantine complete: malicious packets blocked after revocation");
-        
-        ScenarioResult {
-            scenario: ScenarioId::Byzantine,
-            seed: self.seed,
-            passed: true,
-            total_ticks: target_ticks,
-            final_time_secs: oracle.time(),
-            final_entity_count: oracle.active_entities().len(),
-            failure_reason: None,
-            metrics,
-        }
-    }
-    
-    /// DST-004: FlashMob - H3 boundary crossing stress test.
-    ///
-    /// Tests Space Engine with 1000 drones crossing H3 cell boundaries rapidly.
-    fn run_flash_mob(&self) -> ScenarioResult {
-        info!("DST-004: FlashMob - H3 boundary crossing stress test");
-        
-        let context_seed = self.seed;
-        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
-        
-        let context = SimContext::shared(context_seed);
-        let mut oracle = Oracle::new(physics_seed);
-        
-        // Spawn 1000 fast-moving drones in a grid
-        let num_drones = 1000;
-        for i in 0..num_drones {
-            let x = (i % 100) as f64 * 10.0;
-            let y = (i / 100) as f64 * 10.0;
-            let vel_x = 100.0 * ((i % 2) as f64 * 2.0 - 1.0); // Alternating directions
-            let vel_y = 50.0 * ((i / 100 % 2) as f64 * 2.0 - 1.0);
-            
-            oracle.spawn_entity(
-                Vector3::new(x, y, 50.0),
-                Vector3::new(vel_x, vel_y, 0.0),
-                "drone",
-            );
-        }
-        
-        let mut metrics = ScenarioMetrics::default();
-        let dt = 1.0 / self.tick_rate_hz as f64;
-        let target_ticks = (self.max_duration_secs * self.tick_rate_hz as f64) as u64;
-        
-        for tick in 0..target_ticks {
-            oracle.step(dt);
-            context.advance_time(Duration::from_secs_f64(dt));
-            
-            // Generate readings for all drones (stress test)
-            let readings = oracle.generate_all_readings();
-            metrics.oosm_updates += readings.len() as u64;
-            
-            if tick % 30 == 0 {
-                debug!("  t={:.1}s | drones={} | readings/tick={}", 
-                    oracle.time(), 
-                    oracle.active_entities().len(),
-                    readings.len()
-                );
-            }
-        }
-        
-        info!("✓ FlashMob complete: processed {} sensor readings for {} drones", 
-            metrics.oosm_updates, num_drones);
-        
-        ScenarioResult {
-            scenario: ScenarioId::FlashMob,
-            seed: self.seed,
-            passed: true,
-            total_ticks: target_ticks,
-            final_time_secs: oracle.time(),
-            final_entity_count: oracle.active_entities().len(),
-            failure_reason: None,
-            metrics,
-        }
-    }
-    
-    /// DST-005: SlowLoris - High packet loss recovery.
-    ///
-    /// Tests protocol resilience with 50% packet loss.
-    fn run_slow_loris(&self) -> ScenarioResult {
-        info!("DST-005: SlowLoris - 50% packet loss test");
-        
-        let context_seed = self.seed;
-        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
-        
-        let context = SimContext::shared(context_seed);
-        let mut oracle = Oracle::new(physics_seed);
-        let network_controller = SimNetworkController::new();
-        
-        // Set 50% loss between all agents
-        for i in 0..self.num_agents {
-            for j in 0..self.num_agents {
-                if i != j {
-                    let from = NodeId::from_seed(i as u64);
-                    let to = NodeId::from_seed(j as u64);
-                    network_controller.set_loss(from, to, 0.5);
-                }
-            }
-        }
-        
-        // Spawn a few entities
-        for i in 0..5 {
-            oracle.spawn_entity(
-                Vector3::new(i as f64 * 200.0, 0.0, 100.0),
-                Vector3::new(20.0, 0.0, 0.0),
-                "vehicle",
-            );
-        }
-        
-        let mut metrics = ScenarioMetrics::default();
-        let dt = 1.0 / self.tick_rate_hz as f64;
-        let target_ticks = (self.max_duration_secs * self.tick_rate_hz as f64) as u64;
-        
-        // Use seeded RNG for packet loss decisions
-        use rand::SeedableRng;
-        use rand_chacha::ChaCha8Rng;
-        let mut rng = ChaCha8Rng::seed_from_u64(self.seed);
-        
-        for tick in 0..target_ticks {
-            oracle.step(dt);
-            context.advance_time(Duration::from_secs_f64(dt));
-            
-            // Simulate packet sending with 50% loss
-            let simulated_packets = 10; // Packets per tick
-            for _ in 0..simulated_packets {
-                use rand::Rng;
-                metrics.packets_sent += 1;
-                if rng.gen_bool(0.5) {
-                    metrics.packets_dropped += 1;
-                }
-            }
-            
-            if tick % 30 == 0 {
-                let loss_rate = metrics.packets_dropped as f64 / metrics.packets_sent.max(1) as f64;
-                debug!("  t={:.1}s | loss_rate={:.1}%", oracle.time(), loss_rate * 100.0);
-            }
-        }
-        
-        let actual_loss_rate = metrics.packets_dropped as f64 / metrics.packets_sent.max(1) as f64;
-        info!("✓ SlowLoris complete: {:.1}% packet loss ({}/{} dropped)", 
-            actual_loss_rate * 100.0, 
-            metrics.packets_dropped, 
-            metrics.packets_sent
-        );
-        
-        // Pass if loss rate is within expected range (40-60%)
-        let passed = actual_loss_rate >= 0.4 && actual_loss_rate <= 0.6;
-        
-        ScenarioResult {
-            scenario: ScenarioId::SlowLoris,
-            seed: self.seed,
-            passed,
-            total_ticks: target_ticks,
-            final_time_secs: oracle.time(),
-            final_entity_count: oracle.active_entities().len(),
-            failure_reason: if !passed {
-                Some(format!("Unexpected loss rate: {:.1}%", actual_loss_rate * 100.0))
-            } else {
-                None
-            },
-            metrics,
+            passed: false,
+            total_ticks: 0,
+            final_time_secs: 0.0,
+            final_entity_count: 0,
+            failure_reason: Some(format!("NOT IMPLEMENTED: {} has no assertions yet", scenario.name())),
+            metrics: ScenarioMetrics::default(),
         }
     }
     
@@ -1382,95 +1047,6 @@ impl ScenarioRunner {
         }
     }
     
-    /// DST-011: TimeTornado - 5-second OOSM delays.
-    fn run_time_tornado(&self) -> ScenarioResult {
-        use rand::SeedableRng;
-        use rand::Rng;
-        use rand_chacha::ChaCha8Rng;
-        
-        info!("DST-011: TimeTornado - 5-SECOND OOSM DELAYS 🔥");
-        
-        let physics_seed = self.seed.wrapping_mul(0x9e3779b97f4a7c15);
-        let key_provider = DeterministicKeyProvider::new(self.seed);
-        let root_key = key_provider.biscuit_root_key().public();
-        let mut rng = ChaCha8Rng::seed_from_u64(self.seed.wrapping_mul(0xabed0abed));
-        
-        let context = Arc::new(SimContext::new(self.seed));
-        let network = Arc::new(SimNetwork::new_stub(NodeId::from_seed(0)));
-        let mut agent = SimulatedAgent::new(context, network, root_key, 0, AgentConfig::default());
-        
-        let mut oracle = Oracle::new(physics_seed);
-        oracle.spawn_entity(Vector3::new(0.0, 0.0, 100.0), Vector3::new(20.0, 10.0, 0.0), "tornado_target");
-        
-        let dt = 0.1;
-        let max_delay_secs = 5.0;
-        let target_ticks = (self.max_duration_secs.min(60.0) * 10.0) as u64;
-        
-        // Buffer for delayed readings
-        let mut delayed_queue: Vec<(u64, crate::oracle::SensorReading)> = Vec::new();
-        let mut oosm_count = 0u64;
-        
-        info!("  Config: max delay {}s, duration {}s", max_delay_secs, target_ticks as f64 * dt);
-        
-        for tick in 0..target_ticks {
-            oracle.step(dt);
-            let readings = oracle.generate_sensor_readings();
-            
-            // Add current readings to queue with random delay
-            for reading in readings {
-                let delay_ticks = (rng.gen::<f64>() * max_delay_secs / dt) as u64;
-                let delivery_tick = tick + delay_ticks;
-                delayed_queue.push((delivery_tick, reading));
-            }
-            
-            // Deliver readings whose time has come (simulating OOSM)
-            delayed_queue.sort_by_key(|(t, _)| std::cmp::Reverse(*t));
-            while let Some((delivery_tick, _)) = delayed_queue.last() {
-                if *delivery_tick <= tick {
-                    let (_, reading) = delayed_queue.pop().unwrap();
-                    agent.tick();
-                    agent.ingest_readings(&[reading]);
-                    oosm_count += 1;
-                } else {
-                    break;
-                }
-            }
-        }
-        
-        // Drain remaining queue
-        for (_, reading) in delayed_queue.drain(..) {
-            agent.tick();
-            agent.ingest_readings(&[reading]);
-            oosm_count += 1;
-        }
-        
-        let ground_truth = oracle.ground_truth_positions();
-        let rms_error = agent.compute_position_error(&ground_truth);
-        
-        // With 5s delays on a moving target, some error is expected
-        let passed = rms_error < 200.0 && oosm_count > 0;
-        
-        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        info!("  TIME TORNADO RESULTS:");
-        info!("    RMS error:      {:.2}m  {}", rms_error, if passed { "✓" } else { "✗" });
-        info!("    OOSM updates:   {}", oosm_count);
-        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        
-        let mut metrics = ScenarioMetrics::default();
-        metrics.oosm_updates = oosm_count;
-        
-        ScenarioResult {
-            scenario: ScenarioId::TimeTornado,
-            seed: self.seed,
-            passed,
-            total_ticks: target_ticks,
-            final_time_secs: oracle.time(),
-            final_entity_count: 1,
-            failure_reason: if !passed { Some(format!("RMS {:.2}m", rms_error)) } else { None },
-            metrics,
-        }
-    }
-    
     /// DST-012: ZombieApocalypse - 50% of agents are bad actors.
     fn run_zombie_apocalypse(&self) -> ScenarioResult {
         use crate::swarm_network::SwarmNetwork;
@@ -2014,21 +1590,6 @@ impl ScenarioRunner {
         }
     }
     
-    /// DST-016: ProtocolDrift - Stub for now.
-    fn run_protocol_drift(&self) -> ScenarioResult {
-        info!("DST-016: ProtocolDrift - Placeholder 🧬");
-        ScenarioResult {
-            scenario: ScenarioId::ProtocolDrift,
-            seed: self.seed,
-            passed: true,
-            total_ticks: 0,
-            final_time_secs: 0.0,
-            final_entity_count: 0,
-            failure_reason: None,
-            metrics: ScenarioMetrics::default(),
-        }
-    }
-
     /// DST-017: BlindLearning - Evolve without Ground Truth.
     ///
     /// Agents must optimize NIS (Internal Consistency) and Peer Agreement (Consensus)
@@ -2915,46 +2476,34 @@ mod tests {
     use super::*;
     
     #[test]
-    fn test_time_warp_scenario() {
-        let runner = ScenarioRunner::new(42, 6)
-            .with_duration(1.0); // 1 second for fast test
-        
-        let result = runner.run(ScenarioId::TimeWarp);
-        
-        assert!(result.passed);
-        assert!(result.metrics.oosm_updates > 0);
+    fn perception_scenarios_dispatch_to_the_catalog() {
+        // The rebuilt scenarios run real agents and checks (they used to return
+        // `passed: true` without running anything).
+        let result = ScenarioRunner::new(42, 6).run(ScenarioId::TwoViews);
+        assert!(result.passed, "{:?}", result.failure_reason);
+        assert!(result.final_time_secs > 5.0);
     }
-    
+
     #[test]
-    fn test_split_brain_scenario() {
-        let runner = ScenarioRunner::new(42, 6)
-            .with_duration(1.0);
-        
-        let result = runner.run(ScenarioId::SplitBrain);
-        
-        assert!(result.passed);
+    fn placeholder_scenario_reports_not_implemented() {
+        let result = ScenarioRunner::new(42, 6).run(ScenarioId::ProtocolDrift);
+        assert!(!result.passed);
+        assert!(result.failure_reason.unwrap().contains("NOT IMPLEMENTED"));
     }
-    
+
     #[test]
-    fn test_flash_mob_scenario() {
-        let runner = ScenarioRunner::new(42, 6)
-            .with_duration(1.0);
-        
-        let result = runner.run(ScenarioId::FlashMob);
-        
-        assert!(result.passed);
-        assert_eq!(result.final_entity_count, 1000);
-    }
-    
-    #[test]
-    fn test_slow_loris_deterministic() {
-        // Same seed should give same loss rate
-        let runner1 = ScenarioRunner::new(42, 6).with_duration(1.0);
-        let runner2 = ScenarioRunner::new(42, 6).with_duration(1.0);
-        
-        let result1 = runner1.run(ScenarioId::SlowLoris);
-        let result2 = runner2.run(ScenarioId::SlowLoris);
-        
-        assert_eq!(result1.metrics.packets_dropped, result2.metrics.packets_dropped);
+    fn every_scenario_is_in_exactly_one_group() {
+        let all = ScenarioId::all();
+        let legacy = ScenarioId::legacy();
+        for s in &all {
+            assert!(s.catalog_name().is_some(), "{s} in all() must be a perception scenario");
+            assert!(!legacy.contains(s));
+            assert_eq!(s.name().parse::<ScenarioId>().unwrap(), *s);
+        }
+        for s in &legacy {
+            assert!(s.is_legacy());
+            assert_eq!(s.name().parse::<ScenarioId>().unwrap(), *s);
+        }
+        assert_eq!(all.len() + legacy.len(), 33);
     }
 }

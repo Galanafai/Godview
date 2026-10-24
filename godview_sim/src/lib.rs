@@ -60,6 +60,7 @@ pub mod exporter;
 pub mod swarm_network;
 pub mod adaptive;
 pub mod evolution;
+pub mod perception;
 
 pub use context::SimContext;
 pub use world::{SimWorld, SimConfig};

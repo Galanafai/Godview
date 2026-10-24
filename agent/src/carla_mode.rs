@@ -165,6 +165,7 @@ pub async fn run_carla_mode() -> Result<()> {
             entity_type: detection.class_name.clone(),
             timestamp,
             confidence: detection.confidence,  // Entity uses f32
+            position_cov_enu: None,
         };
 
         // ========== UPDATE SPATIAL ENGINE ==========
@@ -200,7 +201,7 @@ pub async fn run_carla_mode() -> Result<()> {
         };
         
         // Run through GNN + Covariance Intersection + Highlander pipeline
-        let canonical_id = match track_manager.process_packet(&core_packet) {
+        let canonical_id = match track_manager.process_packet(&core_packet, None, None) {
             Ok(id) => id,
             Err(e) => {
                 eprintln!("⚠️  Track manager error: {}", e);

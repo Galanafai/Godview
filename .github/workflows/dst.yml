@@ -17,7 +17,7 @@ on:
         required: false
         default: '100'
       scenario:
-        description: 'Scenario to run (all, time_warp, split_brain, byzantine, flash_mob, slow_loris)'
+        description: 'Scenario to run (all = perception catalog, legacy, or a scenario name such as two_views, split_brain, byzantine)'
         required: false
         default: 'all'
 

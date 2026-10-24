@@ -159,7 +159,8 @@ struct Args {
     #[arg(short, long, default_value = "6")]
     agents: usize,
     
-    /// Scenario to run (time_warp, split_brain, byzantine, flash_mob, slow_loris, all)
+    /// Scenario to run: a scenario name, `all` (perception scenarios) or
+    /// `legacy` (SimulatedAgent/TrackManager experiments, not run by `all`)
     #[arg(short = 'S', long, default_value = "all")]
     scenario: String,
     
@@ -189,8 +190,10 @@ fn main() {
     
     // Initialize logging
     let level = if args.verbose { Level::DEBUG } else { Level::INFO };
+    // Logs go to stderr so that `--json` writes nothing but JSON to stdout.
     let subscriber = FmtSubscriber::builder()
         .with_max_level(level)
+        .with_writer(std::io::stderr)
         .finish();
     tracing::subscriber::set_global_default(subscriber)
         .expect("Failed to set tracing subscriber");
@@ -201,14 +204,15 @@ fn main() {
     }
     
     // Parse scenarios
-    let scenarios: Vec<ScenarioId> = if args.scenario == "all" {
-        ScenarioId::all()
-    } else {
-        vec![args.scenario.parse().unwrap_or_else(|e| {
+    let scenarios: Vec<ScenarioId> = match args.scenario.as_str() {
+        "all" => ScenarioId::all(),
+        "legacy" => ScenarioId::legacy(),
+        name => vec![name.parse().unwrap_or_else(|e| {
             eprintln!("Error: {}", e);
-            eprintln!("Available scenarios: time_warp, split_brain, byzantine, flash_mob, slow_loris, all");
+            let names: Vec<&str> = ScenarioId::all().iter().chain(ScenarioId::legacy().iter()).map(|s| s.name()).collect();
+            eprintln!("Available scenarios: all, legacy, {}", names.join(", "));
             std::process::exit(1);
-        })]
+        })],
     };
     
     // Determine base seed
@@ -329,6 +333,7 @@ fn main() {
                         result.seed,
                         result.failure_reason.as_deref().unwrap_or("unknown")
                     );
+                    error!("    reproduce: godview-sim --scenario {} --seed {}", result.scenario.name(), result.seed);
                 }
             }
         }

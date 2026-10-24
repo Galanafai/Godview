@@ -49,6 +49,17 @@ pub struct AugmentedStateFilter {
     /// Maximum size of the NIS rolling window
     #[serde(skip, default = "default_nis_window")]
     pub nis_window_size: usize,
+
+    /// Number of leading history blocks that hold real states (1 after construction).
+    ///
+    /// Blocks beyond this were never written by a prediction, so their
+    /// timestamps are meaningless and must not attract measurements.
+    #[serde(default = "default_valid_blocks")]
+    pub valid_blocks: usize,
+}
+
+fn default_valid_blocks() -> usize {
+    1
 }
 
 fn default_nis_window() -> usize {
@@ -97,6 +108,7 @@ impl AugmentedStateFilter {
             measurement_noise,
             nis_history: VecDeque::with_capacity(30),
             nis_window_size: 30,
+            valid_blocks: 1,
         }
     }
     
@@ -155,18 +167,20 @@ impl AugmentedStateFilter {
     /// **V4 Safety**: No panics - gracefully handles stale measurements and
     /// matrix degradation with covariance reset.
     ///
+    /// Returns `true` if the measurement was applied. Measurements older than
+    /// the populated history window, or newer than the current state, are
+    /// rejected rather than snapped to the nearest stored block (previously a
+    /// 99 s old measurement silently updated the oldest block).
+    ///
     /// # Arguments
     /// * `measurement` - The delayed measurement vector
     /// * `t_meas` - Timestamp when measurement was actually captured
-    pub fn update_oosm(&mut self, measurement: DVector<f64>, t_meas: f64) {
-        // Step 1: Find the lag index closest to t_meas
-        let lag_idx = self.find_lag_index(t_meas);
-        
-        // V4: MaxLag gating - discard measurements older than history
-        if lag_idx > self.max_lag_depth {
-            // Measurement is too old - beyond our history window
-            return;
-        }
+    pub fn update_oosm(&mut self, measurement: DVector<f64>, t_meas: f64) -> bool {
+        // Step 1: Find the lag index closest to t_meas (None if outside the window)
+        let lag_idx = match self.find_lag_index(t_meas) {
+            Some(idx) => idx,
+            None => return false,
+        };
         
         // Step 2: Construct sparse measurement matrix H
         // H maps measurement to the past state at lag_idx
@@ -187,7 +201,7 @@ impl AugmentedStateFilter {
             None => {
                 // Covariance matrix degraded - perform self-healing reset
                 self.reset_covariance();
-                return;
+                return false;
             }
         };
 
@@ -217,6 +231,7 @@ impl AugmentedStateFilter {
         
         self.covariance = &IKH * &self.covariance * IKH.transpose()
             + &K * &self.measurement_noise * K.transpose();
+        true
     }
     
     /// Reset covariance to diagonal with high uncertainty (V4: Self-healing)
@@ -254,100 +269,72 @@ impl AugmentedStateFilter {
     // ========== Private Helper Methods ==========
     
     /// Shift current state into history buffer
-    /// 
-    /// This performs block-shifting on both the state vector AND the covariance matrix
-    /// to maintain proper correlations between current and historical states.
+    ///
+    /// Augmentation is the linear map `x' = A x` that copies the current block
+    /// into slot 1 and shifts every older block down by one (dropping the
+    /// oldest). The covariance must transform the same way, `P' = A P Aᵀ`,
+    /// i.e. block `(i, j)` of the new matrix is block `(src(i), src(j))` of the
+    /// old one with `src(0) = 0` and `src(k) = k - 1`.
+    ///
+    /// The previous implementation shifted the lower-right blocks but never
+    /// rewrote block row 0 and column 0, so the current state lost its
+    /// correlation with its own copy in slot 1 (audit finding F-15): an OOSM
+    /// update then moved the lagged state but left the current state unchanged.
     fn augment_state(&mut self, current_time: f64) {
         let s = self.state_dim;
-        
-        // Shift state blocks to the right (from index max_lag down to 1)
-        for i in (1..=self.max_lag_depth).rev() {
-            let src_start = (i - 1) * s;
-            let dst_start = i * s;
-            
-            // Copy state block
-            let block = self.state_vector.rows(src_start, s).clone_owned();
-            self.state_vector.rows_mut(dst_start, s).copy_from(&block);
+        let n = self.max_lag_depth + 1;
+        let src = |block: usize| if block == 0 { 0 } else { block - 1 };
+
+        let old_x = self.state_vector.clone();
+        for i in 0..n {
+            let block = old_x.rows(src(i) * s, s).clone_owned();
+            self.state_vector.rows_mut(i * s, s).copy_from(&block);
         }
-        
-        // CRITICAL FIX: Also shift covariance matrix blocks
-        // The covariance matrix is organized as:
-        // [ P_00  P_01  P_02  ... ]
-        // [ P_10  P_11  P_12  ... ]
-        // [ P_20  P_21  P_22  ... ]
-        // [ ...                   ]
-        //
-        // When we shift states, we need to shift both row and column blocks.
-        // Block (i,j) moves to block (i+1, j+1)
-        
-        // Shift from bottom-right to top-left to avoid overwriting
-        for i in (1..=self.max_lag_depth).rev() {
-            for j in (1..=self.max_lag_depth).rev() {
-                let src_row = (i - 1) * s;
-                let src_col = (j - 1) * s;
-                let dst_row = i * s;
-                let dst_col = j * s;
-                
-                // Copy covariance block P_{i-1, j-1} to P_{i, j}
-                let block = self.covariance
-                    .view((src_row, src_col), (s, s))
-                    .clone_owned();
+
+        let old_p = self.covariance.clone();
+        for i in 0..n {
+            for j in 0..n {
+                let block = old_p.view((src(i) * s, src(j) * s), (s, s)).clone_owned();
                 self.covariance
-                    .view_mut((dst_row, dst_col), (s, s))
+                    .view_mut((i * s, j * s), (s, s))
                     .copy_from(&block);
             }
         }
-        
-        // Also shift cross-correlation blocks for the first row and column
-        // P_0j moves to P_1j (for j > 0) - first row
-        for j in (1..=self.max_lag_depth).rev() {
-            let src_col = (j - 1) * s;
-            let dst_col = j * s;
-            
-            // Row 0 → Row 1 for column j
-            let block = self.covariance
-                .view((0, src_col), (s, s))
-                .clone_owned();
-            self.covariance
-                .view_mut((s, dst_col), (s, s))
-                .copy_from(&block);
-        }
-        
-        // P_i0 moves to P_i1 (for i > 0) - first column
-        for i in (1..=self.max_lag_depth).rev() {
-            let src_row = (i - 1) * s;
-            let dst_row = i * s;
-            
-            // Column 0 → Column 1 for row i
-            let block = self.covariance
-                .view((src_row, 0), (s, s))
-                .clone_owned();
-            self.covariance
-                .view_mut((dst_row, s), (s, s))
-                .copy_from(&block);
-        }
-        
-        // Shift timestamps
-        for i in (1..=self.max_lag_depth).rev() {
+
+        for i in (1..n).rev() {
             self.history_timestamps[i] = self.history_timestamps[i - 1];
         }
         self.history_timestamps[0] = current_time;
+        self.valid_blocks = (self.valid_blocks + 1).min(n);
     }
     
-    /// Find the history index closest to the measurement timestamp
-    fn find_lag_index(&self, t_meas: f64) -> usize {
+    /// Find the history index closest to the measurement timestamp.
+    ///
+    /// Only populated blocks are considered. Returns `None` when `t_meas`
+    /// lies outside `[oldest - half step, newest + half step]`.
+    fn find_lag_index(&self, t_meas: f64) -> Option<usize> {
+        let valid = self.valid_blocks.clamp(1, self.max_lag_depth + 1);
+        let newest = self.history_timestamps[0];
+        let oldest = self.history_timestamps[valid - 1];
+        let half_step = if valid >= 2 {
+            0.5 * (self.history_timestamps[0] - self.history_timestamps[1]).abs()
+        } else {
+            1e-3
+        };
+        if !t_meas.is_finite() || t_meas < oldest - half_step || t_meas > newest + half_step {
+            return None;
+        }
+
         let mut best_idx = 0;
-        let mut min_diff = (self.history_timestamps[0] - t_meas).abs();
-        
-        for i in 1..=self.max_lag_depth {
+        let mut min_diff = (newest - t_meas).abs();
+        for i in 1..valid {
             let diff = (self.history_timestamps[i] - t_meas).abs();
             if diff < min_diff {
                 min_diff = diff;
                 best_idx = i;
             }
         }
-        
-        best_idx
+        Some(best_idx)
     }
     
     /// Build sparse measurement matrix targeting specific lag index
@@ -514,6 +501,53 @@ mod tests {
         
         // After OOSM, trace should be less than before (or at least not explode)
         assert!(after_update_trace < before_update_trace * 2.0, "OOSM should not explode covariance");
+    }
+
+    #[test]
+    fn augmentation_keeps_current_and_lagged_states_correlated() {
+        // Regression for audit finding F-15 (probe P6): the cross-covariance between
+        // the current state and its copy in slot 1 was left at zero.
+        let state = DVector::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let mut f = AugmentedStateFilter::new(
+            state,
+            DMatrix::identity(6, 6) * 10.0,
+            DMatrix::identity(6, 6) * 0.01,
+            DMatrix::identity(3, 3) * 0.1,
+            5,
+        );
+        f.predict(0.1, 0.1);
+        f.predict(0.1, 0.2);
+        let p01 = f.covariance.view((0, 6), (6, 6)).clone_owned();
+        assert!(p01.norm() > 1.0, "current/lagged cross-covariance must not vanish");
+        let sym = (&f.covariance - f.covariance.transpose()).norm();
+        assert!(sym < 1e-9, "augmented covariance must stay symmetric");
+
+        // An OOSM measurement at lag 1 must also correct the current state.
+        let hist_x = f.state_vector[6];
+        let cur_x = f.get_current_state()[0];
+        assert!(f.update_oosm(DVector::from_vec(vec![hist_x + 2.0, 0.0, 0.0]), 0.1));
+        let moved = f.get_current_state()[0] - cur_x;
+        assert!(moved > 1.0, "current state moved only {moved} m");
+    }
+
+    #[test]
+    fn oosm_rejects_measurements_outside_history() {
+        // Regression for audit finding F-16: the max-lag gate could never fire.
+        let mut f = AugmentedStateFilter::new(
+            DVector::zeros(6),
+            DMatrix::identity(6, 6),
+            DMatrix::identity(6, 6) * 0.01,
+            DMatrix::identity(3, 3) * 0.1,
+            3,
+        );
+        for k in 1..=10 {
+            f.predict(0.1, 100.0 + k as f64 * 0.1);
+        }
+        let before = f.state_vector.clone();
+        assert!(!f.update_oosm(DVector::from_vec(vec![5.0, 0.0, 0.0]), 1.0), "99 s old");
+        assert!(!f.update_oosm(DVector::from_vec(vec![5.0, 0.0, 0.0]), 105.0), "future");
+        assert_eq!(f.state_vector, before);
+        assert!(f.update_oosm(DVector::from_vec(vec![0.0, 0.0, 0.0]), 100.8));
     }
 
     #[test]

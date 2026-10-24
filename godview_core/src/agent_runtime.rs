@@ -41,6 +41,8 @@ use crate::godview_time::AugmentedStateFilter;
 use crate::godview_space::SpatialEngine;
 use crate::godview_trust::SecurityContext;
 use crate::godview_tracking::TrackManager;
+use crate::perception_node::{NodeConfig, PerceptionNode};
+use crate::world_model::WorldModelConfig;
 
 use std::sync::Arc;
 
@@ -102,8 +104,12 @@ where
     /// Trust Engine - CapBAC security
     pub trust_engine: SecurityContext,
     
-    /// Tracking Engine - Multi-object tracking
+    /// Tracking Engine - Multi-object tracking (legacy single-store tracker)
     pub track_manager: TrackManager,
+
+    /// Perception sharing: local tracker, signed reports, replicated store and
+    /// shared world model (see `perception_node`). Received packets go here.
+    pub perception: PerceptionNode,
     
     /// Current tick number
     tick_count: u64,
@@ -152,6 +158,22 @@ where
             ..TrackingConfig::default()
         };
         let track_manager = TrackManager::new(tracking_config);
+
+        // Perception sharing node. The epoch is the boot time in seconds, so it
+        // increases across restarts without persisted state (valid until 2106).
+        let signing_key = context.derive_signing_key(0);
+        let epoch = context.timestamp().as_millis().div_euclid(1000).clamp(0, u32::MAX as i64) as u32;
+        let perception = PerceptionNode::new(
+            signing_key,
+            epoch,
+            NodeConfig {
+                world: WorldModelConfig {
+                    resolution,
+                    ..WorldModelConfig::default()
+                },
+                ..NodeConfig::default()
+            },
+        );
         
         Self {
             node_id: network.local_id(),
@@ -162,6 +184,7 @@ where
             space_engine,
             trust_engine,
             track_manager,
+            perception,
             tick_count: 0,
         }
     }
@@ -187,26 +210,32 @@ where
         
         // Age tracks
         self.track_manager.age_tracks();
+
+        // Advance local track lifecycles and collect expired shared reports
+        self.perception.maintain(self.context.timestamp());
         
         self.tick_count
     }
     
     /// Processes an incoming signed packet.
+    ///
+    /// The envelope's age is checked against the shared timebase (both sides
+    /// use `GodViewContext::timestamp`), then the payload is handed to the
+    /// perception node, which verifies the signature and every report before
+    /// anything is stored. Rejections are returned as errors and counted in
+    /// `perception.stats()`.
     pub fn process_packet(&mut self, sender: NodeId, envelope: SignedPacketEnvelope) -> Result<(), EnvError> {
-        // Validate packet timestamp isn't too old
-        let now_ms = self.context.now().as_millis() as u64;
-        let packet_age_ms = now_ms.saturating_sub(envelope.timestamp_ms);
-        
-        if packet_age_ms > 10_000 {
-            // Packet older than 10 seconds - discard
-            return Ok(());
+        let now = self.context.timestamp();
+        let age_ms = now.as_millis() - envelope.timestamp_ms as i64;
+        if age_ms > 10_000 {
+            return Err(EnvError::NetworkError(format!(
+                "packet from {sender} is {age_ms} ms old"
+            )));
         }
-        
-        // TODO: Deserialize packet, verify trust, update tracking
-        // This would be expanded in Phase 4.3
-        
-        let _ = (sender, envelope); // Suppress unused warning for now
-        Ok(())
+        self.perception
+            .receive(&envelope.payload, now)
+            .map(|_| ())
+            .map_err(|e| EnvError::SerializationError(format!("packet from {sender} rejected: {e}")))
     }
 }
 

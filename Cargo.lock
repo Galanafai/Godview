@@ -4432,6 +4432,7 @@ dependencies = [
  "ed25519-dalek",
  "godview_core",
  "godview_env",
+ "h3o",
  "madsim",
  "nalgebra",
  "proptest",

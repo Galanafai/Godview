@@ -5,6 +5,8 @@ use ed25519_dalek::SigningKey;
 use std::future::Future;
 use std::time::{Duration, SystemTime};
 
+use crate::time::Timestamp;
+
 /// The central interface for Environment Interaction.
 ///
 /// This trait abstracts the "real world" so that GodView engines can run
@@ -32,6 +34,13 @@ pub trait GodViewContext: Send + Sync + 'static {
     /// Critical for validating OOSM logic in `godview_time`.
     /// In simulation, this is derived from virtual clock + epoch offset.
     fn system_time(&self) -> SystemTime;
+
+    /// Returns [`GodViewContext::system_time`] in the shared GodView timebase.
+    ///
+    /// This is the clock that stamps measurements, reports and envelopes.
+    fn timestamp(&self) -> Timestamp {
+        Timestamp::from_system_time(self.system_time())
+    }
     
     /// Suspends execution for the given duration.
     ///

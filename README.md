@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/Tests-61%2B%20Passing-brightgreen.svg)](#-test-results)
-[![DST](https://img.shields.io/badge/DST-20%2F22%20Scenarios-blue.svg)](godview_sim/README.md)
+[![DST](https://img.shields.io/badge/DST-17%20perception%20scenarios-blue.svg)](docs/PERCEPTION_SHARING.md)
 [![Rerun](https://img.shields.io/badge/Rerun-0.28-blue.svg)](https://rerun.io/)
 [![Status](https://img.shields.io/badge/Status-Completed-success.svg)](#)
 
@@ -422,18 +422,28 @@ fn test_highlander_merge_id() {
 
 Inspired by [FoundationDB's simulation testing](https://www.youtube.com/watch?v=4fFDFbi3toc), we built a chaos engineering framework that proves correctness across thousands of seeds.
 
-### Key Scenarios
+### Perception sharing scenarios
 
-| Scenario | Challenge | Result |
-|----------|-----------|--------|
-| DST-010: NetworkHell | 90% packet loss | ✅ 0.82m RMS |
-| DST-011: TimeTornado | 5-second OOSM delays | ✅ <200m RMS |
-| DST-012: ZombieApocalypse | 50% malicious actors | ✅ 100% detection |
-| DST-019: LongHaul | Energy starvation | ✅ 100% survival |
+`--scenario all` runs 17 seeded scenarios of the perception sharing pipeline
+(local tracks, signed reports, report store, shared world model). Each one
+checks a stated invariant: different odometry frames, localization error and
+dropout, H3 cell edges, loss, duplication, corruption and reordering, echoes,
+partitions, restarts, biased and fabricating sources, replay and forgery, and
+late measurements. See [docs/PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md)
+for the contract, the scenario list and what the suite does and does not
+establish.
+
+The earlier scenarios built on the legacy `TrackManager` path (NetworkHell,
+TimeTornado v1, ZombieApocalypse, LongHaul and others) are still available as
+`--scenario legacy` or by name.
 
 ```bash
-# Run all scenarios with seed
+# Run all perception scenarios with one seed
 cargo run -p godview_sim --release -- --scenario all --seed 42
+# Reproduce a reported failure
+cargo run -p godview_sim --release -- --scenario split_brain --seed 3
+# Legacy scenarios
+cargo run -p godview_sim --release -- --scenario legacy --seed 42
 ```
 
 ---

@@ -6,8 +6,19 @@
 //! 3. **Phantom Hazards Problem**: Cryptographic provenance via CapBAC + Ed25519
 //! 4. **Duplicate Ghost Problem**: Distributed data association via GNN + CI + Highlander
 
+pub mod frames;
+pub mod filter;
 pub mod godview_time;
 pub mod godview_space;
+pub mod spatial_index;
+pub mod report;
+pub mod assignment;
+pub mod localization;
+pub mod local_tracker;
+pub mod report_store;
+pub mod world_model;
+pub mod consistency;
+pub mod perception_node;
 pub mod godview_trust;
 pub mod godview_tracking;
 pub mod metrics;

@@ -90,6 +90,15 @@ pub struct Entity {
     
     /// Confidence score (0.0 - 1.0)
     pub confidence: f32,
+
+    /// Position covariance in the local East-North-Up frame at `position`
+    /// (m², packed upper triangle: ee, en, eu, nn, nu, uu).
+    ///
+    /// `None` for producers that do not estimate uncertainty. Entities built
+    /// from fused world objects always carry it, so consumers of the spatial
+    /// engine see the estimate's precision, not just a point.
+    #[serde(default)]
+    pub position_cov_enu: Option<[f32; 6]>,
 }
 
 /// A WorldShard represents a columnar volume of space defined by an H3 cell
@@ -112,6 +121,9 @@ pub struct WorldShard {
     
     /// Counter for generating local element IDs
     next_element_id: u64,
+
+    /// Grid cell of each element (so removal does not need to recompute it)
+    element_cells: HashMap<u64, GridCell>,
 }
 
 impl WorldShard {
@@ -132,6 +144,7 @@ impl WorldShard {
             spatial_grid: HashMap::new(),
             grid_cell_size,
             next_element_id: 0,
+            element_cells: HashMap::new(),
         }
     }
     
@@ -155,8 +168,23 @@ impl WorldShard {
         
         // Store entity data
         self.entities.insert(element_id, entity);
+        self.element_cells.insert(element_id, grid_cell);
         
         element_id
+    }
+
+    /// Removes an element from this shard, returning its entity.
+    pub fn remove(&mut self, element_id: u64) -> Option<Entity> {
+        let entity = self.entities.remove(&element_id)?;
+        if let Some(grid_cell) = self.element_cells.remove(&element_id) {
+            if let Some(set) = self.spatial_grid.get_mut(&grid_cell) {
+                set.remove(&element_id);
+                if set.is_empty() {
+                    self.spatial_grid.remove(&grid_cell);
+                }
+            }
+        }
+        Some(entity)
     }
     
     /// Query entities within a sphere using 3D grid acceleration
@@ -295,6 +323,12 @@ fn gnomonic_inverse(x: f32, z: f32, center_lat: f64, center_lon: f64) -> (f64, f
 pub struct SpatialEngine {
     /// Primary index: H3 Cell -> WorldShard
     pub shards: HashMap<CellIndex, WorldShard>,
+
+    /// Where each entity id currently lives (shard cell, element id).
+    ///
+    /// Makes `update_entity` a true upsert. Previously every update appended a
+    /// new copy and an entity that moved left stale copies behind (audit F-24).
+    locations: HashMap<Uuid, (CellIndex, u64)>,
     
     /// H3 Resolution level
     /// Resolution 10: ~66m edge length (good for city blocks)
@@ -310,6 +344,7 @@ impl SpatialEngine {
     pub fn new(resolution: Resolution) -> Self {
         Self {
             shards: HashMap::new(),
+            locations: HashMap::new(),
             resolution,
         }
     }
@@ -327,6 +362,9 @@ impl SpatialEngine {
             .map_err(|e| format!("Invalid coordinates: {:?}", e))?;
         
         let cell_id = lat_lng.to_cell(self.resolution);
+
+        // Replace any previous copy of this entity (it may have changed shard)
+        self.remove_entity(&entity.id);
         
         // Step 2: Get or create shard
         let shard = self.shards.entry(cell_id).or_insert_with(|| WorldShard::new(cell_id));
@@ -335,9 +373,33 @@ impl SpatialEngine {
         let local_coords = shard.global_to_local(entity.position);
         
         // Step 4: Insert into shard's spatial index
-        shard.insert(entity, local_coords);
+        let id = entity.id;
+        let element_id = shard.insert(entity, local_coords);
+        self.locations.insert(id, (cell_id, element_id));
         
         Ok(cell_id)
+    }
+
+    /// Removes an entity by id. Returns it if it was present.
+    pub fn remove_entity(&mut self, id: &Uuid) -> Option<Entity> {
+        let (cell_id, element_id) = self.locations.remove(id)?;
+        let shard = self.shards.get_mut(&cell_id)?;
+        let removed = shard.remove(element_id);
+        if shard.entities.is_empty() {
+            self.shards.remove(&cell_id);
+        }
+        removed
+    }
+
+    /// Returns the current copy of an entity by id.
+    pub fn get_entity(&self, id: &Uuid) -> Option<&Entity> {
+        let (cell_id, element_id) = self.locations.get(id)?;
+        self.shards.get(cell_id)?.entities.get(element_id)
+    }
+
+    /// Ids of every stored entity.
+    pub fn entity_ids(&self) -> impl Iterator<Item = &Uuid> {
+        self.locations.keys()
     }
     
     /// Query entities within a 3D sphere
@@ -441,6 +503,7 @@ mod tests {
             entity_type: "human_face".to_string(),
             timestamp: 1702934400000,
             confidence: 0.95,
+            position_cov_enu: None,
         };
         
         let result = engine.update_entity(entity);
@@ -463,6 +526,7 @@ mod tests {
             entity_type: "vehicle".to_string(),
             timestamp: 1702934400000,
             confidence: 0.95,
+            position_cov_enu: None,
         };
         
         // Aerial entity (same lat/lon, different altitude)
@@ -473,6 +537,7 @@ mod tests {
             entity_type: "drone".to_string(),
             timestamp: 1702934400000,
             confidence: 0.95,
+            position_cov_enu: None,
         };
         
         engine.update_entity(ground).unwrap();
@@ -549,6 +614,7 @@ mod tests {
             entity_type: "vehicle".to_string(),
             timestamp: 1702934400000,
             confidence: 0.95,
+            position_cov_enu: None,
         };
         
         let nearby = Entity {
@@ -558,6 +624,7 @@ mod tests {
             entity_type: "pedestrian".to_string(),
             timestamp: 1702934400000,
             confidence: 0.95,
+            position_cov_enu: None,
         };
         
         engine.update_entity(sf).unwrap();
@@ -571,6 +638,40 @@ mod tests {
     }
     
     #[test]
+    fn update_replaces_and_remove_deletes() {
+        // Regression for audit finding F-24 (probe P7): updates appended copies.
+        let mut engine = SpatialEngine::new(Resolution::Ten);
+        let id = Uuid::new_v4();
+        let mut e = Entity {
+            id,
+            position: [37.7749, -122.4194, 10.0],
+            velocity: [0.0, 0.0, 0.0],
+            entity_type: "car".to_string(),
+            timestamp: 0,
+            confidence: 0.9,
+            position_cov_enu: Some([1.0, 0.0, 0.0, 1.0, 0.0, 4.0]),
+        };
+        engine.update_entity(e.clone()).unwrap();
+        e.position = [37.7752, -122.4194, 10.0];
+        e.timestamp = 1;
+        engine.update_entity(e.clone()).unwrap();
+        // Move far enough to change shard as well.
+        e.position = [37.7800, -122.4194, 10.0];
+        engine.update_entity(e.clone()).unwrap();
+
+        assert_eq!(engine.stats().total_entities, 1);
+        let hits = engine.query_radius([37.7800, -122.4194, 10.0], 20.0);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].position, e.position, "continuous position preserved");
+        assert_eq!(hits[0].position_cov_enu, e.position_cov_enu, "uncertainty preserved");
+        assert!(engine.query_radius([37.7749, -122.4194, 10.0], 50.0).is_empty());
+
+        assert!(engine.remove_entity(&id).is_some());
+        assert_eq!(engine.stats().total_entities, 0);
+        assert_eq!(engine.stats().total_shards, 0);
+    }
+
+    #[test]
     fn test_query_all_altitudes() {
         let mut engine = SpatialEngine::new(Resolution::Ten);
         
@@ -583,6 +684,7 @@ mod tests {
                 entity_type: "drone".to_string(),
                 timestamp: 1702934400000,
                 confidence: 0.95,
+                position_cov_enu: None,
             };
             engine.update_entity(entity).unwrap();
         }

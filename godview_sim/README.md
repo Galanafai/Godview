@@ -1,5 +1,13 @@
 # GodView Deterministic Simulation Testing (DST) Framework
 
+> **Perception sharing scenarios.** `--scenario all` now runs the 17 scenarios
+> in `src/perception/catalog.rs`, which test the perception sharing pipeline
+> (signed track reports, report store, shared world model) against stated
+> invariants. They are described in
+> [docs/PERCEPTION_SHARING.md](../docs/PERCEPTION_SHARING.md). The scenarios
+> described below, built on the legacy `TrackManager` path, run with
+> `--scenario legacy` or by name.
+
 ## Overview
 
 The **Deterministic Simulation Testing (DST)** framework is a chaos engineering infrastructure for GodView that enables reproducible testing of distributed system behavior under adversarial conditions. By eliminating all sources of non-determinism, we can:

@@ -11,7 +11,7 @@ use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, Normal, Cauchy};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Noise model for sensor readings (v0.6.0)
 /// Agents evolved on Gaussian may fail on heavy-tailed distributions.
@@ -100,8 +100,13 @@ pub struct Oracle {
     /// RNG for physics (noise, random events)
     physics_rng: ChaCha8Rng,
     
-    /// All ground truth entities
-    entities: HashMap<u64, GroundTruthEntity>,
+    /// All ground truth entities.
+    ///
+    /// A `BTreeMap` so every iteration (and therefore every RNG draw made while
+    /// iterating) happens in id order. With the previous `HashMap`, which noise
+    /// sample went to which entity changed between process runs, so a seed did
+    /// not fully reproduce a run.
+    entities: BTreeMap<u64, GroundTruthEntity>,
     
     /// Next entity ID
     next_id: u64,
@@ -124,7 +129,7 @@ impl Oracle {
     pub fn new(physics_seed: u64) -> Self {
         Self {
             physics_rng: ChaCha8Rng::seed_from_u64(physics_seed),
-            entities: HashMap::new(),
+            entities: BTreeMap::new(),
             next_id: 0,
             current_time: 0.0,
             position_noise_std: 0.5, // 50cm noise by default
@@ -330,6 +335,24 @@ mod tests {
         assert!((entity.position.x - 20.0).abs() < 0.001);
     }
     
+    #[test]
+    fn readings_are_reproducible_across_runs_with_many_entities() {
+        // Regression: HashMap iteration order made noise assignment process-dependent.
+        let run = || {
+            let mut o = Oracle::new(5);
+            for i in 0..50 {
+                o.spawn_entity(Vector3::new(i as f64, 0.0, 0.0), Vector3::zeros(), "drone");
+            }
+            o.generate_sensor_readings()
+                .into_iter()
+                .map(|r| (r.entity_id, r.position))
+                .collect::<Vec<_>>()
+        };
+        let a = run();
+        assert!(a.windows(2).all(|w| w[0].0 < w[1].0), "id order");
+        assert_eq!(a, run());
+    }
+
     #[test]
     fn test_oracle_deterministic_noise() {
         let mut oracle1 = Oracle::new(42);

@@ -17,11 +17,12 @@
 
 use super::bus::{LinkFaults, Topology};
 use super::harness::{
-    run, AdversarySpec, AgentSpec, Behavior, LocalizationSpec, ObjectSpec, PartitionSpec,
-    RunRecord, ScenarioSpec, SensorSpec, TruthSample,
+    run, AdversarySpec, AgentSpec, Behavior, BoxSensorSpec, LocalizationSpec, ObjectSpec,
+    PartitionSpec, RunRecord, ScenarioSpec, SensorSpec, TruthSample,
 };
 use super::metrics::mean_chi2_bounds;
 use godview_core::consistency::SourceStatus;
+use godview_core::extent::yaw_residual;
 use godview_core::frames::{EnuFrame, Geodetic};
 use godview_core::godview_space::SpatialEngine;
 use godview_core::perception_node::RejectReason;
@@ -128,6 +129,11 @@ pub fn catalog() -> Vec<Entry> {
             name: "crossing_targets",
             invariant: CROSSING,
             run: crossing_targets,
+        },
+        Entry {
+            name: "large_objects",
+            invariant: LARGE_OBJECTS,
+            run: large_objects,
         },
         Entry {
             name: "object_expiry",
@@ -1234,6 +1240,137 @@ fn crossing_targets(seed: u64) -> ScenarioOutcome {
         Some(&rec),
         CROSSING,
         vec![("samples_with_errors", format!("{bad}/{total}"))],
+    )
+}
+
+const LARGE_OBJECTS: &str = "Cars, vans, trucks and buses are reported as oriented boxes by detectors that see only \
+part of an object (the measured center moves up to a quarter of the length toward the sensor, with that uncertainty \
+reported) and cannot tell front from back. Each object is still one world object, fused from every agent that sees \
+it from whatever side; every world object carries a box whose size is consistent with its reported uncertainty \
+(pooled NEES below 6) and whose heading is within 15 degrees of the truth, modulo 180 degrees unless the object \
+moves, in which case front and back are resolved. The same run without declaring the detector's systematic center \
+error must show duplicates.";
+
+fn large_objects(seed: u64) -> ScenarioOutcome {
+    let mut spec = ScenarioSpec::new("large_objects", seed);
+    spec.duration_s = 10.0;
+    spec.agents = ring(4, 45.0);
+    let partial_view = 0.5;
+    for a in &mut spec.agents {
+        a.sensor.boxes = Some(BoxSensorSpec {
+            partial_view,
+            ..BoxSensorSpec::default()
+        });
+    }
+    // The detector's systematic center error, declared so it is published.
+    spec.node.tracker.box_center_sys_frac = partial_view / 2.0;
+    let sizes = [
+        (4.5, 1.8, 1.5),
+        (12.0, 2.5, 3.5),
+        (12.0, 2.6, 3.2),
+        (5.5, 2.0, 2.2),
+    ];
+    spec.objects = separated_objects(seed, 4, 25.0, 2.0, spec.duration_s, 16.0)
+        .into_iter()
+        .zip(sizes)
+        .map(|(o, (l, w, h))| o.with_size(l, w, h))
+        .collect();
+    let rec = run(&spec);
+    // Ablation: the same run without declaring the systematic center error.
+    // Partial views then split large objects into duplicates, which shows the
+    // threat is exercised and that the declared error is what handles it.
+    let mut blind = spec.clone();
+    blind.node.tracker.box_center_sys_frac = 0.0;
+    let ablation = run(&blind);
+    let mut c = Checker::new("large_objects", seed);
+    let ablation_dups = ablation
+        .samples
+        .iter()
+        .filter(|s| s.t_s >= 2.5)
+        .flat_map(|s| (0..4).map(move |a| (s, a)))
+        .filter(|(s, a)| {
+            ablation
+                .score(s, *a, CUTOFF_M, globally_observed)
+                .false_estimates
+                > 0
+        })
+        .count();
+    c.check(ablation_dups > 0, || {
+        "without the declared systematic error no duplicate appeared; partial views not exercised"
+            .into()
+    });
+    c.tracked_world(
+        &rec,
+        &[0, 1, 2, 3],
+        2.5,
+        f64::INFINITY,
+        2.0,
+        globally_observed,
+    );
+    let mut size_nees = Vec::new();
+    let mut worst_heading = 0.0f64;
+    for s in rec.samples.iter().filter(|s| s.t_s >= 3.0) {
+        let truths: Vec<&TruthSample> = s.truths.iter().filter(|t| globally_observed(t)).collect();
+        for a in 0..4 {
+            let sc = rec.score(s, a, CUTOFF_M, globally_observed);
+            let objects = &s.agents[a].world.objects;
+            for &(e, ti) in &sc.pairs {
+                let (Some(b), Some((size, heading))) =
+                    (objects[e].object_box, truths[ti].object_box)
+                else {
+                    c.fail(format!(
+                        "t={:.2}s agent {a}: world object without a box",
+                        s.t_s
+                    ));
+                    continue;
+                };
+                size_nees.push(
+                    (0..3)
+                        .map(|i| (b.size[i] - size[i]).powi(2) / b.size_var[i])
+                        .sum::<f64>(),
+                );
+                let err = yaw_residual(b.yaw, heading, b.yaw_ambiguous).abs();
+                worst_heading = worst_heading.max(err);
+                c.check(err < 15f64.to_radians(), || {
+                    format!(
+                        "t={:.2}s agent {a}: heading {:.1} deg off (ambiguous: {})",
+                        s.t_s,
+                        err.to_degrees(),
+                        b.yaw_ambiguous
+                    )
+                });
+            }
+        }
+    }
+    let pooled = size_nees.iter().sum::<f64>() / size_nees.len().max(1) as f64;
+    c.check(!size_nees.is_empty() && pooled < 6.0, || {
+        format!(
+            "pooled size NEES {pooled:.2} over {} estimates",
+            size_nees.len()
+        )
+    });
+    c.converged(&rec);
+    c.finish(
+        Some(&rec),
+        LARGE_OBJECTS,
+        vec![
+            (
+                "pooled_size_nees",
+                format!("{pooled:.2} (n={})", size_nees.len()),
+            ),
+            (
+                "worst_heading_deg",
+                format!("{:.1}", worst_heading.to_degrees()),
+            ),
+            (
+                "mean_rms_m",
+                format!("{:.3}", mean_rms(&rec, &[0, 1, 2, 3], 2.5)),
+            ),
+            (
+                "ablation_duplicate_agent_samples",
+                ablation_dups.to_string(),
+            ),
+        ],
     )
 }
 

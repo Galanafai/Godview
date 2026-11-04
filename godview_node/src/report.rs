@@ -125,6 +125,24 @@ pub struct ObjectOut {
     pub members: Vec<String>,
     /// Class id.
     pub class_id: u8,
+    /// Fused oriented box, if the sources reported extent.
+    #[serde(rename = "box", default, skip_serializing_if = "Option::is_none")]
+    pub object_box: Option<BoxOut>,
+}
+
+/// A fused box in geodetic terms.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BoxOut {
+    /// Length, width, height (m).
+    pub size_m: [f64; 3],
+    /// Size standard deviations (m).
+    pub sigma_size_m: [f64; 3],
+    /// Heading of the length axis, counterclockwise from East (degrees).
+    pub heading_deg: f64,
+    /// Heading standard deviation (degrees).
+    pub sigma_heading_deg: f64,
+    /// Front and back not yet resolved (heading known modulo 180 degrees).
+    pub heading_ambiguous: bool,
 }
 
 impl ObjectOut {
@@ -148,6 +166,13 @@ impl ObjectOut {
                 .map(|((src, tr), (e, q))| format!("{}:{}@{e}.{q}", src.short(), tr.0))
                 .collect(),
             class_id: o.class_id,
+            object_box: o.object_box.map(|b| BoxOut {
+                size_m: b.size,
+                sigma_size_m: b.size_var.map(f64::sqrt),
+                heading_deg: b.yaw.to_degrees(),
+                sigma_heading_deg: b.yaw_var.sqrt().to_degrees(),
+                heading_ambiguous: b.yaw_ambiguous,
+            }),
         }
     }
 }

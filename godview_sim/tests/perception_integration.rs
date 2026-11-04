@@ -46,6 +46,7 @@ fn peer_batches(
             r: Matrix3::identity() * 0.04,
             class_id: 1,
             class_prob: 0.9,
+            object_box: None,
         }]);
         node.maintain(t);
         let pose = PoseEstimate {

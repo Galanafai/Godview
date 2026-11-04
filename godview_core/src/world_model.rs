@@ -34,6 +34,7 @@
 //! Nothing produced here is ever inserted into a report store or a local
 //! filter. That missing feedback path is what rules out rumor propagation.
 
+use crate::extent::{fuse_boxes, BoxGate, BoxModel, ObjectBox};
 use crate::frames::{cv_process_noise, cv_transition, ecef_from_enu_rotation, symmetrize, Ecef};
 use crate::godview_space::Entity;
 use crate::report::{AgentId, FrameRef, ReportKey, TrackLifecycle};
@@ -66,6 +67,10 @@ pub struct WorldModelConfig {
     pub gate_vel_chi2: f64,
     /// Reports stamped more than this far after the query time are ignored (s).
     pub max_future_skew_s: f64,
+    /// Box consistency required to fuse two reports or two clusters.
+    pub box_gate: BoxGate,
+    /// Box process noise used when predicting reports to the query time.
+    pub box_model: BoxModel,
 }
 
 impl Default for WorldModelConfig {
@@ -76,6 +81,8 @@ impl Default for WorldModelConfig {
             gate_pos_chi2: 21.11,
             gate_vel_chi2: 21.11,
             max_future_skew_s: 0.5,
+            box_gate: BoxGate::default(),
+            box_model: BoxModel::default(),
         }
     }
 }
@@ -109,6 +116,8 @@ pub struct WorldObject {
     pub class_prob: f32,
     /// Highest member existence probability.
     pub p_exist: f32,
+    /// Fused box, heading counterclockwise from local East at the object.
+    pub object_box: Option<ObjectBox>,
 }
 
 impl WorldObject {
@@ -157,6 +166,14 @@ impl WorldObject {
                 pc[(1, 2)] as f32,
                 pc[(2, 2)] as f32,
             ]),
+            oriented_box: self.object_box.map(|b| {
+                [
+                    b.size[0] as f32,
+                    b.size[1] as f32,
+                    b.size[2] as f32,
+                    b.yaw as f32,
+                ]
+            }),
         }
     }
 }
@@ -208,6 +225,8 @@ pub(crate) struct Prepared {
     pub class_id: u8,
     pub class_prob: f32,
     pub p_exist: f32,
+    /// Box with heading in ENU at the object, predicted to the query time.
+    pub object_box: Option<ObjectBox>,
 }
 
 /// The L3 fusion engine.
@@ -258,7 +277,8 @@ impl WorldModel {
                 snap.skipped_untrusted += 1;
                 continue;
             }
-            let (x, mut p) = self.predict(&r.state(), &r.covariance(), t.secs_since(r.t_valid));
+            let dt = t.secs_since(r.t_valid);
+            let (x, mut p) = self.predict(&r.state(), &r.covariance(), dt);
             if let Some(f) = trust.inflate.get(&r.source) {
                 p *= f.max(1.0);
             }
@@ -270,6 +290,7 @@ impl WorldModel {
                 class_id: r.class_id,
                 class_prob: r.class_prob,
                 p_exist: r.p_exist,
+                object_box: r.object_box.map(|b| self.config.box_model.predict(&b, dt)),
             });
         }
         (items, snap)
@@ -306,7 +327,13 @@ impl WorldModel {
 
     /// Whether two prepared reports may describe the same object.
     pub(crate) fn gates(&self, a: &Prepared, b: &Prepared) -> Option<f64> {
-        if a.key.0 == b.key.0 || a.class_id != b.class_id {
+        if a.key.0 == b.key.0
+            || a.class_id != b.class_id
+            || !self
+                .config
+                .box_gate
+                .passes(a.object_box.as_ref(), b.object_box.as_ref())
+        {
             return None;
         }
         self.gate_states(&a.x, &a.p, &b.x, &b.p)
@@ -364,8 +391,8 @@ impl WorldModel {
 
         let mut cluster_of: Vec<usize> = (0..items.len()).collect();
         let mut members: Vec<Vec<usize>> = (0..items.len()).map(|i| vec![i]).collect();
-        let mut fused: Vec<(Vector6<f64>, Matrix6<f64>)> =
-            items.iter().map(|it| (it.x, it.p)).collect();
+        let mut fused: Vec<(Vector6<f64>, Matrix6<f64>, Option<ObjectBox>)> =
+            items.iter().map(|it| (it.x, it.p, it.object_box)).collect();
         for (_, i, j) in pairs {
             let (ci, cj) = (cluster_of[i], cluster_of[j]);
             if ci == cj {
@@ -380,7 +407,9 @@ impl WorldModel {
                 continue;
             }
             let (a, b) = (&fused[ci], &fused[cj]);
-            if self.gate_states(&a.0, &a.1, &b.0, &b.1).is_none() {
+            if self.gate_states(&a.0, &a.1, &b.0, &b.1).is_none()
+                || !self.config.box_gate.passes(a.2.as_ref(), b.2.as_ref())
+            {
                 continue;
             }
             let (keep, gone) = if ci < cj { (ci, cj) } else { (cj, ci) };
@@ -397,22 +426,30 @@ impl WorldModel {
 }
 
 /// CI-fuses members (indices in key order) in key order.
-fn fuse_members(items: &[Prepared], members: &[usize]) -> (Vector6<f64>, Matrix6<f64>) {
+fn fuse_members(
+    items: &[Prepared],
+    members: &[usize],
+) -> (Vector6<f64>, Matrix6<f64>, Option<ObjectBox>) {
     let first = &items[members[0]];
-    let (mut x, mut p) = (first.x, first.p);
+    let (mut x, mut p, mut b) = (first.x, first.p, first.object_box);
     for m in &members[1..] {
         let it = &items[*m];
         let (nx, np) = covariance_intersection(&x, &p, &it.x, &it.p);
         x = nx;
         p = np;
+        b = match (b, it.object_box) {
+            (Some(a), Some(c)) => Some(fuse_boxes(&a, &c)),
+            (None, c) => c,
+            (a, None) => a,
+        };
     }
-    (x, p)
+    (x, p, b)
 }
 
 /// Fuses one cluster (member indices in key order) into a world object.
 fn fuse_cluster(items: &[Prepared], members: &[usize], t: Timestamp) -> Option<WorldObject> {
     let first = items.get(*members.first()?)?;
-    let (x, p) = fuse_members(items, members);
+    let (x, p, object_box) = fuse_members(items, members);
     let best = members.iter().map(|m| &items[*m]).max_by(|a, b| {
         a.class_prob
             .total_cmp(&b.class_prob)
@@ -433,6 +470,7 @@ fn fuse_cluster(items: &[Prepared], members: &[usize], t: Timestamp) -> Option<W
             .iter()
             .map(|m| items[*m].p_exist)
             .fold(0.0, f32::max),
+        object_box,
     })
 }
 
@@ -549,6 +587,7 @@ mod tests {
             p_exist: 0.9,
             lifecycle: TrackLifecycle::Confirmed,
             valid_for_ms: 1500,
+            object_box: None,
         }
     }
 
@@ -558,6 +597,89 @@ mod tests {
             s.insert(*r);
         }
         s
+    }
+
+    fn boxed(mut r: TrackReport, length: f64, yaw: f64) -> TrackReport {
+        r.object_box = Some(ObjectBox {
+            size: [length, 2.0, 2.0],
+            size_var: [0.04; 3],
+            yaw,
+            yaw_var: 0.0025,
+            yaw_ambiguous: true,
+        });
+        r
+    }
+
+    #[test]
+    fn box_gate_keeps_a_car_and_a_truck_apart_when_position_cannot() {
+        // Two sources with poor localization (1 m) each report a car and a truck
+        // 3 m apart. Position alone gates every cross pair; with source 2's
+        // errors pushing its car toward source 1's truck, position-only
+        // clustering pairs the wrong ones. Boxes refuse those pairs.
+        let car_1 = boxed(
+            report(1, 1, 1, Vector3::new(0.0, 0.0, 0.0), 1.0, 1000),
+            4.5,
+            0.0,
+        );
+        let truck_1 = boxed(
+            report(1, 2, 2, Vector3::new(0.0, 3.0, 0.0), 1.0, 1000),
+            12.0,
+            0.0,
+        );
+        let car_2 = boxed(
+            report(2, 1, 1, Vector3::new(0.0, 2.2, 0.0), 1.0, 1000),
+            4.6,
+            3.1,
+        );
+        let truck_2 = boxed(
+            report(2, 2, 2, Vector3::new(0.0, 5.0, 0.0), 1.0, 1000),
+            11.8,
+            0.05,
+        );
+        let st = store(&[car_1, truck_1, car_2, truck_2]);
+        let t = Timestamp::from_millis(1000);
+        let members = |cfg: WorldModelConfig| -> Vec<Vec<u64>> {
+            let snap = WorldModel::new(cfg).snapshot(&st, t, &TrustView::default());
+            snap.objects
+                .iter()
+                .map(|o| {
+                    o.members
+                        .iter()
+                        .map(|((s, tr), _)| s.0[0] as u64 * 10 + tr.0)
+                        .collect()
+                })
+                .collect()
+        };
+        let with = members(WorldModelConfig::default());
+        assert_eq!(
+            with,
+            vec![vec![11, 21], vec![12, 22]],
+            "cars with cars, trucks with trucks"
+        );
+        let without = members(WorldModelConfig {
+            box_gate: BoxGate::disabled(),
+            ..WorldModelConfig::default()
+        });
+        assert!(
+            without.contains(&vec![12, 21]),
+            "position alone pairs truck 1 with car 2: {without:?}"
+        );
+        let snap = WorldModel::default().snapshot(&st, t, &TrustView::default());
+        let truck = snap
+            .objects
+            .iter()
+            .find(|o| o.members.len() == 2 && o.object_box.unwrap().size[0] > 8.0)
+            .unwrap();
+        let b = truck.object_box.unwrap();
+        assert!(
+            (b.size[0] - 11.9).abs() < 0.11,
+            "fused truck length {}",
+            b.size[0]
+        );
+        assert_eq!(
+            truck.to_entity().oriented_box.map(|o| o[0] > 8.0),
+            Some(true)
+        );
     }
 
     #[test]

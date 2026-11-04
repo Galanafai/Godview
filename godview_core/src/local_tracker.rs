@@ -12,6 +12,7 @@
 //! Lifecycle is driven by elapsed time, not ticks.
 
 use crate::assignment::assign;
+use crate::extent::{BoxGate, BoxModel, ObjectBox};
 use crate::filter::{BufferedObs, CvModel, CvState, FilterError, RetrodictingFilter};
 use crate::report::{LocalTrackId, TrackLifecycle};
 use godview_env::Timestamp;
@@ -33,6 +34,8 @@ pub struct Detection {
     pub class_id: u8,
     /// Detector confidence for `class_id` in `[0, 1]`.
     pub class_prob: f32,
+    /// Oriented box, heading in the odometry frame, if the detector reports extent.
+    pub object_box: Option<ObjectBox>,
 }
 
 /// Local tracker parameters.
@@ -70,6 +73,18 @@ pub struct LocalTrackerConfig {
     pub coast_after_s: f64,
     /// A track without updates for this long is terminated (s).
     pub terminate_after_s: f64,
+    /// Box consistency required to associate a detection with a track, to
+    /// suppress a spawn near a track, and to call two tracks duplicates.
+    pub box_gate: BoxGate,
+    /// Process noise of track boxes.
+    pub box_model: BoxModel,
+    /// Systematic center error of the detector, as a standard deviation in
+    /// fractions of the box's half-length and half-width (0 trusts the
+    /// detector's covariance). Detectors that see only part of an object
+    /// shift the center toward the visible side on every scan; that error
+    /// does not average out, so it is added to published covariances (see
+    /// [`crate::extent::center_sys_cov`]) rather than to the measurement noise.
+    pub box_center_sys_frac: f64,
 }
 
 impl Default for LocalTrackerConfig {
@@ -86,6 +101,9 @@ impl Default for LocalTrackerConfig {
             tentative_max_gap_s: 0.5,
             coast_after_s: 0.3,
             terminate_after_s: 1.5,
+            box_gate: BoxGate::default(),
+            box_model: BoxModel::default(),
+            box_center_sys_frac: 0.0,
         }
     }
 }
@@ -108,6 +126,11 @@ pub struct LocalTrack {
     pub created: Timestamp,
     /// Latest observation time fused.
     pub last_update: Timestamp,
+    /// Box estimate (odometry frame), if any detection carried one.
+    object_box: Option<ObjectBox>,
+    /// Time `object_box` refers to.
+    box_t: Timestamp,
+    box_model: BoxModel,
 }
 
 impl LocalTrack {
@@ -119,6 +142,39 @@ impl LocalTrack {
     /// Estimate predicted to `t`.
     pub fn predicted(&self, t: Timestamp) -> CvState {
         self.filter.predicted(t)
+    }
+
+    /// Box estimate (odometry frame) predicted to `t`, if the track has one.
+    pub fn predicted_box(&self, t: Timestamp) -> Option<ObjectBox> {
+        self.object_box
+            .map(|b| self.box_model.predict(&b, t.secs_since(self.box_t)))
+    }
+
+    /// Fuses a detection's box into the track's box, then lets a well-determined
+    /// velocity pick front from back.
+    fn update_box(&mut self, d: &Detection) {
+        let Some(m) = d.object_box else {
+            return;
+        };
+        let updated = match self.predicted_box(d.t) {
+            Some(est) => self.box_model.update(&est, &m),
+            None => m,
+        };
+        let st = self.filter.state();
+        let v = st.x.fixed_rows::<3>(3);
+        let speed = (v[0] * v[0] + v[1] * v[1]).sqrt();
+        let speed_var = if speed > 0.0 {
+            let u = Vector3::new(v[0] / speed, v[1] / speed, 0.0);
+            let pv: Matrix3<f64> = st.p.fixed_view::<3, 3>(3, 3).into_owned();
+            u.dot(&(pv * u))
+        } else {
+            f64::INFINITY
+        };
+        self.object_box = Some(
+            self.box_model
+                .resolve_with_velocity(&updated, v[0], v[1], speed_var),
+        );
+        self.box_t = self.box_t.max(d.t);
     }
 
     /// Whether this track is published.
@@ -247,6 +303,9 @@ impl LocalTracker {
                         {
                             return f64::INFINITY;
                         }
+                        if !self.box_ok(tr, d) {
+                            return f64::INFINITY;
+                        }
                         let pred = tr.predicted(d.t);
                         let (y, s) = pred.innovation(&d.z, &d.r);
                         match s.cholesky() {
@@ -307,7 +366,7 @@ impl LocalTracker {
                         .iter()
                         .map(|&di| {
                             let d = &fresh[di];
-                            if d.class_id != tr.class_id {
+                            if d.class_id != tr.class_id || !self.box_ok(tr, d) {
                                 return f64::INFINITY;
                             }
                             match tr.predicted(d.t).nis(&d.z, &d.r) {
@@ -338,6 +397,7 @@ impl LocalTracker {
                 r: d.r,
             }) {
                 Ok(nis) => {
+                    tr.update_box(&d);
                     out.updated += 1;
                     tr.hits += 1;
                     tr.last_update = tr.last_update.max(d.t);
@@ -369,6 +429,7 @@ impl LocalTracker {
             let near_known = self.tracks.values().any(|tr| {
                 tr.is_published()
                     && tr.class_id == d.class_id
+                    && self.box_ok(tr, d)
                     && tr
                         .predicted(d.t)
                         .nis(&d.z, &d.r)
@@ -406,6 +467,9 @@ impl LocalTracker {
                     hits: 1,
                     created: d.t,
                     last_update: d.t,
+                    object_box: d.object_box,
+                    box_t: d.t,
+                    box_model: self.config.box_model,
                 },
             );
             out.created += 1;
@@ -420,6 +484,13 @@ impl LocalTracker {
         out
     }
 
+    /// Whether a detection's box is consistent with a track's predicted box.
+    fn box_ok(&self, tr: &LocalTrack, d: &Detection) -> bool {
+        self.config
+            .box_gate
+            .passes(tr.predicted_box(d.t).as_ref(), d.object_box.as_ref())
+    }
+
     /// Drops tentative tracks that duplicate a published track of the same class.
     ///
     /// A detection in the far tail of an established track's gate can start a
@@ -432,11 +503,11 @@ impl LocalTracker {
     /// one, so this does not hide genuinely new objects that spawn suppression
     /// would admit.
     fn discard_tentative_duplicates(&mut self, t: Timestamp) -> usize {
-        let published: Vec<(u8, CvState)> = self
+        let published: Vec<(u8, CvState, Option<ObjectBox>)> = self
             .tracks
             .values()
             .filter(|tr| tr.is_published())
-            .map(|tr| (tr.class_id, tr.predicted(t)))
+            .map(|tr| (tr.class_id, tr.predicted(t), tr.predicted_box(t)))
             .collect();
         let doomed: Vec<LocalTrackId> = self
             .tracks
@@ -444,8 +515,10 @@ impl LocalTracker {
             .filter(|tr| tr.lifecycle == TrackLifecycle::Tentative)
             .filter(|tr| {
                 let x = tr.predicted(t);
-                published.iter().any(|(class, p)| {
+                let xb = tr.predicted_box(t);
+                published.iter().any(|(class, p, pb)| {
                     *class == tr.class_id
+                        && self.config.box_gate.passes(xb.as_ref(), pb.as_ref())
                         && duplicate(
                             &x,
                             p,
@@ -469,16 +542,28 @@ impl LocalTracker {
     /// track with fewer hits (then the higher id) is terminated, so a tombstone
     /// removes it from peers' world states at once rather than after it expires.
     fn prune_duplicates(&mut self, t: Timestamp) -> usize {
-        let published: Vec<(LocalTrackId, u32, u8, CvState)> = self
+        let published: Vec<(LocalTrackId, u32, u8, CvState, Option<ObjectBox>)> = self
             .tracks
             .values()
             .filter(|tr| tr.is_published())
-            .map(|tr| (tr.id, tr.hits, tr.class_id, tr.predicted(t)))
+            .map(|tr| {
+                (
+                    tr.id,
+                    tr.hits,
+                    tr.class_id,
+                    tr.predicted(t),
+                    tr.predicted_box(t),
+                )
+            })
             .collect();
         let mut doomed = std::collections::BTreeSet::new();
         for (i, a) in published.iter().enumerate() {
             for b in &published[i + 1..] {
-                if a.2 != b.2 || doomed.contains(&a.0) || doomed.contains(&b.0) {
+                if a.2 != b.2
+                    || doomed.contains(&a.0)
+                    || doomed.contains(&b.0)
+                    || !self.config.box_gate.passes(a.4.as_ref(), b.4.as_ref())
+                {
                     continue;
                 }
                 if duplicate(
@@ -574,6 +659,7 @@ mod tests {
             r: Matrix3::identity() * 0.09,
             class_id: 1,
             class_prob: 0.9,
+            object_box: None,
         }
     }
 
@@ -724,6 +810,67 @@ mod tests {
             lt.track(LocalTrackId(2)).is_none(),
             "the newcomer must starve and be dropped"
         );
+    }
+
+    fn with_box(mut d: Detection, length: f64, yaw: f64) -> Detection {
+        d.object_box = Some(ObjectBox {
+            size: [length, 2.0, 1.6],
+            size_var: [0.04; 3],
+            yaw,
+            yaw_var: 0.0025,
+            yaw_ambiguous: true,
+        });
+        d
+    }
+
+    #[test]
+    fn boxes_refine_and_motion_resolves_front_from_back() {
+        // A car moving +x at 3 m/s, detected with ambiguous, randomly flipped headings.
+        let mut lt = LocalTracker::new(LocalTrackerConfig::default());
+        for k in 0..30u64 {
+            let flip = if k % 3 == 0 {
+                std::f64::consts::PI
+            } else {
+                0.0
+            };
+            let d = with_box(
+                det(k + 1, k as i64 * 100, 0.3 * k as f64, 0.0),
+                4.5 + 0.1 * ((k % 5) as f64 - 2.0),
+                crate::extent::wrap_pi(0.02 + flip),
+            );
+            lt.process_scan(&[d]);
+        }
+        let tr = lt.tracks().next().unwrap();
+        let b = tr.predicted_box(Timestamp::from_millis(2900)).unwrap();
+        assert!((b.size[0] - 4.5).abs() < 0.1, "length {}", b.size[0]);
+        assert!(!b.yaw_ambiguous, "motion resolved the heading");
+        assert!(
+            crate::extent::wrap_pi(b.yaw - 0.02).abs() < 0.05,
+            "points along travel: {}",
+            b.yaw
+        );
+    }
+
+    #[test]
+    fn a_truck_beside_a_car_track_starts_its_own_track() {
+        // A truck detection inside the car track's position gate does not associate
+        // with it and is not suppressed as tail noise: the sizes disagree.
+        let mut lt = LocalTracker::new(LocalTrackerConfig::default());
+        for k in 0..10u64 {
+            lt.process_scan(&[with_box(det(k + 1, k as i64 * 100, 0.0, 0.0), 4.5, 0.0)]);
+        }
+        let truck = with_box(det(100, 1000, 0.0, 0.8), 12.0, 0.0);
+        let out = lt.process_scan(&[truck]);
+        assert_eq!((out.updated, out.created, out.suppressed), (0, 1, 0));
+        // The same detection without a box would have been associated (or suppressed).
+        let mut lt2 = LocalTracker::new(LocalTrackerConfig::default());
+        for k in 0..10u64 {
+            lt2.process_scan(&[with_box(det(k + 1, k as i64 * 100, 0.0, 0.0), 4.5, 0.0)]);
+        }
+        let mut plain = truck;
+        plain.object_box = None;
+        let out = lt2.process_scan(&[plain]);
+        assert_eq!(out.created, 0, "without a box, position decides");
     }
 
     #[test]

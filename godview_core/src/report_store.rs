@@ -214,6 +214,7 @@ mod tests {
             p_exist: 1.0,
             lifecycle: TrackLifecycle::Confirmed,
             valid_for_ms: 1000,
+            object_box: None,
         }
     }
 

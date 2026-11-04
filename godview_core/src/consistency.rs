@@ -302,6 +302,7 @@ mod tests {
                         p_exist: 0.9,
                         lifecycle: TrackLifecycle::Confirmed,
                         valid_for_ms: 1000,
+                        object_box: None,
                     });
                 }
             }

@@ -99,6 +99,12 @@ pub struct Entity {
     /// engine see the estimate's precision, not just a point.
     #[serde(default)]
     pub position_cov_enu: Option<[f32; 6]>,
+
+    /// Oriented box `[length, width, height, heading]` (m, m, m, rad), heading
+    /// counterclockwise from East at `position`. `None` when the producer
+    /// reports no extent.
+    #[serde(default)]
+    pub oriented_box: Option<[f32; 4]>,
 }
 
 /// A WorldShard represents a columnar volume of space defined by an H3 cell
@@ -504,6 +510,7 @@ mod tests {
             timestamp: 1702934400000,
             confidence: 0.95,
             position_cov_enu: None,
+            oriented_box: None,
         };
         
         let result = engine.update_entity(entity);
@@ -527,6 +534,7 @@ mod tests {
             timestamp: 1702934400000,
             confidence: 0.95,
             position_cov_enu: None,
+            oriented_box: None,
         };
         
         // Aerial entity (same lat/lon, different altitude)
@@ -538,6 +546,7 @@ mod tests {
             timestamp: 1702934400000,
             confidence: 0.95,
             position_cov_enu: None,
+            oriented_box: None,
         };
         
         engine.update_entity(ground).unwrap();
@@ -615,6 +624,7 @@ mod tests {
             timestamp: 1702934400000,
             confidence: 0.95,
             position_cov_enu: None,
+            oriented_box: None,
         };
         
         let nearby = Entity {
@@ -625,6 +635,7 @@ mod tests {
             timestamp: 1702934400000,
             confidence: 0.95,
             position_cov_enu: None,
+            oriented_box: None,
         };
         
         engine.update_entity(sf).unwrap();
@@ -650,6 +661,7 @@ mod tests {
             timestamp: 0,
             confidence: 0.9,
             position_cov_enu: Some([1.0, 0.0, 0.0, 1.0, 0.0, 4.0]),
+            oriented_box: None,
         };
         engine.update_entity(e.clone()).unwrap();
         e.position = [37.7752, -122.4194, 10.0];
@@ -685,6 +697,7 @@ mod tests {
                 timestamp: 1702934400000,
                 confidence: 0.95,
                 position_cov_enu: None,
+                oriented_box: None,
             };
             engine.update_entity(entity).unwrap();
         }

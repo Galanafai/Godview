@@ -337,7 +337,7 @@ pub async fn run(cfg: RunConfig) -> Result<NodeReport, RunError> {
                 let work = std::time::Instant::now();
                 drain(&mut node, &mut rx, &mut received, &mut from);
                 let t_s = t.secs_since(start);
-                node.ingest(&agent.detect(t, &truth.positions_enu(t_s)));
+                node.ingest(&agent.detect(t, &truth, t_s));
                 node.maintain(t);
                 let p = agent.pose(t);
                 let batches = node.publish_by_cell(t, Some(&p), cfg.topic_resolution);

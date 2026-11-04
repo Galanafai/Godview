@@ -10,6 +10,7 @@
 //! global pose estimate has a localization error drawn once from the
 //! covariance it reports.
 
+use godview_core::extent::{wrap_pi, ObjectBox};
 use godview_core::frames::{rotate_state_cov, EnuFrame, Geodetic, Pose3, PoseWithCov};
 use godview_core::local_tracker::Detection;
 use godview_core::localization::{LocalizationStatus, PoseEstimate};
@@ -46,6 +47,8 @@ pub struct SyntheticSpec {
     pub loc_sigma_h_m: f64,
     /// Reported and realized yaw error (degrees).
     pub loc_sigma_yaw_deg: f64,
+    /// Detections carry oriented boxes (sizes cycle through car, van, truck, bus).
+    pub boxes: bool,
 }
 
 impl Default for SyntheticSpec {
@@ -63,6 +66,7 @@ impl Default for SyntheticSpec {
             sensor_sigma_m: 0.3,
             loc_sigma_h_m: 0.1,
             loc_sigma_yaw_deg: 0.2,
+            boxes: true,
         }
     }
 }
@@ -77,7 +81,17 @@ pub fn site() -> EnuFrame {
 pub struct Truth {
     /// `(start position, velocity)` in ENU (m, m/s).
     pub objects: Vec<(Vector3<f64>, Vector3<f64>)>,
+    /// Length, width, height of each object (m), if detections carry boxes.
+    pub sizes: Vec<Option<[f64; 3]>>,
 }
+
+/// Box sizes the synthetic objects cycle through: car, van, truck, bus.
+pub const SIZES: [[f64; 3]; 4] = [
+    [4.5, 1.8, 1.5],
+    [5.5, 2.0, 2.2],
+    [12.0, 2.5, 3.5],
+    [12.0, 2.6, 3.2],
+];
 
 impl Truth {
     /// Builds the objects for `spec` by seeded rejection sampling.
@@ -102,7 +116,16 @@ impl Truth {
                 objects.push((p, v));
             }
         }
-        Self { objects }
+        let sizes = (0..objects.len())
+            .map(|i| spec.boxes.then_some(SIZES[i % SIZES.len()]))
+            .collect();
+        Self { objects, sizes }
+    }
+
+    /// Heading of object `i`'s length axis in ENU: its direction of travel.
+    pub fn heading_enu(&self, i: usize) -> f64 {
+        let v = self.objects[i].1;
+        v.y.atan2(v.x)
     }
 
     /// Object positions in ENU at `t_s` seconds after the start.
@@ -122,6 +145,7 @@ pub struct SyntheticAgent {
     next_obs: u64,
     range_m: f64,
     sigma_m: f64,
+    odom_yaw: f64,
 }
 
 impl SyntheticAgent {
@@ -134,8 +158,9 @@ impl SyntheticAgent {
             spec.ring_radius_m * th.sin(),
             2.0,
         ) + offset_enu;
+        let odom_yaw = 0.3 + 0.7 * index as f64;
         let enu_from_odom = Pose3::from_yaw(
-            0.3 + 0.7 * index as f64,
+            odom_yaw,
             position_enu + Vector3::new(3.0 * index as f64, -2.0 * index as f64, 0.5),
         );
         let site = site();
@@ -174,14 +199,18 @@ impl SyntheticAgent {
             next_obs: 0,
             range_m: spec.sensor_range_m,
             sigma_m: spec.sensor_sigma_m,
+            odom_yaw,
         }
     }
 
-    /// Noisy detections, in this agent's odometry frame, of every object in range.
-    pub fn detect(&mut self, t: Timestamp, truth_enu: &[Vector3<f64>]) -> Vec<Detection> {
+    /// Noisy detections, in this agent's odometry frame, of every object in
+    /// range `t_s` seconds after the start. Objects with a size are reported as
+    /// oriented boxes (size noise 0.2 m, heading noise 0.05 rad, front and back
+    /// indistinguishable).
+    pub fn detect(&mut self, t: Timestamp, truth: &Truth, t_s: f64) -> Vec<Detection> {
         let odom_from_enu = self.enu_from_odom.inverse();
         let mut out = Vec::new();
-        for p in truth_enu {
+        for (i, p) in truth.positions_enu(t_s).iter().enumerate() {
             let n = Vector3::new(
                 randn(&mut self.sensor_rng),
                 randn(&mut self.sensor_rng),
@@ -190,6 +219,22 @@ impl SyntheticAgent {
             if (p - self.position_enu).norm() > self.range_m {
                 continue;
             }
+            let object_box = truth.sizes[i].map(|size| {
+                let ns = [0, 1, 2].map(|_| randn(&mut self.sensor_rng));
+                let ny = randn(&mut self.sensor_rng);
+                let flip = if self.sensor_rng.gen::<f64>() < 0.5 {
+                    std::f64::consts::PI
+                } else {
+                    0.0
+                };
+                ObjectBox {
+                    size: [0, 1, 2].map(|k| (size[k] + 0.2 * ns[k]).max(0.1)),
+                    size_var: [0.04; 3],
+                    yaw: wrap_pi(truth.heading_enu(i) + 0.05 * ny + flip - self.odom_yaw),
+                    yaw_var: 0.0025,
+                    yaw_ambiguous: true,
+                }
+            });
             self.next_obs += 1;
             out.push(Detection {
                 obs_id: self.next_obs,
@@ -199,6 +244,7 @@ impl SyntheticAgent {
                 r: Matrix3::identity() * self.sigma_m * self.sigma_m,
                 class_id: 1,
                 class_prob: 0.9,
+                object_box,
             });
         }
         out
@@ -257,11 +303,17 @@ mod tests {
             ..SyntheticSpec::default()
         };
         let mut agent = SyntheticAgent::new(&spec, 2, Vector3::zeros());
-        let truth = Truth::new(&spec).positions_enu(1.0);
-        let dets = agent.detect(Timestamp::ZERO, &truth);
+        let t = Truth::new(&spec);
+        let truth = t.positions_enu(1.0);
+        let dets = agent.detect(Timestamp::ZERO, &t, 1.0);
         assert_eq!(dets.len(), truth.len());
-        for (d, p) in dets.iter().zip(&truth) {
+        for (i, (d, p)) in dets.iter().zip(&truth).enumerate() {
             assert!((agent.enu_from_odom.transform_point(&d.z) - p).norm() < 1e-9);
+            // The box heading, rotated back into ENU, is the direction of travel (modulo π).
+            let b = d.object_box.expect("boxes on by default");
+            let enu =
+                godview_core::extent::yaw_residual(b.yaw + agent.odom_yaw, t.heading_enu(i), true);
+            assert!(enu.abs() < 0.3, "heading off by {enu}");
         }
     }
 
@@ -269,7 +321,8 @@ mod tests {
     fn distant_agent_sees_nothing() {
         let spec = SyntheticSpec::default();
         let mut agent = SyntheticAgent::new(&spec, 0, Vector3::new(5000.0, 0.0, 0.0));
-        let truth = Truth::new(&spec).positions_enu(0.0);
-        assert!(agent.detect(Timestamp::ZERO, &truth).is_empty());
+        assert!(agent
+            .detect(Timestamp::ZERO, &Truth::new(&spec), 0.0)
+            .is_empty());
     }
 }

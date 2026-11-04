@@ -13,25 +13,34 @@
 //! # Encoding
 //!
 //! A batch is a canonical little-endian byte string followed by an Ed25519
-//! signature over all preceding bytes. There is no self-describing format and
-//! no optional field, so equal content always means equal bytes, and every
-//! decoded value is exactly what the signer signed. The layout is pinned by a
-//! golden-bytes test; changing it requires bumping [`SCHEMA_VERSION`].
+//! signature over all preceding bytes. There is no self-describing format; the
+//! one optional field (the box) has a tag byte, so equal content always means
+//! equal bytes, and every decoded value is exactly what the signer signed. The
+//! layout is pinned by a golden-bytes test; changing it requires bumping
+//! [`SCHEMA_VERSION`]. Schema 1 (no box tag) is still decoded.
 //!
 //! ```text
 //! batch   := "GVR" schema:u8 source:[u8;32] epoch:u32 sent_at:i64 count:u16 report* signature:[u8;64]
 //! report  := seq:u64 track:u64 t_valid:i64 frame pos:f64×3 vel:f32×3 cov:f32×21
-//!            class:u8 class_prob:f32 p_exist:f32 lifecycle:u8 valid_for_ms:u32
+//!            class:u8 class_prob:f32 p_exist:f32 lifecycle:u8 valid_for_ms:u32 box
 //! frame   := 0u8 (ECEF) | 1u8 frame_id:u64 (source-local frame)
+//! box     := 0u8 (none) | 1u8 size:f32×3 size_var:f32×3 yaw:f32 yaw_var:f32 flags:u8
+//!            (schema 2 only; flags bit 0 = heading ambiguous modulo π)
 //! ```
+//!
+//! A box's heading is counterclockwise from local East at the object for
+//! ECEF reports, and from the source frame's x axis for local-frame reports.
 
+use crate::extent::ObjectBox;
 use crate::frames::{is_spd, unpack_upper6};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use godview_env::Timestamp;
 use nalgebra::{Matrix6, Vector3, Vector6};
 
 /// Current wire schema.
-pub const SCHEMA_VERSION: u8 = 1;
+pub const SCHEMA_VERSION: u8 = 2;
+/// The previous schema (no box), still accepted when decoding.
+pub const SCHEMA_VERSION_V1: u8 = 1;
 const MAGIC: &[u8; 3] = b"GVR";
 /// Maximum reports in one batch.
 pub const MAX_REPORTS_PER_BATCH: usize = 4096;
@@ -156,6 +165,8 @@ pub struct TrackReport {
     pub lifecycle: TrackLifecycle,
     /// How long after `t_valid` the source vouches for this estimate (ms).
     pub valid_for_ms: u32,
+    /// Oriented box, if the source's sensors report extent (see [`crate::extent`]).
+    pub object_box: Option<ObjectBox>,
 }
 
 impl TrackReport {
@@ -227,6 +238,9 @@ impl TrackReport {
         if !is_spd(&c) {
             return Err(ReportError::CovarianceNotPositiveDefinite);
         }
+        if self.object_box.is_some_and(|b| !b.is_valid()) {
+            return Err(ReportError::ImplausibleBox);
+        }
         Ok(())
     }
 }
@@ -277,6 +291,12 @@ pub enum ReportError {
     /// Covariance not symmetric positive definite.
     #[error("covariance not positive definite")]
     CovarianceNotPositiveDefinite,
+    /// A box with a non-finite, non-positive or implausible value.
+    #[error("implausible box")]
+    ImplausibleBox,
+    /// Unknown box tag.
+    #[error("bad box tag {0}")]
+    BadBoxTag(u8),
     /// More reports than allowed.
     #[error("too many reports")]
     TooManyReports,
@@ -363,6 +383,21 @@ impl ReportBatch {
             b.extend_from_slice(&r.p_exist.to_le_bytes());
             b.push(r.lifecycle.to_u8());
             b.extend_from_slice(&r.valid_for_ms.to_le_bytes());
+            match r.object_box {
+                None => b.push(0),
+                Some(x) => {
+                    b.push(1);
+                    for v in x
+                        .size
+                        .iter()
+                        .chain(x.size_var.iter())
+                        .chain([x.yaw, x.yaw_var].iter())
+                    {
+                        b.extend_from_slice(&(*v as f32).to_le_bytes());
+                    }
+                    b.push(u8::from(x.yaw_ambiguous));
+                }
+            }
         }
         b
     }
@@ -378,8 +413,9 @@ impl ReportBatch {
         if &bytes[..3] != MAGIC {
             return Err(ReportError::BadMagic);
         }
-        if bytes[3] != SCHEMA_VERSION {
-            return Err(ReportError::UnsupportedSchema(bytes[3]));
+        let schema = bytes[3];
+        if schema != SCHEMA_VERSION && schema != SCHEMA_VERSION_V1 {
+            return Err(ReportError::UnsupportedSchema(schema));
         }
         let (body, sig_bytes) = bytes.split_at(bytes.len() - 64);
         let mut source = [0u8; 32];
@@ -418,6 +454,31 @@ impl ReportBatch {
             let p_exist = r.f32()?;
             let lifecycle = TrackLifecycle::from_u8(r.u8()?)?;
             let valid_for_ms = r.u32()?;
+            let object_box = if schema == SCHEMA_VERSION_V1 {
+                None
+            } else {
+                match r.u8()? {
+                    0 => None,
+                    1 => {
+                        let mut v = [0f64; 8];
+                        for x in v.iter_mut() {
+                            *x = r.f32()? as f64;
+                        }
+                        let flags = r.u8()?;
+                        if flags > 1 {
+                            return Err(ReportError::BadBoxTag(flags));
+                        }
+                        Some(ObjectBox {
+                            size: [v[0], v[1], v[2]],
+                            size_var: [v[3], v[4], v[5]],
+                            yaw: v[6],
+                            yaw_var: v[7],
+                            yaw_ambiguous: flags == 1,
+                        })
+                    }
+                    other => return Err(ReportError::BadBoxTag(other)),
+                }
+            };
             reports.push(TrackReport {
                 source,
                 epoch,
@@ -433,6 +494,7 @@ impl ReportBatch {
                 p_exist,
                 lifecycle,
                 valid_for_ms,
+                object_box,
             });
         }
         if r.at != body.len() {
@@ -571,6 +633,17 @@ mod tests {
             p_exist: 0.95,
             lifecycle: TrackLifecycle::Confirmed,
             valid_for_ms: 1500,
+            object_box: None,
+        }
+    }
+
+    fn a_box() -> ObjectBox {
+        ObjectBox {
+            size: [4.5, 1.875, 1.5],
+            size_var: [0.0625, 0.015625, 0.03125],
+            yaw: 0.5,
+            yaw_var: 0.0078125,
+            yaw_ambiguous: true,
         }
     }
 
@@ -579,11 +652,13 @@ mod tests {
         let mut local = report(src, 11, 4);
         local.frame = FrameRef::Local { frame_id: 9 };
         local.lifecycle = TrackLifecycle::Terminated;
+        let mut boxed = report(src, 10, 3);
+        boxed.object_box = Some(a_box());
         ReportBatch {
             source: src,
             epoch: 7,
             sent_at: Timestamp::from_millis(1_704_067_200_050),
-            reports: vec![report(src, 10, 3), local],
+            reports: vec![boxed, local],
         }
     }
 
@@ -606,9 +681,10 @@ mod tests {
         // Changing the wire layout must be deliberate: bump SCHEMA_VERSION and this test.
         let k = key(1);
         let bytes = batch(&k).sign(&k);
-        // header 50 + ECEF report 159 + local-frame report 167 + signature 64
-        assert_eq!(bytes.len(), 50 + 159 + 167 + 64);
-        assert_eq!(&bytes[..4], b"GVR\x01");
+        // header 50 + ECEF report with box (159 + 1 + 33) + local-frame report
+        // without box (167 + 1) + signature 64
+        assert_eq!(bytes.len(), 50 + 193 + 168 + 64);
+        assert_eq!(&bytes[..4], b"GVR\x02");
         let crc: u32 = bytes[..bytes.len() - 64]
             .iter()
             .fold(0u32, |a, b| a.rotate_left(5) ^ (*b as u32));
@@ -617,10 +693,15 @@ mod tests {
 
     /// An independent encoder written from the layout in the module header.
     fn reference_encoding_checksum() -> u32 {
-        let k = key(1);
-        let b = batch(&k);
+        let v = reference_encoding(&batch(&key(1)), 2);
+        v.iter().fold(0u32, |a, b| a.rotate_left(5) ^ (*b as u32))
+    }
+
+    /// Encodes `b` (unsigned) in the given schema from the documented layout.
+    fn reference_encoding(b: &ReportBatch, schema: u8) -> Vec<u8> {
         let mut v: Vec<u8> = Vec::new();
-        v.extend_from_slice(b"GVR\x01");
+        v.extend_from_slice(b"GVR");
+        v.push(schema);
         v.extend_from_slice(&b.source.0);
         v.extend_from_slice(&7u32.to_le_bytes());
         v.extend_from_slice(&b.sent_at.as_nanos().to_le_bytes());
@@ -655,8 +736,64 @@ mod tests {
                 TrackLifecycle::Terminated => 3,
             });
             v.extend_from_slice(&r.valid_for_ms.to_le_bytes());
+            if schema >= 2 {
+                match r.object_box {
+                    None => v.push(0),
+                    Some(x) => {
+                        v.push(1);
+                        for f in [
+                            x.size[0],
+                            x.size[1],
+                            x.size[2],
+                            x.size_var[0],
+                            x.size_var[1],
+                            x.size_var[2],
+                            x.yaw,
+                            x.yaw_var,
+                        ] {
+                            v.extend_from_slice(&(f as f32).to_le_bytes());
+                        }
+                        v.push(x.yaw_ambiguous as u8);
+                    }
+                }
+            }
         }
-        v.iter().fold(0u32, |a, b| a.rotate_left(5) ^ (*b as u32))
+        v
+    }
+
+    #[test]
+    fn schema_1_batches_still_decode_without_boxes() {
+        let k = key(1);
+        let mut b = batch(&k);
+        for r in &mut b.reports {
+            r.object_box = None;
+        }
+        let mut bytes = reference_encoding(&b, 1);
+        let sig = k.sign(&bytes);
+        bytes.extend_from_slice(&sig.to_bytes());
+        assert_eq!(ReportBatch::verify_and_decode(&bytes).unwrap(), b);
+    }
+
+    #[test]
+    fn implausible_boxes_are_rejected() {
+        let k = key(1);
+        let mut b = batch(&k);
+        let mut bad = a_box();
+        bad.size_var[1] = 0.0;
+        b.reports[0].object_box = Some(bad);
+        assert_eq!(b.reports[0].validate(), Err(ReportError::ImplausibleBox));
+        // A valid batch whose box tag is corrupted (and re-signed) is rejected too.
+        let good = batch(&k);
+        let mut bytes = reference_encoding(&good, 2);
+        let tag_at = 50 + 159; // first report's box tag
+        assert_eq!(bytes[tag_at], 1);
+        bytes[tag_at] = 7;
+        let sig = k.sign(&bytes);
+        bytes.extend_from_slice(&sig.to_bytes());
+        assert_eq!(
+            ReportBatch::verify_and_decode(&bytes),
+            Err(ReportError::BadBoxTag(7))
+        );
     }
 
     #[test]

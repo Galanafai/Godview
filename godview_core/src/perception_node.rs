@@ -20,6 +20,7 @@
 //!   it can touch state; rejections are counted by reason, never silent.
 
 use crate::consistency::{ConsistencyConfig, ConsistencyMonitor};
+use crate::extent::{box_to_enu, center_sys_cov};
 use crate::filter::CvState;
 use crate::frames::{add_clock_uncertainty, Ecef};
 use crate::local_tracker::{Detection, LocalTrack, LocalTracker, LocalTrackerConfig, ScanOutcome};
@@ -333,6 +334,13 @@ impl PerceptionNode {
 
         let mut reports = Vec::with_capacity(entries.len());
         for (track, state) in entries {
+            let odom_box = track.predicted_box(t_valid);
+            let mut state = state;
+            if let Some(b) = odom_box {
+                let sys = center_sys_cov(&b, self.config.tracker.box_center_sys_frac);
+                let mut pp = state.p.fixed_view_mut::<3, 3>(0, 0);
+                pp += sys;
+            }
             let (frame, x, mut p) = match global {
                 Some(g) => {
                     let (x, p) = g.ecef_from_odom.transform_state(&state.x, &state.p);
@@ -371,6 +379,13 @@ impl PerceptionNode {
                 p_exist,
                 lifecycle: track.lifecycle,
                 valid_for_ms,
+                object_box: odom_box
+                    .map(|b| match global {
+                        Some(g) => box_to_enu(&b, &g.ecef_from_odom, &Ecef::new(x[0], x[1], x[2])),
+                        None => b,
+                    })
+                    .map(|b| b.quantized())
+                    .filter(|b| b.is_valid()),
             };
             if report.validate().is_err() {
                 continue;
@@ -536,6 +551,7 @@ mod tests {
                         r: Matrix3::identity() * 0.04,
                         class_id: 1,
                         class_prob: 0.9,
+                        object_box: None,
                     }
                 })
                 .collect();
@@ -632,6 +648,67 @@ mod tests {
         }
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].cell, None);
+    }
+
+    #[test]
+    fn published_boxes_carry_heading_in_east_north_up_and_systematic_center_error() {
+        // An agent whose odometry frame is rotated 0.7 rad sees a stationary 12 m
+        // truck whose length points 0.2 rad from its odometry x axis: the shared
+        // heading is 0.9 rad from East (modulo π, the detector is ambiguous), and
+        // the declared systematic center error widens the report along the truck.
+        let mut cfg = NodeConfig::default();
+        cfg.tracker.box_center_sys_frac = 0.25;
+        let mut plain = Rig::new(8, Vector3::zeros(), 0.7);
+        let mut rig = Rig::new(8, Vector3::zeros(), 0.7);
+        rig.node = PerceptionNode::new(SigningKey::from_bytes(&[8; 32]), 1, cfg);
+        let truth = Vector3::new(20.0, 10.0, 1.0);
+        let mut last = (None, None);
+        for k in 0..6 {
+            let t = Timestamp::from_millis(k * 100);
+            for (r, out) in [(&mut plain, &mut last.0), (&mut rig, &mut last.1)] {
+                let z = r.odom.inverse().transform_point(&truth);
+                r.next_obs += 1;
+                r.node.ingest(&[Detection {
+                    obs_id: r.next_obs,
+                    t,
+                    z,
+                    r: Matrix3::identity() * 0.04,
+                    class_id: 1,
+                    class_prob: 0.9,
+                    object_box: Some(crate::extent::ObjectBox {
+                        size: [12.0, 2.5, 3.5],
+                        size_var: [0.04; 3],
+                        yaw: 0.2,
+                        yaw_var: 0.0025,
+                        yaw_ambiguous: true,
+                    }),
+                }]);
+                r.node.maintain(t);
+                *out = r.node.publish(t, Some(&r.pose(t))).or(out.take());
+            }
+        }
+        let decode =
+            |b: Option<Vec<u8>>| ReportBatch::verify_and_decode(&b.unwrap()).unwrap().reports[0];
+        let (p, s) = (decode(last.0), decode(last.1));
+        let b = s.object_box.expect("box published");
+        assert!(
+            crate::extent::wrap_half_pi(b.yaw - 0.9).abs() < 1e-3,
+            "yaw {}",
+            b.yaw
+        );
+        assert!((b.size[0] - 12.0).abs() < 0.05);
+        let along = site().ecef_from_enu() * Vector3::new(0.9f64.cos(), 0.9f64.sin(), 0.0);
+        let var = |r: &TrackReport| {
+            let c = r.covariance();
+            let pp: Matrix3<f64> = c.fixed_view::<3, 3>(0, 0).into_owned();
+            along.dot(&(pp * along))
+        };
+        assert!(
+            var(&s) - var(&p) > 1.5f64.powi(2) * 0.99,
+            "systematic error added along the length: {} vs {}",
+            var(&s),
+            var(&p)
+        );
     }
 
     #[test]

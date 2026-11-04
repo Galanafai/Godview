@@ -8,7 +8,10 @@
 //!  "pose": {"lat_deg": 37.7749, "lon_deg": -122.4194, "height_m": 10.0,
 //!           "yaw_deg": 30.0, "sigma_h_m": 0.1, "sigma_v_m": 0.2, "sigma_yaw_deg": 0.3},
 //!  "detections": [{"x": 12.0, "y": -3.0, "z": 1.0, "sigma_m": 0.3,
-//!                  "class_id": 1, "class_prob": 0.9}]}
+//!                  "class_id": 1, "class_prob": 0.9,
+//!                  "box": {"length_m": 4.5, "width_m": 1.8, "height_m": 1.5,
+//!                          "yaw_deg": 10.0, "sigma_size_m": 0.2,
+//!                          "sigma_yaw_deg": 3.0, "yaw_ambiguous": true}}]}
 //! ```
 //!
 //! Detections are positions (m) in the agent's odometry frame: a smooth
@@ -19,8 +22,10 @@
 //! uncertainty of that placement. `agent_xyz` is the agent's own position in
 //! the odometry frame (default: the origin); it decides which topic cells
 //! the node subscribes to. `pose` may be `null` when the agent has no global
-//! localization; its tracks are then kept local and not shared.
+//! localization; its tracks are then kept local and not shared. `box` is
+//! optional: an oriented box with its heading in the odometry frame.
 
+use godview_core::extent::{wrap_pi, ObjectBox};
 use godview_core::frames::{rotate_state_cov, EnuFrame, FrameError, Geodetic, Pose3, PoseWithCov};
 use godview_core::local_tracker::Detection;
 use godview_core::localization::{LocalizationStatus, PoseEstimate};
@@ -77,6 +82,29 @@ pub struct InputDetection {
     pub class_id: u8,
     /// Class confidence in `[0, 1]`.
     pub class_prob: f32,
+    /// Oriented box, if the detector reports extent (JSON key `box`).
+    #[serde(rename = "box", default, skip_serializing_if = "Option::is_none")]
+    pub object_box: Option<InputBox>,
+}
+
+/// An oriented box in the odometry frame.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct InputBox {
+    /// Length along the heading, width, height (m).
+    pub length_m: f64,
+    /// Width (m).
+    pub width_m: f64,
+    /// Height (m).
+    pub height_m: f64,
+    /// Heading of the length axis, counterclockwise from the odometry x axis (degrees).
+    pub yaw_deg: f64,
+    /// Size standard deviation, each dimension (m).
+    pub sigma_size_m: f64,
+    /// Heading standard deviation (degrees).
+    pub sigma_yaw_deg: f64,
+    /// The detector cannot tell front from back (heading known modulo 180 degrees).
+    #[serde(default)]
+    pub yaw_ambiguous: bool,
 }
 
 /// Errors in an input line.
@@ -124,6 +152,7 @@ pub fn parse_line(line: &str, next_obs: &mut u64) -> Result<ParsedFrame, InputEr
             r: Matrix3::identity() * d.sigma_m * d.sigma_m,
             class_id: d.class_id,
             class_prob: d.class_prob.clamp(0.0, 1.0),
+            object_box: d.object_box.map(|b| b.to_box()).transpose()?,
         });
     }
     Ok(ParsedFrame {
@@ -132,6 +161,25 @@ pub fn parse_line(line: &str, next_obs: &mut u64) -> Result<ParsedFrame, InputEr
         detections,
         agent_odom: Vector3::from(frame.agent_xyz),
     })
+}
+
+impl InputBox {
+    fn to_box(self) -> Result<ObjectBox, InputError> {
+        let b = ObjectBox {
+            size: [self.length_m, self.width_m, self.height_m],
+            size_var: [self.sigma_size_m.powi(2); 3],
+            yaw: wrap_pi(self.yaw_deg.to_radians()),
+            yaw_var: self.sigma_yaw_deg.to_radians().powi(2),
+            yaw_ambiguous: self.yaw_ambiguous,
+        };
+        if b.is_valid() {
+            Ok(b)
+        } else {
+            Err(InputError::Uncertainty(
+                "box (sizes must be positive, sigmas positive)",
+            ))
+        }
+    }
 }
 
 fn pose_estimate(p: &InputPose, t: Timestamp) -> Result<PoseEstimate, InputError> {
@@ -192,6 +240,25 @@ mod tests {
             "{enu:?}"
         );
         assert!(pose.ecef_from_odom.cov[(0, 0)] > 0.0);
+    }
+
+    #[test]
+    fn boxes_parse_and_bad_boxes_are_rejected() {
+        let mut next = 0;
+        let line = LINE.replace(
+            "\"class_prob\": 0.9}",
+            "\"class_prob\": 0.9, \"box\": {\"length_m\": 12.0, \"width_m\": 2.5, \"height_m\": 3.5, \"yaw_deg\": 90.0, \"sigma_size_m\": 0.2, \"sigma_yaw_deg\": 3.0, \"yaw_ambiguous\": true}}",
+        )
+        .replace('\n', " ");
+        let f = parse_line(&line, &mut next).unwrap();
+        let b = f.detections[0].object_box.unwrap();
+        assert_eq!(b.size, [12.0, 2.5, 3.5]);
+        assert!((b.yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-12 && b.yaw_ambiguous);
+        let bad = line.replace("\"length_m\": 12.0", "\"length_m\": -1.0");
+        assert!(matches!(
+            parse_line(&bad, &mut next),
+            Err(InputError::Uncertainty(_))
+        ));
     }
 
     #[test]

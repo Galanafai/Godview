@@ -80,11 +80,52 @@ object in the odometry frame.
 * Lifecycle: `Tentative` until 3 hits, `Confirmed`, `Coasting` after 0.3 s
   without data, `Terminated` after 1.5 s.
 
+## 3a. Object extent (oriented boxes)
+
+Detections may carry an oriented box (`extent::ObjectBox`): length, width and
+height with variances, and a heading with a variance. Many detectors cannot
+tell front from back, so a heading can be marked ambiguous (known modulo π).
+Points without a box remain the base case (radar tracks, aircraft, anything a
+sensor reports without a size), and every rule below applies only when both
+sides have a box.
+
+* **Tracking.** A track refines its size per axis from every box (with a
+  small process noise so it stays adaptive) and its heading with a filter
+  that wraps angles, modulo π when ambiguous. Once the track's velocity is
+  well determined and above 1 m/s, the direction of travel picks front from
+  back. The velocity is not fused as a heading measurement, since objects can
+  move sideways.
+* **Gating.** Association, spawn suppression and duplicate pruning in the
+  local tracker, and pair and cluster gating in the world model, also
+  require the sizes (3 DOF, 99.99%) and headings (1 DOF, 99.99%) to agree
+  within their uncertainty. A car beside a truck is not merged even when
+  poor localization makes their positions indistinguishable (unit test
+  `box_gate_keeps_a_car_and_a_truck_apart_when_position_cannot`).
+* **Shared frame.** A report's heading is counterclockwise from East at the
+  object, converted with the agent's pose; the pose's heading uncertainty is
+  added to the box's.
+* **Fusion.** Sizes are fused by covariance intersection with a
+  trace-minimizing weight; for the scalar heading CI keeps the more certain
+  input, flipped by an unambiguous one if needed.
+* **Partial views.** A detector that sees only part of an object places
+  the center toward the visible side, on every scan. That error does not
+  average out, so a filter that treats it as noise becomes confidently wrong,
+  and two agents viewing a truck from opposite ends then report it twice. A
+  detector's systematic center error is declared as `box_center_sys_frac` (a
+  standard deviation in fractions of the half-length and half-width) and
+  added to published covariances along the box's axes. In the
+  `large_objects` scenario, every seed shows the truck or bus duplicated
+  without it and none with it.
+
+The world object, the consumer `Entity` (`oriented_box`), the node's JSON
+report and the node's stdin input all carry boxes.
+
 ## 4. Reports on the wire
 
 `ReportBatch` is a manually encoded, versioned, signed binary format
-(`"GVR"`, schema 1; 50 byte header, 159 bytes per ECEF report, 167 per local
-report, 64 byte Ed25519 signature). Every byte is covered by the signature; a
+(`"GVR"`, schema 2; 50 byte header, 160 bytes per ECEF report without a box
+and 193 with one, 168 per local report without a box, 64 byte Ed25519
+signature). Schema 1 batches (no box tag) are still decoded. Every byte is covered by the signature; a
 test flips each byte in turn and requires rejection.
 
 * `AgentId` is the source's Ed25519 verifying key, so a batch can only be
@@ -117,7 +158,7 @@ and query time give a bit-identical result on every agent.
 2. Candidate pairs are found with `SpatialIndex` (H3 partition over exact
    ECEF positions, with exact 3-D distance filtering, so pairs across cell
    edges are never lost) and gated on position and velocity (chi-square,
-   3 DOF, 99.99%).
+   3 DOF, 99.99%), and on box size and heading when both reports have boxes.
 3. Clusters are built under the constraint that a cluster holds at most one
    track per source; two clusters merge only if their fused estimates also
    gate.
@@ -127,8 +168,8 @@ and query time give a bit-identical result on every agent.
    process model) is unknown.
 5. World object ids are derived deterministically from the members.
 
-`WorldObject::to_entity` converts to the consumer `Entity` (geodetic position
-and ENU covariance) for `SpatialEngine`.
+`WorldObject::to_entity` converts to the consumer `Entity` (geodetic position,
+ENU covariance and, if present, the oriented box) for `SpatialEngine`.
 
 ## 7. Trust
 
@@ -251,7 +292,7 @@ cargo run --release -p godview_sim -- --scenario split_brain --seed 3
 cargo run --release -p godview_sim -- --scenario legacy --seed 42
 ```
 
-`all` runs the 17 perception scenarios below. The 16 scenarios that exercise
+`all` runs the 18 perception scenarios below. The 16 scenarios that exercise
 the legacy `TrackManager` path are kept under `legacy`. `--duration` applies
 to legacy scenarios only; perception scenarios have fixed durations.
 
@@ -267,6 +308,7 @@ to legacy scenarios only; perception scenarios have fixed durations.
 | `slow_loris` | 50% loss: soft state keeps every object present. |
 | `biased_source` | Unreported 6 m bias detected and excluded by all honest agents; an ablation with trust disabled shows the ghosts. |
 | `crossing_targets` | Two objects within 1.5 m are not merged and keep their identities. |
+| `large_objects` | Cars, vans, trucks and buses as oriented boxes, from detectors that see only part of an object and cannot tell front from back: each is one world object from every side, with size consistent with its uncertainty (pooled NEES below 6) and heading within 15 degrees (modulo 180 unless it moves). The same run without the declared systematic center error must show duplicates. |
 | `object_expiry` | Disappearing objects leave every world within coast plus validity time; new ones appear. |
 | `echo_chamber` | Relayed and repeated reports change nothing: world equals the one built from each source's own reports. |
 | `split_brain` | Partition: each side fuses its own sources; after healing all converge. |

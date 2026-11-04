@@ -30,6 +30,7 @@ use crate::context::SimContext;
 use crate::keys::DeterministicKeyProvider;
 use crate::oracle::Oracle;
 use godview_core::consistency::SourceStatus;
+use godview_core::extent::{wrap_pi, ObjectBox};
 use godview_core::frames::{rotate_state_cov, Ecef, EnuFrame, Geodetic, Pose3, PoseWithCov};
 use godview_core::local_tracker::Detection;
 use godview_core::localization::{LocalizationStatus, PoseEstimate};
@@ -46,6 +47,39 @@ use rand_chacha::ChaCha8Rng;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Duration;
 
+/// How a sensor reports object extent (oriented boxes).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BoxSensorSpec {
+    /// Size noise, each of length, width, height (m).
+    pub sigma_size_m: f64,
+    /// Heading noise (rad).
+    pub sigma_yaw_rad: f64,
+    /// The detector cannot tell front from back: headings are reported
+    /// modulo π, randomly flipped.
+    pub ambiguous: bool,
+    /// Partial view: the measured center moves toward the sensor along the
+    /// object's length by a uniform amount in `[0, partial_view · length / 2]`
+    /// when seen end-on (the far end is not seen), scaled by the cosine
+    /// between the length axis and the direction to the sensor, so a
+    /// broadside view has no shift. Half of that range is a systematic offset
+    /// that repeats every scan; the detection's covariance carries only the
+    /// per-scan spread (variance `a² / 12` for range `a`), and the systematic
+    /// part must be declared through the tracker's `box_center_sys_frac`
+    /// (`partial_view / 2` matches it exactly).
+    pub partial_view: f64,
+}
+
+impl Default for BoxSensorSpec {
+    fn default() -> Self {
+        Self {
+            sigma_size_m: 0.2,
+            sigma_yaw_rad: 0.05,
+            ambiguous: true,
+            partial_view: 0.0,
+        }
+    }
+}
+
 /// Sensor model of an agent.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SensorSpec {
@@ -59,6 +93,8 @@ pub struct SensorSpec {
     pub min_delay_ms: u64,
     /// See `min_delay_ms`.
     pub max_delay_ms: u64,
+    /// Report oriented boxes for objects that have a size (`None`: points only).
+    pub boxes: Option<BoxSensorSpec>,
 }
 
 impl Default for SensorSpec {
@@ -69,6 +105,7 @@ impl Default for SensorSpec {
             p_detect: 1.0,
             min_delay_ms: 0,
             max_delay_ms: 0,
+            boxes: None,
         }
     }
 }
@@ -158,6 +195,9 @@ pub struct ObjectSpec {
     pub spawn_s: f64,
     /// Removal time (s), if any.
     pub remove_s: Option<f64>,
+    /// Length, width, height (m), if the object has a box. Its heading is the
+    /// direction of travel (East if stationary).
+    pub size: Option<Vector3<f64>>,
 }
 
 impl ObjectSpec {
@@ -169,6 +209,23 @@ impl ObjectSpec {
             class_id: 1,
             spawn_s: 0.0,
             remove_s: None,
+            size: None,
+        }
+    }
+
+    /// The same object with a box of the given length, width and height.
+    pub fn with_size(mut self, length: f64, width: f64, height: f64) -> Self {
+        self.size = Some(Vector3::new(length, width, height));
+        self
+    }
+
+    /// Heading of the object's length axis in ENU (rad).
+    pub fn heading_enu(&self) -> f64 {
+        let v = self.velocity_enu;
+        if v.x.hypot(v.y) > 1e-9 {
+            v.y.atan2(v.x)
+        } else {
+            0.0
         }
     }
 }
@@ -270,6 +327,8 @@ pub struct TruthSample {
     pub observers: BTreeSet<usize>,
     /// Of those, observers with a global pose at this time.
     pub global_observers: BTreeSet<usize>,
+    /// True box `(length, width, height, heading in ENU)`, if the object has one.
+    pub object_box: Option<([f64; 3], f64)>,
 }
 
 /// One agent's state at a sample.
@@ -544,6 +603,7 @@ pub fn run(spec: &ScenarioSpec) -> RunRecord {
     oracle.set_position_noise(0.0);
     let mut spawned: BTreeMap<usize, u64> = BTreeMap::new(); // spec index -> oracle id
     let mut class_of: BTreeMap<u64, u8> = BTreeMap::new();
+    let mut box_of: BTreeMap<u64, ([f64; 3], f64)> = BTreeMap::new();
     let mut spawn_time: BTreeMap<u64, f64> = BTreeMap::new();
 
     let mut record = RunRecord {
@@ -583,6 +643,9 @@ pub fn run(spec: &ScenarioSpec) -> RunRecord {
                 let id = oracle.spawn_entity(o.position_enu, o.velocity_enu, "object");
                 spawned.insert(i, id);
                 class_of.insert(id, o.class_id);
+                if let Some(sz) = o.size {
+                    box_of.insert(id, ([sz.x, sz.y, sz.z], o.heading_enu()));
+                }
                 spawn_time.insert(id, t_s);
             }
             if let (Some(r), Some(id)) = (o.remove_s, spawned.get(&i)) {
@@ -655,6 +718,44 @@ pub fn run(spec: &ScenarioSpec) -> RunRecord {
                 if u >= ag.spec.sensor.p_detect {
                     continue;
                 }
+                // Box measurement. Random numbers are drawn only when the sensor
+                // reports boxes, so point-only scenarios keep their noise streams.
+                let mut shift = Vector3::zeros();
+                let mut r_enu = Matrix3::identity() * ag.spec.sensor.sigma_m.powi(2);
+                let mut object_box = None;
+                if let (Some(bs), Some((sz, heading))) = (ag.spec.sensor.boxes, box_of.get(id)) {
+                    let ns = [
+                        randn(&mut ag.sensor_rng),
+                        randn(&mut ag.sensor_rng),
+                        randn(&mut ag.sensor_rng),
+                    ];
+                    let ny = randn(&mut ag.sensor_rng);
+                    let flip: f64 = ag.sensor_rng.gen();
+                    let part: f64 = ag.sensor_rng.gen();
+                    let axis = Vector3::new(heading.cos(), heading.sin(), 0.0);
+                    if bs.partial_view > 0.0 {
+                        // Seen end-on, the far end is hidden and the center moves
+                        // toward the sensor; seen broadside, the whole side is
+                        // visible. The shift scales with the cosine between the
+                        // length axis and the direction to the sensor.
+                        let view = (here - p).normalize().dot(&axis);
+                        let a = bs.partial_view * sz[0] / 2.0 * view;
+                        shift = axis * (part * a);
+                        r_enu += axis * axis.transpose() * (a * a / 12.0);
+                    }
+                    let mut yaw = heading + ny * bs.sigma_yaw_rad - ag.spec.odom_yaw_rad;
+                    if bs.ambiguous && flip < 0.5 {
+                        yaw += std::f64::consts::PI;
+                    }
+                    let v = bs.sigma_size_m * bs.sigma_size_m;
+                    object_box = Some(ObjectBox {
+                        size: [0, 1, 2].map(|i| (sz[i] + ns[i] * bs.sigma_size_m).max(0.1)),
+                        size_var: [v; 3],
+                        yaw: wrap_pi(yaw),
+                        yaw_var: bs.sigma_yaw_rad * bs.sigma_yaw_rad,
+                        yaw_ambiguous: bs.ambiguous,
+                    });
+                }
                 ag.next_obs += 1;
                 let s = &ag.spec.sensor;
                 let delay = if s.max_delay_ms > s.min_delay_ms {
@@ -667,10 +768,13 @@ pub fn run(spec: &ScenarioSpec) -> RunRecord {
                     t,
                     // Noise is drawn in ENU and rotated with the point, so a rotated
                     // odometry frame sees the same physical error.
-                    z: odom_from_enu.transform_point(&(p + n)),
-                    r: Matrix3::identity() * s.sigma_m * s.sigma_m,
+                    z: odom_from_enu.transform_point(&(p + n + shift)),
+                    r: odom_from_enu.rotation.matrix()
+                        * r_enu
+                        * odom_from_enu.rotation.matrix().transpose(),
                     class_id: class_of.get(id).copied().unwrap_or(1),
                     class_prob: 0.9,
+                    object_box,
                 };
                 ag.pending
                     .push_back((t.add_millis(delay as i64).as_nanos(), det));
@@ -815,6 +919,7 @@ pub fn run(spec: &ScenarioSpec) -> RunRecord {
                             position: site.to_ecef(p),
                             observers,
                             global_observers,
+                            object_box: box_of.get(id).copied(),
                         }
                     })
                     .collect();
@@ -918,6 +1023,7 @@ fn fabricate(ag: &mut SimAgent, count: usize, site: &EnuFrame, t: Timestamp) -> 
                 p_exist: 0.99,
                 lifecycle: TrackLifecycle::Confirmed,
                 valid_for_ms: 1500,
+                object_box: None,
             }
         })
         .collect();

@@ -273,7 +273,7 @@ to legacy scenarios only; perception scenarios have fixed durations.
 | `agent_restart` | Restart with a new epoch and reused track ids: old reports replaced, peers fuse it again. |
 | `byzantine` | Fabricator creates ghosts until revoked; replay and forgery rejected and leave worlds identical to a control run. |
 | `time_warp` | Out-of-order detections inside the retrodiction window are all fused. |
-| `time_tornado` | Detections up to 5 s late are rejected, not misapplied, and never create ghosts; covariance covers the larger errors (pooled NEES below 6). |
+| `time_tornado` | Detections up to 5 s late are rejected, not misapplied, and never create ghosts (estimates no real object explains within their own 99.99% uncertainty); covariance covers the larger errors (pooled NEES below 6). |
 
 "Tracks every object" in these invariants has a precise meaning
 (`catalog::TRACKING_CRITERION`): at each 0.5 s sample every expected object is

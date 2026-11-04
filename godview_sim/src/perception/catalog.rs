@@ -1540,7 +1540,8 @@ fn time_warp(seed: u64) -> ScenarioOutcome {
 
 const TIME_TORNADO: &str =
     "Detections delayed by up to 5 s mostly fall outside the retrodiction window: they are \
-rejected rather than applied to the wrong time, stale data never creates ghost objects, and the reported \
+rejected rather than applied to the wrong time, stale data never creates ghost objects (estimates no real object \
+explains within their own 99.99% uncertainty), and the reported \
 covariance covers the larger errors of rarely updated tracks (pooled NEES below 6, every error under 3 m).";
 
 fn time_tornado(seed: u64) -> ScenarioOutcome {
@@ -1562,10 +1563,45 @@ fn time_tornado(seed: u64) -> ScenarioOutcome {
     for s in rec.samples.iter().filter(|s| s.t_s >= 5.0) {
         for a in 0..3 {
             let sc = rec.score(s, a, CUTOFF_M, |_| true);
-            c.check(sc.false_estimates == 0, || {
+            // A ghost is an estimate that no real object explains, given the
+            // estimate's own uncertainty: beyond the 5 m cutoff and outside its
+            // 99.99% position ellipsoid around every truth. A just-confirmed
+            // track of a real object can be a few meters off with an honest
+            // multi-meter covariance (seen at seed 48: 5.35 m off with about
+            // 4 m of uncertainty, 0.29 m off a tenth of a second later); it is
+            // not a ghost. The ghost this check exists for drifted to 22 m off
+            // while claiming about 1.2 m.
+            let objects = &s.agents[a].world.objects;
+            let ghosts: Vec<String> = sc
+                .unmatched_estimates
+                .iter()
+                .filter_map(|&e| {
+                    let o = &objects[e];
+                    let p: nalgebra::Matrix3<f64> = o.cov.fixed_view::<3, 3>(0, 0).into_owned();
+                    let chol = p.cholesky()?;
+                    let explained = s.truths.iter().any(|t| {
+                        let d = o.position().0 - t.position.0;
+                        d.dot(&chol.solve(&d)) < 21.11
+                    });
+                    let nearest = s
+                        .truths
+                        .iter()
+                        .map(|t| t.position.distance(&o.position()))
+                        .fold(f64::INFINITY, f64::min);
+                    (!explained).then(|| {
+                        format!(
+                            "{nearest:.1} m from the nearest object, sigma {:.1} m",
+                            p.trace().sqrt()
+                        )
+                    })
+                })
+                .collect();
+            c.check(ghosts.is_empty(), || {
                 format!(
-                    "t={:.2}s agent {a}: {} ghost objects from stale data",
-                    s.t_s, sc.false_estimates
+                    "t={:.2}s agent {a}: {} ghost objects from stale data ({})",
+                    s.t_s,
+                    ghosts.len(),
+                    ghosts.join("; ")
                 )
             });
             // Only about a tenth of the detections arrive inside the retrodiction

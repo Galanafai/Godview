@@ -302,7 +302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 viz.log_packet_detection(&packet, noise_factor as f32 * 0.5)?;
                 
                 // Feed to GodView TrackManager
-                match godview.process_packet(&packet) {
+                match godview.process_packet(&packet, None, None) {
                     Ok(_canonical_id) => {},
                     Err(e) => {
                         eprintln!("Warning: Track processing error: {:?}", e);

@@ -1,5 +1,7 @@
 # GodView Project Report: The Road to Evolutionary Intelligence 🧬
 
+> **Earlier design.** This document describes GodView before the perception-sharing rewrite. For the current architecture and status see [../docs/PERCEPTION_SHARING.md](../docs/PERCEPTION_SHARING.md) and the [root README](../README.md). Figures and statuses below were not re-verified.
+
 **Date**: January 30, 2026
 **Topic**: Deterministic Simulation Testing (DST) & Adaptive Swarm Intelligence
 

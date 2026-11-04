@@ -364,7 +364,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     [av.color[0], av.color[1], av.color[2], 60],
                 )?;
                 
-                let _ = track_manager.process_packet(&packet);
+                let _ = track_manager.process_packet(&packet, None, None);
             }
             
             // Each target
@@ -399,7 +399,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     [av.color[0], av.color[1], av.color[2], 40],
                 )?;
                 
-                let _ = track_manager.process_packet(&packet);
+                let _ = track_manager.process_packet(&packet, None, None);
             }
         }
 
@@ -432,7 +432,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 
                 viz.log_packet_detection(&packet, cam.noise_scale as f32 * 0.3)?;
-                let _ = track_manager.process_packet(&packet);
+                let _ = track_manager.process_packet(&packet, None, None);
             }
             
             // Detect AVs
@@ -460,7 +460,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 
                 viz.log_packet_detection(&packet, cam.noise_scale as f32 * 0.3)?;
-                let _ = track_manager.process_packet(&packet);
+                let _ = track_manager.process_packet(&packet, None, None);
             }
         }
 

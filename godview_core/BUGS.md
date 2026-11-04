@@ -1,5 +1,7 @@
 # GodView Core - Known Issues & Bugs
 
+> **Earlier design.** This document describes GodView before the perception-sharing rewrite. For the current architecture and status see [../docs/PERCEPTION_SHARING.md](../docs/PERCEPTION_SHARING.md) and the [root README](../README.md). Figures and statuses below were not re-verified. One correction: the AS-EKF covariance shift listed as fixed below still lost the correlation between the current and lagged states; it was rewritten as an exact block permutation (`P' = A P Aᵀ`) with a regression test (`augmentation_keeps_current_and_lagged_states_correlated`).
+
 **Date:** 2025-12-22
 **Status:** ✅ All Critical Bugs Fixed
 

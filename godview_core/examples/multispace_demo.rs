@@ -174,7 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     confidence_score: 0.9,
                 };
                 
-                let _ = track_manager.process_packet(&packet);
+                let _ = track_manager.process_packet(&packet, None, None);
             }
         }
 

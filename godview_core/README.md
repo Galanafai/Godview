@@ -1,5 +1,7 @@
 # GodView Core - Research Library
 
+> **Earlier design.** This document describes GodView before the perception-sharing rewrite. For the current architecture and status see [../docs/PERCEPTION_SHARING.md](../docs/PERCEPTION_SHARING.md) and the [root README](../README.md). Figures and statuses below were not re-verified.
+
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 

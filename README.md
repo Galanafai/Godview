@@ -1,608 +1,132 @@
-# 👁️ GodView v0.6.0
+# GodView
 
-## The HTTP of Spatial Computing
+**Shared perception for robots and vehicles.** Each agent shares what it sees as signed track reports that carry their own uncertainty, and every agent fuses the reports it receives into the same picture of the world.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-61%2B%20Passing-brightgreen.svg)](#-test-results)
-[![DST](https://img.shields.io/badge/DST-17%20perception%20scenarios-blue.svg)](docs/PERCEPTION_SHARING.md)
-[![Rerun](https://img.shields.io/badge/Rerun-0.28-blue.svg)](https://rerun.io/)
-[![Status](https://img.shields.io/badge/Status-Completed-success.svg)](#)
+[![DST](https://img.shields.io/badge/DST-17%20perception%20scenarios-blue.svg)](docs/PERCEPTION_SHARING.md#10-deterministic-simulation-dst)
 
-> *A Self-Evolving Distributed Perception Protocol for Multi-Agent Autonomous Systems*
+> **Status: research prototype.** The pipeline runs end to end, across separate processes over Zenoh, and is tested under injected network faults and adversaries in deterministic simulation. It has not yet been run on real sensor data, over a real radio network, or at fleet scale. See [What is and is not proven](#what-is-and-is-not-proven).
 
-**GodView** solves the fundamental problems of distributed spatial computing: time synchronization across networks, 3D spatial indexing at global scale, and Byzantine fault tolerance in untrusted agent meshes.
+## In plain terms
 
----
+A robot cannot see around a corner. Another robot can. GodView lets each one share what it sees so that every robot knows what the others know, keeps that picture consistent when the network drops or reorders messages, and stops trusting a robot whose reports do not hold up.
 
-## 🏗️ Architecture
+Three things make this hard, and GodView handles each one:
 
-```mermaid
-graph TB
-    subgraph "godview_core"
-        TIME["⏰ Time Engine<br/>godview_time.rs<br/><i>AS-EKF</i>"]
-        SPACE["🌍 Space Engine<br/>godview_space.rs<br/><i>H3 + 3D Grid</i>"]
-        TRUST["🔐 Trust Engine<br/>godview_trust.rs<br/><i>CapBAC + Ed25519</i>"]
-        TRACK["🎯 Tracking Engine<br/>godview_tracking.rs<br/><i>GNN + CI + Highlander</i>"]
-    end
-    
-    ZENOH["Zenoh Mesh"] --> TRUST
-    TRUST --> TRACK
-    TRACK --> TIME
-    TRACK --> SPACE
-```
+| Problem | What goes wrong | What GodView does |
+|:--|:--|:--|
+| **Different frames** | Each robot measures in its own drifting coordinate frame, and its own position is uncertain. | Reports are converted to a shared Earth frame (ECEF) with the robot's localization and clock uncertainty folded into each report's covariance. |
+| **Double counting** | Relayed and echoed reports make the fused picture look more certain than it is. | Only each agent's own tracks are ever shared, the fused world is never fed back, and fusion uses covariance intersection, which is safe under unknown correlation. |
+| **Untrusted data** | A robot can be miscalibrated, compromised or impersonated. | Every batch is Ed25519-signed and validated; replays and forgeries are rejected; a consistency monitor inflates or excludes sources that disagree with their peers. |
 
-| Problem | Engine | Solution |
-|:--------|:-------|:---------|
-| **Time Travel** — Out-of-sequence measurements | Time | Augmented State EKF with retrodiction |
-| **Pancake World** — 2D spatial indices ignore altitude | Space | H3 hexagonal sharding + 3D grid spatial index |
-| **Sybil Attack** — Unauthenticated publishers | Trust | CapBAC with Biscuit tokens + Ed25519 signatures |
-| **Duplicate Ghost** — Same object, multiple IDs | Tracking | GNN + Covariance Intersection + Highlander CRDT |
-
----
-
-## ⏰ Time Engine: Augmented State EKF
-
-**File:** [`godview_core/src/godview_time.rs`](godview_core/src/godview_time.rs)
-
-The Time Engine handles **Out-of-Sequence Measurements (OOSM)** — a critical problem in distributed systems where sensor data arrives with 100-500ms network latency.
-
-### How It Works
-
-Instead of rewinding time, the AS-EKF maintains a sliding window of **L past states**:
+## How it works
 
 ```
-Augmented State:   x̂_aug = [x̂_k, x̂_{k-1}, ..., x̂_{k-L}]ᵀ
-
-Augmented Covariance (tracks correlations between current and past states):
-                   ┌ P_{k,k}    P_{k,k-1}   ... P_{k,k-L}  ┐
-         P_aug =   │ P_{k-1,k}  P_{k-1,k-1} ... P_{k-1,k-L}│
-                   │ ...        ...         ... ...        │
-                   └ P_{k-L,k}  P_{k-L,k-1} ... P_{k-L,k-L}┘
+ sensors ─▶ local tracker ─▶ signed reports ─▶ Zenoh topic per H3 cell ─▶ peers
+            (own frame)       (Earth frame,                                  │
+                               with covariance)                              ▼
+                                                     report store (merge-safe, last writer wins)
+                                                                             │
+                                                                             ▼
+                                         shared world model (gate, cluster, fuse; deterministic)
 ```
 
-**Configuration:** `L=20` at 30Hz provides a **600ms rewinding window**.
+1. **Local tracks.** Each agent tracks objects in its own odometry frame with a Kalman filter that accepts late, out-of-order detections inside a short window and rejects older ones rather than applying them at the wrong time.
+2. **Signed reports.** Each track is published in ECEF with a full covariance that includes the agent's pose and clock uncertainty, in a versioned binary format with an Ed25519 signature over every byte.
+3. **Cell topics.** Reports travel on one Zenoh topic per H3 cell. A node subscribes only to the cells around itself, so what it receives depends on what is near it, not on the size of the fleet.
+4. **Report store.** Received reports go into a last-writer-wins store keyed by source and track. Duplicated, reordered and relayed messages all converge to the same store.
+5. **World model.** Each agent computes the shared world from its store: predict to a common time, find candidates with an H3 index, gate on position and velocity, cluster with at most one track per source, and fuse by covariance intersection. The same store always gives a bit-identical world.
 
-### Critical Algorithm: State Augmentation
+The full contract, frames, formats and parameters are in [docs/PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md).
 
-When time advances, states shift into history **and** the covariance matrix shifts correspondingly:
+## Quick start
 
-```rust
-fn augment_state(&mut self, current_time: f64) {
-    let s = self.state_dim;
-    
-    // 1. Shift state blocks (index N → N+1, etc.)
-    for i in (1..=self.max_lag_depth).rev() {
-        let src = (i - 1) * s;
-        let dst = i * s;
-        let block = self.state_vector.rows(src, s).clone_owned();
-        self.state_vector.rows_mut(dst, s).copy_from(&block);
-    }
-    
-    // 2. CRITICAL: Also shift covariance matrix blocks
-    for i in (1..=self.max_lag_depth).rev() {
-        for j in (1..=self.max_lag_depth).rev() {
-            let block = self.covariance
-                .view(((i-1)*s, (j-1)*s), (s, s))
-                .clone_owned();
-            self.covariance
-                .view_mut((i*s, j*s), (s, s))
-                .copy_from(&block);
-        }
-    }
-}
-```
-
-### Joseph-Form Update (Numerical Stability)
-
-```rust
-let IKH = &I - &K * &H_aug;
-self.covariance = &IKH * &self.covariance * IKH.transpose()
-    + &K * &self.measurement_noise * K.transpose();
-```
-
----
-
-## 🌍 Space Engine: H3 + 3D Grid
-
-**File:** [`godview_core/src/godview_space.rs`](godview_core/src/godview_space.rs)
-
-The Space Engine solves the **"Pancake World"** problem — standard 2D geospatial indexes ignore altitude, causing drones at 300m to appear co-located with ground vehicles.
-
-### Two-Level Hierarchy
-
-```
-                    ┌─────────────────────────────────────┐
-                    │         Global (Spherical)           │
-                    │    H3 Hexagonal Grid (Res 10)       │
-                    │         ~66m per hexagon            │
-                    └─────────────┬───────────────────────┘
-                                  │
-                    ┌─────────────▼───────────────────────┐
-                    │        Local (3D Cartesian)         │
-                    │     3D Hash Grid (10m cells)        │
-                    │      O(k³) spherical queries        │
-                    └─────────────────────────────────────┘
-```
-
-### 3D Grid Spatial Index
-
-```rust
-#[derive(Hash, Eq, PartialEq)]
-struct GridCell {
-    x: i32,
-    y: i32,
-    z: i32,
-}
-
-impl GridCell {
-    fn from_local_coords(coords: [f32; 3], cell_size: f32) -> Self {
-        Self {
-            x: (coords[0] / cell_size).floor() as i32,
-            y: (coords[1] / cell_size).floor() as i32,
-            z: (coords[2] / cell_size).floor() as i32,
-        }
-    }
-}
-```
-
-### Efficient Sphere Query (O(k³) vs O(N))
-
-```rust
-pub fn query_sphere(&self, center: [f32; 3], radius: f32) -> Vec<&Entity> {
-    let cell_radius = (radius / self.grid_cell_size).ceil() as i32;
-    let center_cell = GridCell::from_local_coords(center, self.grid_cell_size);
-    
-    let mut results = Vec::new();
-    
-    // Only check cells within radius (O(k³) vs O(N) linear scan)
-    for grid_cell in center_cell.neighbors(cell_radius) {
-        if let Some(entity_ids) = self.spatial_grid.get(&grid_cell) {
-            for &id in entity_ids {
-                if distance(&entity, center) <= radius {
-                    results.push(entity);
-                }
-            }
-        }
-    }
-    results
-}
-```
-
-### H3 Resolution Lookup
-
-```rust
-const H3_EDGE_LENGTH_M: [f64; 16] = [
-    1107712.591,  // Res 0
-    // ...
-    65.907,       // Res 10 - ~66m (default)
-    24.910,       // Res 11 - ~25m
-    // ...
-];
-```
-
----
-
-## 🔐 Trust Engine: CapBAC + Ed25519
-
-**File:** [`godview_core/src/godview_trust.rs`](godview_core/src/godview_trust.rs)
-
-The Trust Engine prevents **Sybil attacks** and data spoofing using cryptographic provenance and capability-based access control.
-
-### The Security Chain
-
-1. **Provenance:** Every hazard packet is signed by the agent's private Ed25519 key
-   - Prevents spoofing (can't fake being Agent #42)
-
-2. **Authorization:** Agent presents a Biscuit token signed by Root Authority
-   - Token: `allow if resource("godview/nyc/sector_7")`
-
-3. **Datalog Policies:** Rules are evaluated logically
-   - If Agent #42 tries to publish to `godview/sf/sector_1`, policy fails (token restricted to NYC)
-
-### Signed Packet Structure
-
-```rust
-pub struct SignedPacket {
-    payload: Vec<u8>,
-    
-    #[serde(with = "signature_serde")]
-    signature: Signature,
-    
-    #[serde(with = "verifying_key_serde")]
-    public_key: VerifyingKey,
-}
-
-impl SignedPacket {
-    pub fn verify_integrity(&self) -> Result<(), AuthError> {
-        self.public_key
-            .verify(&self.payload, &self.signature)
-            .map_err(|_| AuthError::InvalidSignature)
-    }
-}
-```
-
-### O(1) Revocation Check
-
-```rust
-pub struct SecurityContext {
-    root_public_key: PublicKey,
-    revoked_keys: HashSet<[u8; 32]>,  // O(1) lookup (was Vec with O(N))
-}
-
-impl SecurityContext {
-    pub fn is_revoked(&self, key: &VerifyingKey) -> bool {
-        self.revoked_keys.contains(&key.to_bytes())  // O(1)
-    }
-}
-```
-
----
-
-## 🎯 Tracking Engine: GNN + CI + Highlander
-
-**File:** [`godview_core/src/godview_tracking.rs`](godview_core/src/godview_tracking.rs)
-
-The Tracking Engine eliminates **duplicate ghosts** when multiple agents observe the same physical entity.
-
-### 4-Stage Pipeline
-
-```
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────┐
-│   STAGE 1    │───▶│   STAGE 2    │───▶│   STAGE 3    │───▶│  STAGE 4 │
-│   Spatial    │    │   Geometric  │    │   Identity   │    │   State  │
-│   Pruning    │    │    Gating    │    │  Resolution  │    │  Fusion  │
-└──────────────┘    └──────────────┘    └──────────────┘    └──────────┘
-       │                   │                   │                   │
-       ▼                   ▼                   ▼                   ▼
-  H3 k-ring(1)        Mahalanobis         Highlander           Covariance
-   → ~7 cells          Distance           Min-UUID             Intersection
-```
-
-### Stage 2: Mahalanobis Gating
-
-```rust
-pub fn mahalanobis_distance_squared(
-    &self,
-    track: &UniqueTrack,
-    packet: &GlobalHazardPacket,
-) -> f64 {
-    let h = Matrix6::identity();
-    let z = Vector6::new(
-        packet.position[0], packet.position[1], packet.position[2],
-        packet.velocity[0], packet.velocity[1], packet.velocity[2],
-    );
-    
-    let residual = z - &h * &track.state;
-    let r = self.confidence_to_covariance(packet.confidence_score);
-    let s = &h * &track.covariance * h.transpose() + r;
-    
-    let s_inv = s.try_inverse().unwrap_or(Matrix6::identity() * 1e6);
-    (residual.transpose() * s_inv * residual)[(0, 0)]
-}
-```
-
-**Threshold:** D² < 12.59 (Chi² distribution, 6 DOF, 95% confidence)
-
-### Stage 3: Highlander ID Resolution (Min-UUID CRDT)
-
-> *"There can be only one."*
-
-```rust
-impl UniqueTrack {
-    pub fn merge_id(&mut self, remote_id: Uuid) {
-        // G-Set: Only grows, never shrinks
-        self.observed_ids.insert(remote_id);
-        
-        // Highlander: smallest UUID wins
-        if remote_id < self.canonical_id {
-            self.canonical_id = remote_id;
-        }
-    }
-}
-```
-
-All agents converge to the same canonical_id without coordination.
-
-### Stage 4: Covariance Intersection (Loop-Safe Fusion)
-
-```rust
-pub fn covariance_intersection(
-    x_a: &Vector6<f64>, p_a: &Matrix6<f64>,
-    x_b: &Vector6<f64>, p_b: &Matrix6<f64>,
-) -> Option<(Vector6<f64>, Matrix6<f64>)> {
-    // Weight using trace minimization
-    let tr_a = p_a.trace();
-    let tr_b = p_b.trace();
-    let omega = tr_b / (tr_a + tr_b);
-    
-    let p_a_inv = p_a.try_inverse()?;
-    let p_b_inv = p_b.try_inverse()?;
-    
-    let p_ci_inv = p_a_inv * omega + p_b_inv * (1.0 - omega);
-    let p_ci = p_ci_inv.try_inverse()?;
-    
-    let x_ci = p_ci * (p_a_inv * x_a * omega + p_b_inv * x_b * (1.0 - omega));
-    
-    Some((x_ci, p_ci))
-}
-```
-
-**Why CI?** In gossip networks, data recirculates. CI is **loop-safe** — it never reduces uncertainty below the most confident input.
-
----
-
-## ✅ Test Results
+Requires a stable Rust toolchain.
 
 ```bash
-$ cargo test --lib
-running 37 tests
-test result: ok. 37 passed; 0 failed
+# All tests (unit, integration, multi-process). Use --release for realistic timing.
+cargo test --workspace
+
+# Deterministic simulation: all 17 perception scenarios for one seed, or many seeds
+cargo run --release -p godview_sim -- --scenario all --seed 42
+cargo run --release -p godview_sim -- --scenario all --seed 1 --seeds 100
+
+# Reproduce one scenario and seed (failures print this command)
+cargo run --release -p godview_sim -- --scenario split_brain --seed 3
 ```
 
-### Running Tests
+### Run nodes over Zenoh
 
 ```bash
-cd godview_core
+cargo build --release -p godview_node
+START=$(( $(date +%s%3N) + 3000 ))   # common start time for all nodes
 
-# Run all library tests
-cargo test --lib
-
-# Run specific module
-cargo test godview_time
-cargo test godview_tracking
-
-# Run with output
-cargo test -- --nocapture
+# Two agents watching the same synthetic scene, the second over a lossy link
+target/release/godview-node --listen tcp/127.0.0.1:7447 \
+  --synthetic-index 0 --ring-agents 2 --key-seed 1 --start-unix-ms $START &
+target/release/godview-node --listen tcp/127.0.0.1:7448 --connect tcp/127.0.0.1:7447 \
+  --synthetic-index 1 --ring-agents 2 --key-seed 2 --start-unix-ms $START \
+  --loss 0.2 --jitter-ms 60
 ```
 
-### Test Coverage by Module
+Each node prints a JSON report when it finishes: traffic, rejections, faults, timing, tracking quality against the synthetic truth, and the final world with the provenance of every object.
 
-| Module | Tests | What They Verify |
-|:-------|:-----:|:-----------------|
-| **godview_space** | 8 | H3 cell hashing, 3D grid neighbors, edge length lookup, entity insertion, multi-shard queries, altitude queries, vertical separation |
-| **godview_time** | 5 | Filter initialization, prediction step, covariance shifting, state history, OOSM updates |
-| **godview_tracking** | 13 | Track creation, Mahalanobis gating, CI fusion weights, CI rumor safety, Highlander merge, spatial k-ring queries, packet processing, class gating, track aging |
-| **godview_trust** | 4 | Signed packet creation, signature verification, tampering detection, Biscuit authorization |
-| **metrics** | 5 | Ghost score range, entropy positive-definite, entropy reduction, Mahalanobis identical, tension zero |
-| **validation** | 2 | Validation session, ghost detection |
-
-### Key Test Descriptions
-
-**Rumor Safety Test** — Verifies CI fusion doesn't collapse covariance when same data loops back:
-```rust
-#[test]
-fn test_covariance_intersection_rumor_safety() {
-    // Fuse with EXACT SAME DATA (simulating looped rumor)
-    let (_, p_fused) = covariance_intersection(&x, &p, &x, &p).unwrap();
-    // INVARIANT: Covariance should NOT shrink
-    assert!(p_fused.trace() >= original_trace * 0.99);
-}
-```
-
-**Highlander Merge Test** — Confirms min-UUID wins in CRDT resolution:
-```rust
-#[test]
-fn test_highlander_merge_id() {
-    track.merge_id(smaller_uuid);
-    assert_eq!(track.canonical_id, smaller_uuid);  // Smaller wins
-}
-```
-
-### All Bugs Fixed (v0.3.0 → v0.6.0)
-
-| Engine | Issue | Status |
-|:-------|:------|:-------|
-| Time | Covariance not shifted with state | ✅ Fixed |
-| Space | Linear scan O(N) | ✅ Fixed (3D grid) |
-| Space | Hardcoded 66m hex | ✅ Fixed (lookup table) |
-| Trust | O(N) revocation check | ✅ Fixed (HashSet) |
-| Tracking | age_tracks off-by-one | ✅ Fixed |
-| Tracking | Missing track rekey | ✅ Fixed |
-
----
-
-## 📊 Performance
-
-| Component | Operation | Complexity | Time |
-|-----------|-----------|------------|------|
-| AS-EKF | Prediction (9D) | O(1) | ~50 µs |
-| AS-EKF | OOSM Update | O(1) | ~100 µs |
-| Covariance Intersection | 5 agents | O(1) | ~20 µs |
-| H3+Octree | Query (50m) | O(log N + k) | ~50 µs |
-| Ed25519 | Sign/Verify | O(1) | 15/40 µs |
-
-*Benchmarked on AMD Ryzen 9 5950X*
-
----
-
-## 🛰️ Running nodes over Zenoh
-
-**Crate:** `godview_node` (binary `godview-node`)
-
-Each node runs the perception-sharing pipeline in its own process and talks
-to peers over Zenoh. Reports travel on one topic per H3 cell
-(`godview/v1/reports/<res>/<cell>`), and a node subscribes only to the cells
-around itself, so what it receives depends on what is near it, not on fleet
-size. Detections come from a seeded synthetic scene or from JSON lines on
-stdin (the hook for an external detector). Faults can be injected on
-outgoing traffic.
+To feed a node from your own perception stack, pipe JSON lines into its stdin, one frame per line: detections in the agent's odometry frame and the placement of that frame on the Earth, each with its uncertainty (like ROS `odom` and `map -> odom`). The format is documented in [`godview_node/src/input.rs`](godview_node/src/input.rs).
 
 ```bash
-START=$(( $(date +%s%3N) + 3000 ))
-godview-node --listen tcp/127.0.0.1:7447 --synthetic-index 0 --key-seed 1 --start-unix-ms $START &
-godview-node --listen tcp/127.0.0.1:7448 --connect tcp/127.0.0.1:7447 \
-  --synthetic-index 1 --key-seed 2 --start-unix-ms $START --loss 0.2 --jitter-ms 60
-# Multi-process tests (real processes, real Zenoh, injected faults):
-cargo test --release -p godview_node
+my_detector | target/release/godview-node --connect tcp/<peer>:7447
 ```
 
-Details in [docs/PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md#9-running-nodes-over-zenoh-godview_node).
+## What is and is not proven
 
----
+**Tested, with the scope stated in each test:**
 
-## 🧪 Deterministic Simulation Testing (v0.4.0+)
+- **Deterministic simulation (`godview_sim`).** 17 scenarios, each checking one stated invariant: different coordinate frames, localization error and dropout, H3 cell edges, loss, duplication, corruption and reordering, relays and echoes, partitions, restarts, a biased source, a fabricating source, replay and forgery, and late measurements. Every run is reproducible from its seed. All 17 passed for each of 160 seeds checked (2,720 runs). The runs check that each invariant held for those seeds; they are not a proof that it holds in general.
+- **Multi-process tests (`godview_node`).** Real node processes over Zenoh on localhost:
+  - Four nodes with 20% loss, 20% duplication and 10 to 70 ms delays track every object, and they compute a bit-identical world after a final fault-free round.
+  - A node 5 km away in the same mesh receives no traffic.
+  - A node fed JSON lines on stdin fuses with a synthetic peer.
+- **Unit and property tests** for frames and uncertainty propagation (including a Monte Carlo check), the filter, assignment, the wire format (every byte flip rejected), the store's merge laws, the spatial index and cell cover against brute force, and the world model.
 
-**Crate:** [`godview_sim`](godview_sim/README.md)
+**Measured:** in release on a two-core machine, four nodes with four objects each spent about 2.5 ms per 10 Hz tick (at most about 8 ms).
 
-Inspired by [FoundationDB's simulation testing](https://www.youtube.com/watch?v=4fFDFbi3toc), we built a chaos engineering framework that proves correctness across thousands of seeds.
+**Not yet:**
 
-### Perception sharing scenarios
+- real sensor data or a real detector;
+- a real radio network;
+- many agents or many objects (scale is not benchmarked);
+- object extent (detections are points with covariance, not boxes);
+- world-object IDs that stay stable when sources join or leave;
+- Biscuit capability checks per batch;
+- revocations that survive a restart.
 
-`--scenario all` runs 17 seeded scenarios of the perception sharing pipeline
-(local tracks, signed reports, report store, shared world model). Each one
-checks a stated invariant: different odometry frames, localization error and
-dropout, H3 cell edges, loss, duplication, corruption and reordering, echoes,
-partitions, restarts, biased and fabricating sources, replay and forgery, and
-late measurements. See [docs/PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md)
-for the contract, the scenario list and what the suite does and does not
-establish.
+## Repository layout
 
-The earlier scenarios built on the legacy `TrackManager` path (NetworkHell,
-TimeTornado v1, ZombieApocalypse, LongHaul and others) are still available as
-`--scenario legacy` or by name.
+| Path | What it is |
+|:--|:--|
+| [`godview_core/`](godview_core) | The library. Perception sharing: `frames`, `filter`, `local_tracker`, `report`, `report_store`, `topics`, `spatial_index`, `world_model`, `consistency`, `perception_node`. Also the earlier engines (see below). |
+| [`godview_env/`](godview_env) | Environment abstraction (time, randomness, keys, network) so the same code runs in production and in simulation. |
+| [`godview_node/`](godview_node) | The `godview-node` binary: Zenoh transport, cell topics, synthetic and stdin inputs, fault injection, multi-process tests. |
+| [`godview_sim/`](godview_sim) | Deterministic simulation: the perception harness and scenario catalog, plus the legacy scenarios. |
+| [`docs/`](docs) | Documentation. [PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md) is the current specification; see [docs/README.md](docs/README.md) for what the other documents cover. |
+| [`agent/`](agent) | CARLA detection agent on the earlier `TrackManager` path. Not a workspace member. |
+| [`carla_bridge/`](carla_bridge), [`demo/`](demo), [`viewer/`](viewer) | CARLA bridges, demo scripts and a web viewer for the earlier pipeline. |
 
-```bash
-# Run all perception scenarios with one seed
-cargo run -p godview_sim --release -- --scenario all --seed 42
-# Reproduce a reported failure
-cargo run -p godview_sim --release -- --scenario split_brain --seed 3
-# Legacy scenarios
-cargo run -p godview_sim --release -- --scenario legacy --seed 42
-```
+## Earlier design
 
----
+GodView began with four engines: an augmented-state EKF for out-of-sequence measurements (`godview_time`), an H3 plus 3D grid spatial index (`godview_space`), capability-based security with Biscuit tokens (`godview_trust`), and a tracker that fused peers' packets with nearest-neighbor association, covariance intersection and a min-UUID identity rule (`godview_tracking`, "Highlander"). An audit found that this tracker could double count, mixed coordinate frames and depended on message order. The perception-sharing pipeline above replaces it for shared perception.
 
-## 🧬 Evolutionary Intelligence (v0.5.0+)
+The earlier engines are still in the repository. `godview_time` was repaired (its state augmentation lost correlations), `godview_space` is still used as the store consumers read, and `TrackManager` still drives the CARLA agent, the Rerun examples in `godview_core/examples`, and the legacy simulation scenarios (`--scenario legacy`), including the evolutionary parameter-tuning experiments. The examples build with `--features visualization` (`kitti_demo` also needs `kitti`; `carla_demo` needs `carla` and a system ZeroMQ, and was not checked). Two legacy scenarios, `scale_limit` and `common_bias`, also fail on the earlier code, and `protocol_drift` has no assertions.
 
-Agents evolve their own parameters in real-time without human tuning:
+## References
 
-```rust
-struct EvoParams {
-    gossip_interval_ticks: u64,   // Communication frequency
-    max_neighbors_gossip: usize,  // Redundancy level
-    confidence_threshold: f64,    // Accuracy vs Recall
-    sensor_bias_estimate: f64,    // Self-calibration
-}
-```
+1. S. Julier and J. Uhlmann, "A Non-divergent Estimation Algorithm in the Presence of Unknown Correlations," American Control Conference, 1997. (Covariance intersection.)
+2. Y. Bar-Shalom, "Update with Out-of-Sequence Measurements in Tracking: Exact Solution," IEEE Transactions on Aerospace and Electronic Systems, 2002.
+3. A. Rahmathullah, Á. García-Fernández and L. Svensson, "Generalized Optimal Sub-Pattern Assignment Metric," FUSION, 2017. (GOSPA, used to score estimates.)
+4. Uber Engineering, "H3: Uber's Hexagonal Hierarchical Spatial Index."
+5. Zenoh, [zenoh.io](https://zenoh.io).
 
-**Adaptive Mutation**: Step size scales 1.5× after 5 consecutive failures (cap 10×).
+## License
 
-**Emergency Protocol**: Agents stop messaging when energy < 50J to survive.
-
----
-
-## 👁️ Blind Fitness (v0.5.0+)
-
-The key breakthrough: **agents learn without ground truth**.
-
-```
-BlindFitness = 0.5×(1/NIS) + 0.3×(1/PeerAgreement) + 0.2×(1/Bandwidth)
-```
-
-| Metric | Source | What It Measures |
-|--------|--------|------------------|
-| **NIS** | Kalman filter | Internal consistency |
-| **Peer Agreement** | Neighbor consensus | External validation |
-| **Bandwidth** | Message count | Resource efficiency |
-
-**Anti-Groupthink**: 20% fitness penalty if NIS < 0.5 AND covariance > 100.
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Docker with NVIDIA Container Toolkit
-- GPU with CUDA support
-
-### Run Demo
-
-```bash
-# Clone and enter
-git clone https://github.com/Galanafai/Hivemind.git
-cd Hivemind
-
-# Build Docker image
-sudo docker build -t godview:latest .
-
-# Run synthetic multi-agent demo
-sudo docker run --rm --gpus all \
-  -v $(pwd):/workspace \
-  -w /workspace/godview_core \
-  godview:latest \
-  cargo run --example kitti_demo --features visualization,kitti -- \
-  --save /workspace/godview_demo.rrd
-
-# View in Rerun
-rerun godview_demo.rrd
-```
-
-### Run Tests
-
-```bash
-cd godview_core
-cargo test
-```
-
----
-
-## 🗂️ Repository Structure
-
-```
-godview/
-├── godview_core/              # Rust library - core algorithms
-│   ├── src/
-│   │   ├── godview_time.rs        # AS-EKF implementation
-│   │   ├── godview_space.rs       # H3 + Octree spatial indexing
-│   │   ├── godview_trust.rs       # CapBAC + Ed25519 security
-│   │   ├── godview_tracking.rs    # CI fusion + Highlander CRDT
-│   │   └── visualization.rs       # Rerun.io integration
-│   └── examples/
-│       ├── rerun_demo.rs          # Synthetic multi-agent demo
-│       └── kitti_demo.rs          # Real KITTI dataset demo
-├── godview_node/              # Node binary: Zenoh transport, H3 cell topics
-├── godview_sim/               # Deterministic simulation testing
-├── carla_bridge/              # CARLA simulator integration
-├── agent/                     # Rust detection agent
-├── viewer/                    # Three.js web viewer
-└── docs/                      # Additional documentation
-```
-
----
-
-## 📚 References
-
-### Academic Papers
-
-1. **Augmented State EKF:** Challa, S., & Bar-Shalom, Y. (2000). "OOSM Problem in Tracking"
-2. **Covariance Intersection:** Julier, S., & Uhlmann, J. (1997). "A Non-divergent Estimation Algorithm in the Presence of Unknown Correlations"
-3. **H3 Geospatial Indexing:** Uber Engineering. "H3: Uber's Hexagonal Hierarchical Spatial Index"
-4. **Biscuit Tokens:** CleverCloud. "Biscuit: Datalog-Based Authorization"
-
-### Key Dependencies
-
-| Crate | Purpose |
-|-------|---------|
-| [`nalgebra`](https://nalgebra.org/) | Linear algebra, SIMD-accelerated |
-| [`h3o`](https://docs.rs/h3o) | Pure Rust H3 hexagonal indexing |
-| [`biscuit-auth`](https://docs.rs/biscuit-auth) | Capability-based tokens |
-| [`ed25519-dalek`](https://docs.rs/ed25519-dalek) | Ed25519 signatures |
-| [`rerun`](https://rerun.io/) | 3D visualization |
-
----
-
-## 🤝 Contributing
-
-1. Read the core library documentation in `godview_core/README.md`
-2. Run `cargo test` in `godview_core/`
-3. Follow Rust API guidelines
-4. Submit PR with tests
-
-**License:** MIT
-
----
-
-**Built for research in distributed perception and autonomous systems**
-
-*"The HTTP of Spatial Computing"* 👁️
+MIT. See [LICENSE](LICENSE).

@@ -1,5 +1,7 @@
 # GodView DST: Deterministic Simulation Testing
 
+> **Earlier design.** This document describes GodView before the perception-sharing rewrite. For the current architecture and status see [../docs/PERCEPTION_SHARING.md](../docs/PERCEPTION_SHARING.md) and the [root README](../README.md). Figures and statuses below were not re-verified.
+
 ## Overview
 
 DST ensures GodView is **correct, reproducible, and resilient** by running chaos engineering scenarios with deterministic seeds.

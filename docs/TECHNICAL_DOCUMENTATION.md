@@ -1,5 +1,7 @@
 # GodView System - Complete Technical Documentation
 
+> **Earlier design.** This document describes GodView before the perception-sharing rewrite. For the current architecture and status see [PERCEPTION_SHARING.md](PERCEPTION_SHARING.md) and the [root README](../README.md). Figures and statuses below were not re-verified.
+
 **For: Gemini Review & Future Development**
 
 ---

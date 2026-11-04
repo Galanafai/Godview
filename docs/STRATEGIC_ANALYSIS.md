@@ -1,5 +1,7 @@
 # GodView Strategic Component Analysis
 
+> **Earlier design.** This document describes GodView before the perception-sharing rewrite. For the current architecture and status see [PERCEPTION_SHARING.md](PERCEPTION_SHARING.md) and the [root README](../README.md). Figures and statuses below were not re-verified.
+
 ## 1. Extrapolated Use Cases
 
 The GodView core abstractions (Spatial Engines, Time Engines, Trust Engines) are decoupled enough to serve as a foundational layer for other domains.

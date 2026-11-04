@@ -309,7 +309,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // =========================================================
                 // STEP 3: Feed to TrackManager (Covariance Intersection)
                 // =========================================================
-                let _ = track_manager.process_packet(&packet);
+                let _ = track_manager.process_packet(&packet, None, None);
             }
         }
 

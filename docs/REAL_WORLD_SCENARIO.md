@@ -1,5 +1,7 @@
 # GodView Real-World Scenario: "SkyHigh" Autonomous Medical Delivery Network
 
+> **Earlier design.** This document describes GodView before the perception-sharing rewrite. For the current architecture and status see [PERCEPTION_SHARING.md](PERCEPTION_SHARING.md) and the [root README](../README.md). Figures and statuses below were not re-verified.
+
 ## The Challenge
 In a dense urban metropolis (e.g., Tokyo or New York), a fleet of 500 autonomous drones is deployed to deliver urgent medical supplies (blood, organs, epi-pens) between hospitals and clinics. 
 

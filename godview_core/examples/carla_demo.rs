@@ -416,7 +416,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         confidence_score: 1.0,
                     };
                     
-                    let _ = track_manager.process_packet(&packet);
+                    let _ = track_manager.process_packet(&packet, None, None);
                     
                     // Update cinematic camera if this is ego vehicle
                     if Some(actor.id) == ego_vehicle_id {

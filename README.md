@@ -82,7 +82,7 @@ my_detector | target/release/godview-node --connect tcp/<peer>:7447
 
 **Tested, with the scope stated in each test:**
 
-- **Deterministic simulation (`godview_sim`).** 17 scenarios, each checking one stated invariant: different coordinate frames, localization error and dropout, H3 cell edges, loss, duplication, corruption and reordering, relays and echoes, partitions, restarts, a biased source, a fabricating source, replay and forgery, and late measurements. Every run is reproducible from its seed. All 17 passed for each of 160 seeds checked (2,720 runs). The runs check that each invariant held for those seeds; they are not a proof that it holds in general.
+- **Deterministic simulation (`godview_sim`).** 17 scenarios, each checking one stated invariant: different coordinate frames, localization error and dropout, H3 cell edges, loss, duplication, corruption and reordering, relays and echoes, partitions, restarts, a biased source, a fabricating source, replay and forgery, and late measurements. Every run is reproducible from its seed. All 17 passed for each of 260 seeds checked (4,420 runs), including the 100 seeds CI drew for this revision's parent. The runs check that each invariant held for those seeds; they are not a proof that it holds in general.
 - **Multi-process tests (`godview_node`).** Real node processes over Zenoh on localhost:
   - Four nodes with 20% loss, 20% duplication and 10 to 70 ms delays track every object, and they compute a bit-identical world after a final fault-free round.
   - A node 5 km away in the same mesh receives no traffic.

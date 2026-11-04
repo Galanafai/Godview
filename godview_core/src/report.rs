@@ -17,15 +17,17 @@
 //! one optional field (the box) has a tag byte, so equal content always means
 //! equal bytes, and every decoded value is exactly what the signer signed. The
 //! layout is pinned by a golden-bytes test; changing it requires bumping
-//! [`SCHEMA_VERSION`]. Schema 1 (no box tag) is still decoded.
+//! [`SCHEMA_VERSION`]. Schemas 1 (no box, no birth time) and 2 (no birth
+//! time) are still decoded; their reports get `born = t_valid`.
 //!
 //! ```text
 //! batch   := "GVR" schema:u8 source:[u8;32] epoch:u32 sent_at:i64 count:u16 report* signature:[u8;64]
 //! report  := seq:u64 track:u64 t_valid:i64 frame pos:f64×3 vel:f32×3 cov:f32×21
-//!            class:u8 class_prob:f32 p_exist:f32 lifecycle:u8 valid_for_ms:u32 box
+//!            class:u8 class_prob:f32 p_exist:f32 lifecycle:u8 valid_for_ms:u32 born box
 //! frame   := 0u8 (ECEF) | 1u8 frame_id:u64 (source-local frame)
 //! box     := 0u8 (none) | 1u8 size:f32×3 size_var:f32×3 yaw:f32 yaw_var:f32 flags:u8
-//!            (schema 2 only; flags bit 0 = heading ambiguous modulo π)
+//!            (schema 2 and later; flags bit 0 = heading ambiguous modulo π)
+//! born    := i64 ns, when the source's track was created (schema 3 and later)
 //! ```
 //!
 //! A box's heading is counterclockwise from local East at the object for
@@ -38,8 +40,10 @@ use godview_env::Timestamp;
 use nalgebra::{Matrix6, Vector3, Vector6};
 
 /// Current wire schema.
-pub const SCHEMA_VERSION: u8 = 2;
-/// The previous schema (no box), still accepted when decoding.
+pub const SCHEMA_VERSION: u8 = 3;
+/// Schema 2 (no birth time), still accepted when decoding.
+pub const SCHEMA_VERSION_V2: u8 = 2;
+/// Schema 1 (no box, no birth time), still accepted when decoding.
 pub const SCHEMA_VERSION_V1: u8 = 1;
 const MAGIC: &[u8; 3] = b"GVR";
 /// Maximum reports in one batch.
@@ -165,6 +169,10 @@ pub struct TrackReport {
     pub lifecycle: TrackLifecycle,
     /// How long after `t_valid` the source vouches for this estimate (ms).
     pub valid_for_ms: u32,
+    /// When the source created this track (source clock). Constant over the
+    /// track's life; the world model names a fused object after its oldest
+    /// member. Never after `t_valid`.
+    pub born: Timestamp,
     /// Oriented box, if the source's sensors report extent (see [`crate::extent`]).
     pub object_box: Option<ObjectBox>,
 }
@@ -241,6 +249,9 @@ impl TrackReport {
         if self.object_box.is_some_and(|b| !b.is_valid()) {
             return Err(ReportError::ImplausibleBox);
         }
+        if self.born > self.t_valid {
+            return Err(ReportError::BornAfterEstimate);
+        }
         Ok(())
     }
 }
@@ -297,6 +308,9 @@ pub enum ReportError {
     /// Unknown box tag.
     #[error("bad box tag {0}")]
     BadBoxTag(u8),
+    /// A track created after the time of its own estimate.
+    #[error("track born after its estimate")]
+    BornAfterEstimate,
     /// More reports than allowed.
     #[error("too many reports")]
     TooManyReports,
@@ -351,7 +365,7 @@ impl ReportBatch {
     }
 
     fn encode_unsigned(&self) -> Vec<u8> {
-        let mut b = Vec::with_capacity(50 + self.reports.len() * 167 + 64);
+        let mut b = Vec::with_capacity(50 + self.reports.len() * 209 + 64);
         b.extend_from_slice(MAGIC);
         b.push(SCHEMA_VERSION);
         b.extend_from_slice(&self.source.0);
@@ -383,6 +397,7 @@ impl ReportBatch {
             b.extend_from_slice(&r.p_exist.to_le_bytes());
             b.push(r.lifecycle.to_u8());
             b.extend_from_slice(&r.valid_for_ms.to_le_bytes());
+            b.extend_from_slice(&r.born.as_nanos().to_le_bytes());
             match r.object_box {
                 None => b.push(0),
                 Some(x) => {
@@ -414,7 +429,7 @@ impl ReportBatch {
             return Err(ReportError::BadMagic);
         }
         let schema = bytes[3];
-        if schema != SCHEMA_VERSION && schema != SCHEMA_VERSION_V1 {
+        if !(SCHEMA_VERSION_V1..=SCHEMA_VERSION).contains(&schema) {
             return Err(ReportError::UnsupportedSchema(schema));
         }
         let (body, sig_bytes) = bytes.split_at(bytes.len() - 64);
@@ -454,6 +469,11 @@ impl ReportBatch {
             let p_exist = r.f32()?;
             let lifecycle = TrackLifecycle::from_u8(r.u8()?)?;
             let valid_for_ms = r.u32()?;
+            let born = if schema >= 3 {
+                Timestamp::from_nanos(r.i64()?)
+            } else {
+                t_valid
+            };
             let object_box = if schema == SCHEMA_VERSION_V1 {
                 None
             } else {
@@ -494,6 +514,7 @@ impl ReportBatch {
                 p_exist,
                 lifecycle,
                 valid_for_ms,
+                born,
                 object_box,
             });
         }
@@ -633,6 +654,7 @@ mod tests {
             p_exist: 0.95,
             lifecycle: TrackLifecycle::Confirmed,
             valid_for_ms: 1500,
+            born: Timestamp::from_millis(1_704_067_190_000),
             object_box: None,
         }
     }
@@ -681,10 +703,10 @@ mod tests {
         // Changing the wire layout must be deliberate: bump SCHEMA_VERSION and this test.
         let k = key(1);
         let bytes = batch(&k).sign(&k);
-        // header 50 + ECEF report with box (159 + 1 + 33) + local-frame report
-        // without box (167 + 1) + signature 64
-        assert_eq!(bytes.len(), 50 + 193 + 168 + 64);
-        assert_eq!(&bytes[..4], b"GVR\x02");
+        // header 50 + ECEF report with birth and box (159 + 8 + 1 + 33) +
+        // local-frame report with birth, without box (167 + 8 + 1) + signature 64
+        assert_eq!(bytes.len(), 50 + 201 + 176 + 64);
+        assert_eq!(&bytes[..4], b"GVR\x03");
         let crc: u32 = bytes[..bytes.len() - 64]
             .iter()
             .fold(0u32, |a, b| a.rotate_left(5) ^ (*b as u32));
@@ -693,7 +715,7 @@ mod tests {
 
     /// An independent encoder written from the layout in the module header.
     fn reference_encoding_checksum() -> u32 {
-        let v = reference_encoding(&batch(&key(1)), 2);
+        let v = reference_encoding(&batch(&key(1)), 3);
         v.iter().fold(0u32, |a, b| a.rotate_left(5) ^ (*b as u32))
     }
 
@@ -736,6 +758,9 @@ mod tests {
                 TrackLifecycle::Terminated => 3,
             });
             v.extend_from_slice(&r.valid_for_ms.to_le_bytes());
+            if schema >= 3 {
+                v.extend_from_slice(&r.born.as_nanos().to_le_bytes());
+            }
             if schema >= 2 {
                 match r.object_box {
                     None => v.push(0),
@@ -771,7 +796,36 @@ mod tests {
         let mut bytes = reference_encoding(&b, 1);
         let sig = k.sign(&bytes);
         bytes.extend_from_slice(&sig.to_bytes());
+        // Without a birth time on the wire, a report is taken as born at t_valid.
+        for r in &mut b.reports {
+            r.born = r.t_valid;
+        }
         assert_eq!(ReportBatch::verify_and_decode(&bytes).unwrap(), b);
+    }
+
+    #[test]
+    fn schema_2_batches_still_decode_with_boxes() {
+        let k = key(1);
+        let mut b = batch(&k);
+        let mut bytes = reference_encoding(&b, 2);
+        let sig = k.sign(&bytes);
+        bytes.extend_from_slice(&sig.to_bytes());
+        for r in &mut b.reports {
+            r.born = r.t_valid;
+        }
+        let decoded = ReportBatch::verify_and_decode(&bytes).unwrap();
+        assert!(decoded.reports[0].object_box.is_some());
+        assert_eq!(decoded, b);
+    }
+
+    #[test]
+    fn a_track_born_after_its_estimate_is_rejected() {
+        let k = key(1);
+        let mut b = batch(&k);
+        b.reports[0].born = b.reports[0].t_valid.add_millis(1);
+        assert_eq!(b.reports[0].validate(), Err(ReportError::BornAfterEstimate));
+        b.reports[0].born = b.reports[0].t_valid;
+        assert_eq!(b.reports[0].validate(), Ok(()));
     }
 
     #[test]
@@ -784,8 +838,8 @@ mod tests {
         assert_eq!(b.reports[0].validate(), Err(ReportError::ImplausibleBox));
         // A valid batch whose box tag is corrupted (and re-signed) is rejected too.
         let good = batch(&k);
-        let mut bytes = reference_encoding(&good, 2);
-        let tag_at = 50 + 159; // first report's box tag
+        let mut bytes = reference_encoding(&good, 3);
+        let tag_at = 50 + 159 + 8; // first report's box tag
         assert_eq!(bytes[tag_at], 1);
         bytes[tag_at] = 7;
         let sig = k.sign(&bytes);

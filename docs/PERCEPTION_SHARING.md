@@ -123,16 +123,20 @@ report and the node's stdin input all carry boxes.
 ## 4. Reports on the wire
 
 `ReportBatch` is a manually encoded, versioned, signed binary format
-(`"GVR"`, schema 2; 50 byte header, 160 bytes per ECEF report without a box
-and 193 with one, 168 per local report without a box, 64 byte Ed25519
-signature). Schema 1 batches (no box tag) are still decoded. Every byte is covered by the signature; a
-test flips each byte in turn and requires rejection.
+(`"GVR"`, schema 3; 50 byte header, 168 bytes per ECEF report without a box
+and 201 with one, 176 per local report without a box, 64 byte Ed25519
+signature). Schemas 1 (no box) and 2 (no birth time) are still decoded; their
+reports are taken as born at `t_valid`. Every byte is covered by the
+signature; a test flips each byte in turn and requires rejection.
 
 * `AgentId` is the source's Ed25519 verifying key, so a batch can only be
   signed by the source it names.
 * A report is identified by `(source, local track id)` and versioned by
   `(epoch, seq)`. The epoch increases on restart, so a restarted agent that
   reuses track ids replaces its old reports instead of colliding with them.
+* `born` is when the source created the track (its own clock). It is
+  constant over the track's life, must not be later than `t_valid`, and is
+  only used to name world objects (section 6).
 * Covariance is sent as the upper triangle in f32, quantized conservatively
   and validated (finite, positive definite, bounded) on receipt.
 * Termination is sent as a `Terminated` tombstone, republished for the
@@ -166,7 +170,25 @@ and query time give a bit-identical result on every agent.
    weight (golden section search, ties broken to 0.5). CI is used because the
    correlation between sources (common localization infrastructure, shared
    process model) is unknown.
-5. World object ids are derived deterministically from the members.
+5. Each world object is named after its oldest member: the report whose
+   track was created first, ties broken by the smaller key. The rule needs
+   no memory between snapshots, so agents with the same reports agree on IDs
+   (the snapshot digest includes them).
+
+**What the ID rule does and does not give.** A source that starts tracking
+an object later never renames it; under the earlier rule (smallest member
+key, kept as `IdRule::SmallestKey` for comparison) about half of all joins
+did. The ID still changes when the track holding it ends, and passes to the
+next-oldest member. When objects drive past a row of sensors, the oldest
+track is usually the first to leave, so the ID changes at almost every
+handoff: in `handoff_ids` over 40 seeds the new rule averaged 41.0 ID changes
+per run against 44.9 for the old one, all of them handoffs, against 24.0
+renames on a join under the old rule. Keeping one ID through a whole chain of
+handoffs needs the name to travel with the reports (a source publishing the
+ID its track currently belongs to); that is not built. The rule also trusts
+each source's birth times: a validly signed source that claims very old
+tracks takes the IDs of the objects it sees, as a source with a small key
+could under the old rule.
 
 `WorldObject::to_entity` converts to the consumer `Entity` (geodetic position,
 ENU covariance and, if present, the oriented box) for `SpatialEngine`.
@@ -292,7 +314,7 @@ cargo run --release -p godview_sim -- --scenario split_brain --seed 3
 cargo run --release -p godview_sim -- --scenario legacy --seed 42
 ```
 
-`all` runs the 18 perception scenarios below. The 16 scenarios that exercise
+`all` runs the 19 perception scenarios below. The 16 scenarios that exercise
 the legacy `TrackManager` path are kept under `legacy`. `--duration` applies
 to legacy scenarios only; perception scenarios have fixed durations.
 
@@ -309,6 +331,7 @@ to legacy scenarios only; perception scenarios have fixed durations.
 | `biased_source` | Unreported 6 m bias detected and excluded by all honest agents; an ablation with trust disabled shows the ghosts. |
 | `crossing_targets` | Two objects within 1.5 m are not merged and keep their identities. |
 | `large_objects` | Cars, vans, trucks and buses as oriented boxes, from detectors that see only part of an object and cannot tell front from back: each is one world object from every side, with size consistent with its uncertainty (pooled NEES below 6) and heading within 15 degrees (modulo 180 unless it moves). The same run without the declared systematic center error must show duplicates. |
+| `handoff_ids` | Objects drive past a row of short-range agents in both directions, so sources keep joining and leaving. An ID changes only when its holder leaves or an older track joins; every object passes through at least three holders. The smallest-key rule must rename objects on a join in the same run. |
 | `object_expiry` | Disappearing objects leave every world within coast plus validity time; new ones appear. |
 | `echo_chamber` | Relayed and repeated reports change nothing: world equals the one built from each source's own reports. |
 | `split_brain` | Partition: each side fuses its own sources; after healing all converge. |

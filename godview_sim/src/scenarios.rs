@@ -121,6 +121,8 @@ pub enum ScenarioId {
 
     /// Cars, trucks and buses reported as oriented boxes, seen from different sides.
     LargeObjects,
+    /// Objects handed between agents keep their IDs.
+    HandoffIds,
 
     /// Objects disappear and appear.
     ObjectExpiry,
@@ -147,6 +149,7 @@ impl ScenarioId {
             ScenarioId::BiasedSource,
             ScenarioId::CrossingTargets,
             ScenarioId::LargeObjects,
+            ScenarioId::HandoffIds,
             ScenarioId::ObjectExpiry,
             ScenarioId::EchoChamber,
             ScenarioId::SplitBrain,
@@ -196,6 +199,7 @@ impl ScenarioId {
             ScenarioId::BiasedSource => "biased_source",
             ScenarioId::CrossingTargets => "crossing_targets",
             ScenarioId::LargeObjects => "large_objects",
+            ScenarioId::HandoffIds => "handoff_ids",
             ScenarioId::ObjectExpiry => "object_expiry",
             ScenarioId::EchoChamber => "echo_chamber",
             ScenarioId::SplitBrain => "split_brain",
@@ -324,6 +328,7 @@ impl ScenarioId {
             ScenarioId::BiasedSource => "biased_source",
             ScenarioId::CrossingTargets => "crossing_targets",
             ScenarioId::LargeObjects => "large_objects",
+            ScenarioId::HandoffIds => "handoff_ids",
             ScenarioId::ObjectExpiry => "object_expiry",
             ScenarioId::EchoChamber => "echo_chamber",
             ScenarioId::AgentRestart => "agent_restart",
@@ -367,6 +372,7 @@ impl ScenarioId {
             ScenarioId::BiasedSource => "Unreported 6 m bias detected and excluded",
             ScenarioId::CrossingTargets => "Objects passing within 1.5 m keep identities",
             ScenarioId::LargeObjects => "Boxes: a truck seen from opposite ends is one object, with its size and heading",
+            ScenarioId::HandoffIds => "IDs survive sources joining and leaving; only a departing holder renames",
             ScenarioId::ObjectExpiry => "Disappearing objects dropped, new ones confirmed",
             ScenarioId::EchoChamber => "Relayed echoes never reduce uncertainty",
             ScenarioId::AgentRestart => "Restarted agent's new epoch accepted on reconnection",
@@ -441,6 +447,7 @@ impl std::str::FromStr for ScenarioId {
             "biased_source" => Ok(ScenarioId::BiasedSource),
             "crossing_targets" => Ok(ScenarioId::CrossingTargets),
             "large_objects" => Ok(ScenarioId::LargeObjects),
+            "handoff_ids" => Ok(ScenarioId::HandoffIds),
             "object_expiry" => Ok(ScenarioId::ObjectExpiry),
             "echo_chamber" => Ok(ScenarioId::EchoChamber),
             "agent_restart" => Ok(ScenarioId::AgentRestart),

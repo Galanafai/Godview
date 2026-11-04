@@ -26,7 +26,8 @@ use godview_core::extent::yaw_residual;
 use godview_core::frames::{EnuFrame, Geodetic};
 use godview_core::godview_space::SpatialEngine;
 use godview_core::perception_node::RejectReason;
-use godview_core::report::ReportError;
+use godview_core::report::{ReportError, ReportKey};
+use godview_core::world_model::IdRule;
 use h3o::Resolution;
 use nalgebra::Vector3;
 use rand::{Rng, SeedableRng};
@@ -134,6 +135,11 @@ pub fn catalog() -> Vec<Entry> {
             name: "large_objects",
             invariant: LARGE_OBJECTS,
             run: large_objects,
+        },
+        Entry {
+            name: "handoff_ids",
+            invariant: HANDOFF_IDS,
+            run: handoff_ids,
         },
         Entry {
             name: "object_expiry",
@@ -1370,6 +1376,134 @@ fn large_objects(seed: u64) -> ScenarioOutcome {
                 "ablation_duplicate_agent_samples",
                 ablation_dups.to_string(),
             ),
+        ],
+    )
+}
+
+const HANDOFF_IDS: &str = "Objects drive past a row of agents with short sensor range, in both directions, so \
+sources keep joining and leaving each object. A world object's ID changes only when the track holding it leaves the \
+object or an older track joins it: a source that starts tracking an object later never renames it. The earlier \
+smallest-key rule does rename objects in the same run (checked as an ablation). Every object passes through at \
+least three holders, and all agents converge to the same world, IDs included.";
+
+/// For each agent and object, the IDs it shows over time and the changes the
+/// ID rule cannot explain (not "holder left" and not "an older track joined").
+fn id_history(
+    rec: &RunRecord,
+    agents: &[usize],
+) -> (usize, usize, Vec<String>, BTreeSet<(u64, ReportKey)>) {
+    type Seen = (ReportKey, godview_env::Timestamp, BTreeSet<ReportKey>);
+    let mut changes = 0;
+    let mut unexplained = 0;
+    let mut first = Vec::new();
+    let mut holders = BTreeSet::new();
+    for &a in agents {
+        let mut prev: std::collections::BTreeMap<u64, (usize, Seen)> = Default::default();
+        for (si, s) in rec.samples.iter().enumerate() {
+            let truths: Vec<&TruthSample> =
+                s.truths.iter().filter(|t| globally_observed(t)).collect();
+            let sc = rec.score(s, a, CUTOFF_M, globally_observed);
+            for &(e, ti) in &sc.pairs {
+                let o = &s.agents[a].world.objects[e];
+                let id = truths[ti].id;
+                let members: BTreeSet<ReportKey> = o.members.iter().map(|(k, _)| *k).collect();
+                holders.insert((id, o.id));
+                if let Some((pi, (pid, pborn, _))) = prev.get(&id) {
+                    if *pi + 1 == si && *pid != o.id {
+                        changes += 1;
+                        let holder_left = !members.contains(pid);
+                        let older_joined = o.born < *pborn;
+                        if !holder_left && !older_joined {
+                            unexplained += 1;
+                            if first.len() < 4 {
+                                first.push(format!(
+                                    "t={:.2}s agent {a} object {id}: renamed while its holder stayed and the new \
+                                     holder is younger",
+                                    s.t_s
+                                ));
+                            }
+                        }
+                    }
+                }
+                prev.insert(id, (si, (o.id, o.born, members)));
+            }
+        }
+    }
+    (changes, unexplained, first, holders)
+}
+
+fn handoff_ids(seed: u64) -> ScenarioOutcome {
+    let mut spec = ScenarioSpec::new("handoff_ids", seed);
+    // Long enough for the leading objects to pass all four agents, short
+    // enough that none leaves the covered road (the tracking checks would then
+    // see its coasting track as a false estimate, which is not this test).
+    spec.duration_s = 26.0;
+    spec.agents = (0..4)
+        .map(|i| {
+            let mut a = AgentSpec::at(Vector3::new(40.0 * i as f64, -12.0, 2.0));
+            a.odom_yaw_rad = 0.9 * i as f64 - 1.3;
+            a.odom_offset_enu = Vector3::new(-2.0 * i as f64, 3.0 * i as f64, 0.5);
+            a.sensor.range_m = 32.0;
+            a
+        })
+        .collect();
+    // Eastbound on y = 0, westbound on y = 6, both directions so that every
+    // pair of neighbors has a joiner with the smaller key in one direction.
+    let mut rng = ChaCha8Rng::seed_from_u64(seed ^ 0x1d5);
+    let mut objects = Vec::new();
+    for (x0, y, dir) in [
+        (-40.0, 0.0, 1.0),
+        (-72.0, 0.0, 1.0),
+        (160.0, 6.0, -1.0),
+        (192.0, 6.0, -1.0),
+    ] {
+        let speed = rng.gen_range(6.5..7.5);
+        let x0 = x0 + rng.gen_range(-2.0..2.0);
+        objects.push(ObjectSpec::moving(
+            Vector3::new(x0, y, 1.0),
+            Vector3::new(dir * speed, 0.0, 0.0),
+        ));
+    }
+    spec.objects = objects;
+    let rec = run(&spec);
+    let agents = [0, 1, 2, 3];
+    let (changes, unexplained, first, holders) = id_history(&rec, &agents);
+    let mut c = Checker::new("handoff_ids", seed);
+    for f in first {
+        c.fail(f);
+    }
+    c.check(unexplained == 0, || {
+        format!("{unexplained} of {changes} ID changes not explained by the holder leaving or an older track joining")
+    });
+    // Every object is handed through at least three holders (the scenario
+    // exercises leaves, not only joins).
+    for id in 0..spec.objects.len() as u64 {
+        let n = holders.iter().filter(|(o, _)| *o == id).count();
+        c.check(n >= 3, || {
+            format!("object {id} had {n} holders; handoffs not exercised")
+        });
+    }
+    // Ablation: the smallest-key rule renames objects when a source joins.
+    let mut old = spec.clone();
+    old.node.world.id_rule = IdRule::SmallestKey;
+    let old_rec = run(&old);
+    let (old_changes, old_unexplained, _, _) = id_history(&old_rec, &agents);
+    c.check(old_unexplained > 0, || {
+        "the smallest-key rule never renamed an object on a join; joins not exercised".into()
+    });
+    let rms = mean_rms(&rec, &agents, 2.0);
+    c.check(rms < 1.0, || format!("mean matched RMS {rms:.3} m"));
+    c.converged(&rec);
+    c.finish(
+        Some(&rec),
+        HANDOFF_IDS,
+        vec![
+            ("id_changes", changes.to_string()),
+            (
+                "smallest_key_rule_changes",
+                format!("{old_changes} ({old_unexplained} on a join)"),
+            ),
+            ("mean_rms_m", format!("{rms:.3}")),
         ],
     )
 }

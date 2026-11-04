@@ -109,6 +109,10 @@ pub struct WorldOut {
 /// One fused object.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ObjectOut {
+    /// Stable ID: the oldest contributing track, as `source:track`.
+    pub id: String,
+    /// When that track was created (ms since the Unix epoch, its source's clock).
+    pub tracked_since_unix_ms: i64,
     /// Latitude (degrees).
     pub lat_deg: f64,
     /// Longitude (degrees).
@@ -154,6 +158,8 @@ impl ObjectOut {
             .map_or(f64::NAN, |c| ((c[0] as f64 + c[3] as f64) / 2.0).sqrt());
         let p = o.position().0;
         Self {
+            id: format!("{}:{}", o.id.0.short(), o.id.1 .0),
+            tracked_since_unix_ms: o.born.as_millis(),
             lat_deg: e.position[0],
             lon_deg: e.position[1],
             height_m: e.position[2],

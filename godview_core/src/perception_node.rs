@@ -379,6 +379,7 @@ impl PerceptionNode {
                 p_exist,
                 lifecycle: track.lifecycle,
                 valid_for_ms,
+                born: track.created.min(t_valid),
                 object_box: odom_box
                     .map(|b| match global {
                         Some(g) => box_to_enu(&b, &g.ecef_from_odom, &Ecef::new(x[0], x[1], x[2])),

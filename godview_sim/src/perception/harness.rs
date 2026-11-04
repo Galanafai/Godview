@@ -1023,6 +1023,7 @@ fn fabricate(ag: &mut SimAgent, count: usize, site: &EnuFrame, t: Timestamp) -> 
                 p_exist: 0.99,
                 lifecycle: TrackLifecycle::Confirmed,
                 valid_for_ms: 1500,
+                born: t,
                 object_box: None,
             }
         })

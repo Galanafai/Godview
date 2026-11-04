@@ -292,6 +292,56 @@ impl Checker {
         });
     }
 
+    /// Every world object of every agent in `agents` satisfies `ok` (on its set
+    /// of source agents) at the samples in `[from_s, to_s)`, under the same
+    /// isolated-error tolerance as [`TRACKING_CRITERION`].
+    ///
+    /// A pair's position statistic can exceed its gate at one instant, which
+    /// splits one cluster for one snapshot (seen in CI: 21.5 against 21.11,
+    /// with fused snapshots on both sides). A violation by the same agent at
+    /// two consecutive samples fails, as do more than one violating sample and
+    /// more than 2% of checked object-samples.
+    fn fused_members(
+        &mut self,
+        rec: &RunRecord,
+        agents: &[usize],
+        from_s: f64,
+        to_s: f64,
+        what: &str,
+        ok: impl Fn(&BTreeSet<usize>) -> bool,
+    ) {
+        let mut bad_samples = 0usize;
+        let mut checked = 0usize;
+        let mut previous: BTreeSet<usize> = BTreeSet::new();
+        for s in rec
+            .samples
+            .iter()
+            .filter(|s| s.t_s >= from_s && s.t_s < to_s)
+        {
+            let mut now_bad = BTreeSet::new();
+            for &a in agents {
+                let members = members_by_agent(rec, s, a);
+                checked += members.len();
+                if let Some(m) = members.iter().find(|m| !ok(m)) {
+                    now_bad.insert(a);
+                    if previous.contains(&a) {
+                        self.fail(format!(
+                            "t={:.2}s agent {a}: {what} for two consecutive samples (members {m:?})",
+                            s.t_s
+                        ));
+                    }
+                }
+            }
+            if !now_bad.is_empty() {
+                bad_samples += 1;
+            }
+            previous = now_bad;
+        }
+        self.check(bad_samples <= 1 || bad_samples * 50 <= checked, || {
+            format!("{what} at {bad_samples} samples over {checked} checked object-samples (more than 2%)")
+        });
+    }
+
     /// After the final reliable round, every agent computes the same world, and
     /// it equals the world built from each source's own reports alone.
     fn converged(&mut self, rec: &RunRecord) {
@@ -474,18 +524,14 @@ fn two_views(seed: u64) -> ScenarioOutcome {
 
     let mut c = Checker::new("two_views", seed);
     c.tracked_world(&rec, &[0, 1], 2.0, f64::INFINITY, 0.5, globally_observed);
-    for s in rec.samples.iter().filter(|s| s.t_s >= 2.0) {
-        for a in 0..2 {
-            for m in members_by_agent(&rec, s, a) {
-                c.check(m == BTreeSet::from([0, 1]), || {
-                    format!(
-                        "t={:.2}s agent {a}: world object members {m:?}, expected both sources",
-                        s.t_s
-                    )
-                });
-            }
-        }
-    }
+    c.fused_members(
+        &rec,
+        &[0, 1],
+        2.0,
+        f64::INFINITY,
+        "an object not fused from both sources",
+        |m| *m == BTreeSet::from([0, 1]),
+    );
     let (nees, n) = pooled_nees(&rec, &[0, 1], 2.0);
     // Sanity bound only: samples within one run are correlated in time.
     c.check(n > 0 && nees < 9.0, || {
@@ -1246,13 +1292,14 @@ fn echo_chamber(seed: u64) -> ScenarioOutcome {
             format!("agent {a} saw no duplicate reports; echoes not exercised")
         });
     }
-    for s in rec.samples.iter().filter(|s| s.t_s >= 3.0) {
-        for a in [0usize, 4] {
-            for m in members_by_agent(&rec, s, a) {
-                c.check(m.len() == 5, || format!("t={:.2}s agent {a}: object fused from {} sources, expected all 5 via relays", s.t_s, m.len()));
-            }
-        }
-    }
+    c.fused_members(
+        &rec,
+        &[0, 4],
+        3.0,
+        f64::INFINITY,
+        "an object not fused from all 5 sources via relays",
+        |m| m.len() == 5,
+    );
     c.tracked_world(&rec, &[0, 2, 4], 3.0, f64::INFINITY, 0.5, globally_observed);
     c.converged(&rec);
     let dup: u64 = rec.node_stats.iter().map(|s| s.duplicate).sum();
@@ -1303,18 +1350,19 @@ fn split_brain(seed: u64) -> ScenarioOutcome {
                         )
                     });
                 }
-                if s.t_s >= 8.0 {
-                    c.check(m.len() == 4, || {
-                        format!(
-                            "t={:.2}s agent {a} fuses {} sources after healing, expected 4",
-                            s.t_s,
-                            m.len()
-                        )
-                    });
-                }
             }
         }
     }
+    // Never fusing across the partition is checked strictly above: no message
+    // crosses it, so a violation cannot be a statistical tail.
+    c.fused_members(
+        &rec,
+        &[0, 1, 2, 3],
+        8.0,
+        f64::INFINITY,
+        "an object not fused from all 4 sources after healing",
+        |m| m.len() == 4,
+    );
     c.converged(&rec);
     c.finish(
         Some(&rec),
@@ -1340,18 +1388,14 @@ fn agent_restart(seed: u64) -> ScenarioOutcome {
     spec.objects = separated_objects(seed, 3, 25.0, 2.0, spec.duration_s, 12.0);
     let rec = run(&spec);
     let mut c = Checker::new("agent_restart", seed);
-    for s in rec.samples.iter().filter(|s| s.t_s >= 8.0) {
-        for a in [0usize, 1] {
-            for m in members_by_agent(&rec, s, a) {
-                c.check(m.contains(&2), || {
-                    format!(
-                        "t={:.2}s agent {a} does not fuse the restarted agent",
-                        s.t_s
-                    )
-                });
-            }
-        }
-    }
+    c.fused_members(
+        &rec,
+        &[0, 1],
+        8.0,
+        f64::INFINITY,
+        "an object not fused with the restarted agent",
+        |m| m.contains(&2),
+    );
     c.tracked_world(&rec, &[0, 1, 2], 8.0, f64::INFINITY, 0.6, globally_observed);
     c.converged(&rec);
     c.finish(Some(&rec), RESTART, vec![])

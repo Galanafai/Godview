@@ -72,6 +72,11 @@ object in the odometry frame.
   silently dropped. Without it a young track with a poor velocity estimate
   could starve while its object went untracked (found by DST,
   `object_expiry`).
+* A tentative track not re-observed within 0.5 s is dropped, and it never
+  gates a detection across a longer gap. Its velocity is known only from a
+  few close observations, so left alone its gate grows until it can capture
+  another object's detection and confirm with a confident wrong velocity
+  (found by DST, `time_tornado`).
 * Lifecycle: `Tentative` until 3 hits, `Confirmed`, `Coasting` after 0.3 s
   without data, `Terminated` after 1.5 s.
 
@@ -279,7 +284,11 @@ attributed to the same object at two consecutive samples fails the scenario.
 Isolated errors are counted once per sample and object (a duplicate local
 track at one source shows in every agent's world at once and is one event);
 more than one such event, and more than 2% of expected object-samples, fails
-the scenario.
+the scenario. The same tolerance applies to checks that every object is fused
+from the expected sources, since one report can fall outside its gate for one
+snapshot. Checks that something must never happen (fusing across a
+partition, ghosts from stale data, worlds that differ from a control run)
+stay strict at every sample.
 
 ### What the DST suite establishes
 

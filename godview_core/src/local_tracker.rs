@@ -57,6 +57,15 @@ pub struct LocalTrackerConfig {
     pub confirm_hits: u32,
     /// Tentative tracks not confirmed within this time are dropped silently (s).
     pub tentative_timeout_s: f64,
+    /// Longest gap between a tentative track's observations (s).
+    ///
+    /// A tentative track has a velocity known only from a few close-together
+    /// observations. Left unobserved, its gate grows with that uncertainty
+    /// until it can capture another object's detection and confirm with a
+    /// confident, wrong velocity (found by DST, `time_tornado`). A tentative
+    /// track not re-observed within this gap is dropped, and it never gates a
+    /// detection further than this from its last observation.
+    pub tentative_max_gap_s: f64,
     /// A confirmed track without updates for this long starts coasting (s).
     pub coast_after_s: f64,
     /// A track without updates for this long is terminated (s).
@@ -74,6 +83,7 @@ impl Default for LocalTrackerConfig {
             retro_window_s: 0.5,
             confirm_hits: 3,
             tentative_timeout_s: 1.0,
+            tentative_max_gap_s: 0.5,
             coast_after_s: 0.3,
             terminate_after_s: 1.5,
         }
@@ -229,6 +239,12 @@ impl LocalTracker {
                     .iter()
                     .map(|d| {
                         if d.class_id != tr.class_id {
+                            return f64::INFINITY;
+                        }
+                        if tr.lifecycle == TrackLifecycle::Tentative
+                            && d.t.secs_since(tr.last_update).abs()
+                                > self.config.tentative_max_gap_s
+                        {
                             return f64::INFINITY;
                         }
                         let pred = tr.predicted(d.t);
@@ -501,7 +517,9 @@ impl LocalTracker {
             let idle = now.secs_since(tr.last_update);
             match tr.lifecycle {
                 TrackLifecycle::Tentative => {
-                    if now.secs_since(tr.created) > cfg.tentative_timeout_s {
+                    if now.secs_since(tr.created) > cfg.tentative_timeout_s
+                        || now.secs_since(tr.last_update) > cfg.tentative_max_gap_s
+                    {
                         drop.push((*id, false));
                     }
                 }
@@ -705,6 +723,50 @@ mod tests {
         assert!(
             lt.track(LocalTrackId(2)).is_none(),
             "the newcomer must starve and be dropped"
+        );
+    }
+
+    #[test]
+    fn a_stale_tentative_track_cannot_capture_a_distant_detection() {
+        // Regression (found by DST time_tornado): two detections 50 ms apart
+        // start a tentative track with a velocity known to about 10 m/s. Almost
+        // a second later its gate spans tens of meters, and it captured another
+        // object's detection 25 m away, confirming with a confident wrong
+        // velocity. It must neither gate across the gap nor survive it.
+        let mut lt = LocalTracker::new(LocalTrackerConfig::default());
+        let mut a = det(1, 0, 0.0, 0.0);
+        a.r = Matrix3::identity() * 0.09;
+        let mut b = det(2, 50, 1.0, 0.0);
+        b.r = Matrix3::identity() * 0.09;
+        lt.process_scan(&[a]);
+        lt.process_scan(&[b]);
+        assert_eq!(lt.track(LocalTrackId(1)).unwrap().hits, 2);
+        let mut far = det(3, 1000, 22.0, 4.0);
+        far.r = Matrix3::identity() * 0.09;
+        let nis = lt
+            .track(LocalTrackId(1))
+            .unwrap()
+            .predicted(far.t)
+            .nis(&far.z, &far.r)
+            .unwrap();
+        assert!(
+            nis < 11.34,
+            "test premise: the stale track's gate covers the detection (NIS {nis})"
+        );
+        let out = lt.process_scan(&[far]);
+        assert_eq!(
+            (out.updated, out.created),
+            (0, 1),
+            "the detection starts its own track"
+        );
+        lt.maintain(Timestamp::from_millis(1000));
+        assert!(
+            lt.track(LocalTrackId(1)).is_none(),
+            "the stale tentative track is dropped"
+        );
+        assert!(
+            lt.drain_terminated().is_empty(),
+            "it was never published, so no tombstone"
         );
     }
 

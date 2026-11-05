@@ -198,6 +198,23 @@ What this shows:
   from 10-29-43_4 (0.29 m) still gives 629 of 873 and NEES 10.09 on
   both-labeled objects; the box declaration cannot fix an understated pose.
 
+## Held-out confirmation (test2, test3)
+
+### Frozen settings
+
+Fixed on 2026-11-05, before test2 and test3 were downloaded, and committed
+before any of their data was read. No setting may change after the results
+are seen.
+
+* Pose: nominal declaration, 1.27 m horizontal (per axis), 2.0 m vertical,
+  0.1 deg yaw.
+* Tracker: `box_size_sys_m` 0.18, `box_yaw_sys_rad` 1.7 deg (0.02967 rad).
+* All gates on; everything else default (`NodeConfig::default()`).
+* Converter and replay unchanged from the test1 runs: version 1 detections
+  (labels of boxes with at least 5 own lidar points within 120 m, plus
+  seeded noise of 0.3 m, 0.2 m and 3 deg, seed 1), 10 Hz, 100 ms delivery
+  delay, 5 m cutoff, the same expected-object rule and the same scoring.
+
 ## Relative offset between the cars, per frame
 
 The same object, labeled by both cars and placed with each car's own pose

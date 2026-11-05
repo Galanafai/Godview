@@ -45,6 +45,8 @@ struct Args {
     box_size_sys_m: f64,
     box_yaw_sys_deg: f64,
     diag: String,
+    dump: String,
+    no_sharing: bool,
 }
 
 fn parse_args() -> Args {
@@ -58,10 +60,18 @@ fn parse_args() -> Args {
         box_size_sys_m: 0.0,
         box_yaw_sys_deg: 0.0,
         diag: String::new(),
+        dump: String::new(),
+        no_sharing: false,
     };
     let v: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < v.len() {
+        // Each car fuses only its own reports (nothing is delivered between cars).
+        if v[i] == "--no-sharing" {
+            a.no_sharing = true;
+            i += 1;
+            continue;
+        }
         let val = v.get(i + 1).cloned().unwrap_or_default();
         match v[i].as_str() {
             "--dir" => a.dir = val,
@@ -74,6 +84,9 @@ fn parse_args() -> Args {
             // Diagnostics only: per frame and car, the gids of missed objects and of
             // objects with a duplicate, written as JSON lines. Does not change scoring.
             "--diag" => a.diag = val,
+            // Per frame: each car's world objects and the labels, in the odometry
+            // frame, as JSON lines (for visualization). Does not change scoring.
+            "--dump" => a.dump = val,
             "--box-yaw-sys-deg" => a.box_yaw_sys_deg = val.parse().expect("--box-yaw-sys-deg"),
             // Diagnostics only (world model): no-box-gate, no-size-gate, no-yaw-gate,
             // no-vel-gate, no-pos-gate.
@@ -195,6 +208,9 @@ fn main() {
     let mut ever_detected: [BTreeSet<String>; 2] = [BTreeSet::new(), BTreeSet::new()];
     let mut rejected = [0usize; 2];
     let mut diag_lines: Vec<String> = Vec::new();
+    let mut dump_lines: Vec<String> = Vec::new();
+    let odom_yaw = anchor["yaw_deg"].as_f64().unwrap();
+    let node_ids: Vec<godview_core::report::AgentId> = nodes.iter().map(|n| n.id()).collect();
 
     for (i, fr) in frames.iter().enumerate() {
         let t = Timestamp(fr["t_ns"].as_i64().unwrap());
@@ -207,6 +223,9 @@ fn main() {
             nodes[c].ingest(&parsed[c].detections);
             nodes[c].maintain(t);
             if let Some(bytes) = nodes[c].publish(t, parsed[c].pose.as_ref()) {
+                if args.no_sharing {
+                    continue;
+                }
                 queue.push_back((t.as_nanos() + args.delay_ms * 1_000_000, 1 - c, bytes));
             }
         }
@@ -235,8 +254,41 @@ fn main() {
             .map(|o| godview_core::frames::Ecef(pose_exact.transform_point(&arr3(&o["pos"]))))
             .collect();
 
+        let mut dump_worlds: Vec<Value> = Vec::new();
         for c in 0..2 {
             let world = nodes[c].world(t);
+            if !args.dump.is_empty() {
+                let odom_from_ecef = pose_exact.inverse();
+                let objs_dump: Vec<Value> = world
+                    .objects
+                    .iter()
+                    .map(|w| {
+                        let p = odom_from_ecef.transform_point(&w.position().0);
+                        let sources: Vec<usize> = w
+                            .sources()
+                            .iter()
+                            .filter_map(|s| node_ids.iter().position(|n| n == s))
+                            .collect();
+                        let (agent, track) = w.id;
+                        let id = format!(
+                            "{}:{}",
+                            node_ids.iter().position(|n| *n == agent).map_or("?".to_string(), |k| k.to_string()),
+                            track.0
+                        );
+                        json!({
+                            "id": id,
+                            "x": p.x, "y": p.y,
+                            "box": w.object_box.map(|b| json!({
+                                "l": b.size[0], "w": b.size[1],
+                                "yaw_deg": b.yaw.to_degrees() - odom_yaw,
+                            })),
+                            "members": w.members.len(),
+                            "sources": sources,
+                        })
+                    })
+                    .collect();
+                dump_worlds.push(Value::Array(objs_dump));
+            }
             let est: Vec<_> = world
                 .objects
                 .iter()
@@ -355,6 +407,23 @@ fn main() {
             st.false_estimates += f_false;
             st.sq_err += f_sq;
             st.per_frame.push(json!([i, f_matched, f_missed, f_dup, f_false]));
+            if !args.dump.is_empty() && c == 1 {
+                let labels: Vec<Value> = objs
+                    .iter()
+                    .map(|o| {
+                        let p = arr3(&o["pos"]);
+                        json!({
+                            "gid": o["gid"], "x": p.x, "y": p.y,
+                            "l": o["size"][0], "w": o["size"][1],
+                            "yaw_deg": o["yaw_enu_deg"].as_f64().unwrap() - odom_yaw,
+                            "detected_by": o["detected_by"], "cav": o["cav"],
+                        })
+                    })
+                    .collect();
+                dump_lines.push(
+                    json!({"frame": i, "ego": fr["ego_odom"], "labels": labels, "worlds": dump_worlds}).to_string(),
+                );
+            }
             if !args.diag.is_empty() && (!d_missed.is_empty() || !d_dup.is_empty()) {
                 diag_lines.push(json!({"frame": i, "car": c, "missed": d_missed, "dup": d_dup}).to_string());
             }
@@ -408,6 +477,7 @@ fn main() {
         "declared": truth["declared"],
         "delay_ms": args.delay_ms,
         "ablations": args.ablate,
+        "no_sharing": args.no_sharing,
         "box_size_sys_m": args.box_size_sys_m,
         "box_yaw_sys_deg": args.box_yaw_sys_deg,
         "cutoff_m": args.cutoff_m,
@@ -418,6 +488,9 @@ fn main() {
     std::fs::write(&args.out, serde_json::to_string_pretty(&out).unwrap()).unwrap();
     if !args.diag.is_empty() {
         std::fs::write(&args.diag, diag_lines.join("\n")).unwrap();
+    }
+    if !args.dump.is_empty() {
+        std::fs::write(&args.dump, dump_lines.join("\n")).unwrap();
     }
     for c in out["cars"].as_array().unwrap() {
         println!(

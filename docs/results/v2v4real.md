@@ -369,6 +369,42 @@ frozen result above is the one reported.
   real detector, which is more likely to be ambiguous (`yaw_ambiguous`)
   than confidently wrong; this replay declares headings as unambiguous.
 
+## Demo video
+
+![Car A alone, Car B alone and the shared view, V2V4Real test3 scenario 2022-03-17-11-51-42_0, frame 101](../media/v2v4real_shared_view_still.png)
+
+Two real cars about 60 m apart, nearly stationary (held-out scenario
+`2022-03-17-11-51-42_0`, frozen settings): alone, car A's world holds 6.7
+objects per frame on average and car B's 19.4, while the shared GodView
+world holds 25.0, with labels as gray outlines and GodView world objects
+filled in a color fixed by their world ID. Detections are the dataset's
+labels with added noise, not a real detector, so the video shows sharing,
+association and fusion, not perception quality.
+
+* Video: [`docs/media/v2v4real_shared_view.mp4`](../media/v2v4real_shared_view.mp4)
+  (22.1 s, 10 Hz, 221 frames); short loop:
+  [`docs/media/v2v4real_shared_view.gif`](../media/v2v4real_shared_view.gif)
+  (8 s at 5 frames per second).
+* "Car A alone" and "Car B alone" come from a replay with `--no-sharing`
+  (each car fuses only its own reports); "Shared view" is car 0's world in
+  the normal replay (car 1's shared world is the same up to the 100 ms
+  delay). "Objects seen" counts world objects inside the drawn area,
+  including duplicates and coasting tracks. The dump runs reproduce the
+  frozen held-out numbers exactly.
+* This scenario was chosen because sharing helps most there (car A alone
+  matches 6.7 labeled objects per frame, shared 24.8); in the other held-out
+  scenarios the gain is smaller (for example 9.6 to 10.8 in
+  `2022-03-17-11-02-23_2`).
+* Reproduce:
+
+```sh
+R=target/release/v2v4real-replay; D=$V2V4REAL_DIR/converted_heldout/2022-03-17-11-51-42_0
+$R --dir $D --out share.json --box-size-sys-m 0.18 --box-yaw-sys-deg 1.7 --dump share.dump
+$R --dir $D --out alone.json --box-size-sys-m 0.18 --box-yaw-sys-deg 1.7 --no-sharing --dump alone.dump
+python -I scripts/v2v4real/render_demo.py share.dump alone.dump docs/media v2v4real_shared_view \
+    --title "V2V4Real test3, scenario 2022-03-17-11-51-42_0" --still-frame 100
+```
+
 ## Relative offset between the cars, per frame
 
 The same object, labeled by both cars and placed with each car's own pose

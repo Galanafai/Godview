@@ -148,7 +148,8 @@ Checked on the test1 split only (2026-11-05). Scripts:
   0.7 degrees (95th percentile of the absolute difference 8.5, 40.8 and 3.6
   degrees); with the sign of `angle[1]` flipped the medians are -27, 2.6 and
   -24.5 degrees. Radians are ruled out the same way (fewer points inside the
-  box). The 40.8 degree tail in scenario 3 is not explained yet.
+  box). The 40.8 degree tail in scenario 3 is one misannotated object; see
+  "Heading tail in scenario 3" below.
 * `location` is the box center: relative to `location[2]`, the lidar points
   inside a box span from -0.96 to between +0.84 and +0.95 times `extent[2]`
   (medians per scenario).
@@ -195,8 +196,63 @@ same place after the pose transform:
   lidar to GPS/INS mounting, and annotation differences between the cars.
   Only the relative error is observable without ground truth poses.
 
-Consequence for the replay: the declared pose sigma has to cover a relative
-error of up to about 3 m horizontally that is correlated over many seconds.
-If GodView treats pose noise as independent from frame to frame, the replay
-will show that as overconfident fused positions (high NEES) for objects seen
-by both cars, and that should be reported, not tuned away.
+Consequence for the replay (corrected after review): GodView does not
+average pose error down over time. Tracks live in each car's odometry frame,
+the pose covariance is added fresh at every publish, and the world model fuses
+the latest reports with Covariance Intersection. So a pose sigma that
+understates this offset does not show up as one overconfident object; it
+shows up as the object appearing twice, because the pair fails the 99.99%
+position gate. The declared sigma has to cover a relative offset of up to
+about 4 m horizontally (and several metres vertically), correlated over many
+seconds. With two cars the consistency monitor never judges either of them
+(`min_partners` is 3), so nothing downstream catches an understated sigma.
+The replay confirms this: with a 1 cm RTK sigma, 994 extra estimates
+(duplicates) appear against 385 with the nominal sigma (docs/results/v2v4real.md).
+
+### Heading tail in scenario 3 (explained)
+
+* The 40.8 degree 95th percentile comes from one object only (car 0 id 3 =
+  car 1 id 2, frames 15 to 31, 17 pairs). The disagreement grows smoothly
+  from 15 to 44 degrees and back; it is not a front/back flip and not a wrap
+  artifact (the wrap is handled; car 0's raw yaw sits near +-180 degrees).
+* The object pulls away from a near stop and turns: its direction of motion
+  from the labeled positions goes from -88 to -153 degrees. Car 1's label
+  (24 to 170 lidar points) follows the turn. Car 0's label (5 to 25 points)
+  stays at about -95 degrees. So car 0 has one wrong heading annotation on a
+  sparsely seen object.
+* Labels do not flip front/back in test1: 0 of 492 cross-car pairs differ by
+  about 180 degrees, and 0 of 2,348 consecutive-frame steps of one car's own
+  label tracks jump by more than 20 degrees, except two 24 degree steps of
+  one car 1 object in scenario 0. Converted detections therefore carry
+  `yaw_ambiguous: false`.
+* Script: `scripts/v2v4real/verify/check_heading_tail.py`.
+
+### Earth anchor from the gps field
+
+* Per scenario, a 2-D rigid fit of `lidar_pose` (both cars, all frames) to
+  the gps latitude and longitude in local ENU (`scripts/v2v4real/gps_fit.py`):
+
+| scenario | map x axis from East | horizontal residual rms / max | height residual rms |
+|---|---|---|---|
+| 09-54-40_0 | 1.39 deg | 0.16 / 0.43 m | 1.29 m |
+| 10-29-43_3 | 1.02 deg | 0.22 / 0.56 m | 2.34 m |
+| 10-29-43_4 | 1.36 deg | 0.18 / 0.56 m | 0.44 m |
+
+* The residual includes the GPS antenna to lidar lever arm, which is not
+  modeled. The three fits put the map origin (about 780 m from where the
+  cars drive) 5 to 23 m apart, so the scenarios plausibly share one map
+  frame, but the fits do not agree exactly. Each scenario uses its own fit.
+* After the rotation, gps heading minus pose yaw is -0.4 to 0.0 degrees for
+  car 0 and 1.1 to 1.5 degrees for car 1. Which car's heading is right is not
+  known.
+
+### Sizes and classes across cars
+
+* The two cars label the same object with different sizes: over the 8 linked
+  objects the absolute difference has median 0.14, 0.05, 0.13 m (length,
+  width, height) and maximum 1.06, 0.48, 0.52 m. Within one car a label ID
+  keeps one size over time for 23 of 36 IDs.
+* Linked pairs disagree on class in 79 pair-frames of scenario 3 (one object:
+  Van for car 0, Truck for car 1). GodView only fuses equal class ids, so the
+  converter maps every vehicle type to one class.
+* Script: `scripts/v2v4real/verify/check_size_agreement.py`.

@@ -179,10 +179,13 @@ impl LocalTrack {
         } else {
             f64::INFINITY
         };
-        self.object_box = Some(
+        let mature = d.t.secs_since(self.created) >= self.box_model.resolve_after_s;
+        self.object_box = Some(if mature {
             self.box_model
-                .resolve_with_velocity(&updated, v[0], v[1], speed_var),
-        );
+                .resolve_with_velocity(&updated, v[0], v[1], speed_var)
+        } else {
+            updated
+        });
         self.box_t = self.box_t.max(d.t);
     }
 
@@ -830,6 +833,23 @@ mod tests {
             yaw_ambiguous: true,
         });
         d
+    }
+
+    #[test]
+    fn a_young_track_does_not_decide_front_from_back() {
+        // Fast and well measured, but younger than resolve_after_s: still ambiguous.
+        let mut lt = LocalTracker::new(LocalTrackerConfig::default());
+        for k in 0..8u64 {
+            let d = with_box(det(k + 1, k as i64 * 100, 0.5 * k as f64, 0.0), 4.5, 0.02);
+            lt.process_scan(&[d]);
+        }
+        let b = lt
+            .tracks()
+            .next()
+            .unwrap()
+            .predicted_box(Timestamp::from_millis(700))
+            .unwrap();
+        assert!(b.yaw_ambiguous, "0.7 s old track resolved its heading");
     }
 
     #[test]

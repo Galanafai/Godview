@@ -18,7 +18,7 @@ Three things make this hard, and GodView handles each one:
 |:--|:--|:--|
 | **Different frames** | Each robot measures in its own drifting coordinate frame, and its own position is uncertain. | Reports are converted to a shared Earth frame (ECEF) with the robot's localization and clock uncertainty folded into each report's covariance. |
 | **Double counting** | Relayed and echoed reports make the fused picture look more certain than it is. | Only each agent's own tracks are ever shared, no fused estimate is ever fed back (only object IDs travel back, as labels), and fusion uses covariance intersection, which is safe under unknown correlation. |
-| **Different sizes** | A truck seen from opposite ends looks like two objects, and a car beside a truck can look like one. | Detections can carry oriented boxes. Sizes and headings must agree for reports to fuse, and a detector's systematic center error from seeing only part of an object is published as uncertainty. |
+| **Different sizes** | A truck seen from opposite ends looks like two objects, and a car beside a truck can look like one. | Detections can carry oriented boxes. Sizes and headings must agree for reports to fuse, and a detector's systematic errors (a center shifted by seeing only part of an object, a size or heading it always gets wrong) are published as uncertainty. |
 | **Untrusted data** | A robot can be miscalibrated, compromised or impersonated. | Every batch is Ed25519-signed and validated; replays and forgeries are rejected; a consistency monitor inflates or excludes sources that disagree with their peers. |
 
 ## How it works

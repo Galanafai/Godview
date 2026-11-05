@@ -1251,25 +1251,32 @@ fn crossing_targets(seed: u64) -> ScenarioOutcome {
 
 const LARGE_OBJECTS: &str = "Cars, vans, trucks and buses are reported as oriented boxes by detectors that see only \
 part of an object (the measured center moves up to a quarter of the length toward the sensor, with that uncertainty \
-reported) and cannot tell front from back. Each object is still one world object, fused from every agent that sees \
+reported), that get each object's size and heading wrong by a fixed amount per agent (0.4 m per dimension and 0.05 \
+rad, standard deviation, as the human annotators of the V2V4Real dataset do), and that cannot tell front from back. Each \
+object is still one world object, fused from every agent that sees \
 it from whatever side; every world object carries a box whose size is consistent with its reported uncertainty \
 (pooled NEES below 6) and whose heading is within 15 degrees of the truth, modulo 180 degrees unless the object \
 moves, in which case front and back are resolved. The same run without declaring the detector's systematic center \
-error must show duplicates.";
+error must show duplicates, and so must the run without declaring its systematic size and heading errors.";
 
 fn large_objects(seed: u64) -> ScenarioOutcome {
     let mut spec = ScenarioSpec::new("large_objects", seed);
     spec.duration_s = 10.0;
     spec.agents = ring(4, 45.0);
     let partial_view = 0.5;
+    let (size_bias_m, yaw_bias_rad) = (0.4, 0.05);
     for a in &mut spec.agents {
         a.sensor.boxes = Some(BoxSensorSpec {
             partial_view,
+            size_bias_m,
+            yaw_bias_rad,
             ..BoxSensorSpec::default()
         });
     }
-    // The detector's systematic center error, declared so it is published.
+    // The detector's systematic errors, declared so they are published.
     spec.node.tracker.box_center_sys_frac = partial_view / 2.0;
+    spec.node.tracker.box_size_sys_m = size_bias_m;
+    spec.node.tracker.box_yaw_sys_rad = yaw_bias_rad;
     let sizes = [
         (4.5, 1.8, 1.5),
         (12.0, 2.5, 3.5),
@@ -1282,27 +1289,32 @@ fn large_objects(seed: u64) -> ScenarioOutcome {
         .map(|(o, (l, w, h))| o.with_size(l, w, h))
         .collect();
     let rec = run(&spec);
-    // Ablation: the same run without declaring the systematic center error.
-    // Partial views then split large objects into duplicates, which shows the
-    // threat is exercised and that the declared error is what handles it.
+    // Ablations: the same run without declaring the systematic center error,
+    // and without declaring the systematic size and heading errors. Each must
+    // split objects into duplicates, which shows the threat is exercised and
+    // that the declaration is what handles it.
+    let duplicate_samples = |r: &RunRecord| {
+        r.samples
+            .iter()
+            .filter(|s| s.t_s >= 2.5)
+            .flat_map(|s| (0..4).map(move |a| (s, a)))
+            .filter(|(s, a)| r.score(s, *a, CUTOFF_M, globally_observed).false_estimates > 0)
+            .count()
+    };
     let mut blind = spec.clone();
     blind.node.tracker.box_center_sys_frac = 0.0;
-    let ablation = run(&blind);
+    let ablation_dups = duplicate_samples(&run(&blind));
+    let mut blind_size = spec.clone();
+    blind_size.node.tracker.box_size_sys_m = 0.0;
+    blind_size.node.tracker.box_yaw_sys_rad = 0.0;
+    let size_ablation_dups = duplicate_samples(&run(&blind_size));
     let mut c = Checker::new("large_objects", seed);
-    let ablation_dups = ablation
-        .samples
-        .iter()
-        .filter(|s| s.t_s >= 2.5)
-        .flat_map(|s| (0..4).map(move |a| (s, a)))
-        .filter(|(s, a)| {
-            ablation
-                .score(s, *a, CUTOFF_M, globally_observed)
-                .false_estimates
-                > 0
-        })
-        .count();
     c.check(ablation_dups > 0, || {
-        "without the declared systematic error no duplicate appeared; partial views not exercised"
+        "without the declared systematic center error no duplicate appeared; partial views not exercised"
+            .into()
+    });
+    c.check(size_ablation_dups > 0, || {
+        "without the declared systematic size and heading errors no duplicate appeared; biases not exercised"
             .into()
     });
     c.tracked_world(
@@ -1375,6 +1387,10 @@ fn large_objects(seed: u64) -> ScenarioOutcome {
             (
                 "ablation_duplicate_agent_samples",
                 ablation_dups.to_string(),
+            ),
+            (
+                "size_ablation_duplicate_agent_samples",
+                size_ablation_dups.to_string(),
             ),
         ],
     )

@@ -245,6 +245,32 @@ impl BoxModel {
     }
 }
 
+/// Adds a detector's systematic size and heading errors to a box's variances.
+///
+/// The size counterpart of [`center_sys_cov`]: a detector (or an annotator)
+/// that gets an object's size or heading wrong by the same amount on every
+/// scan produces an error that the track's filter cannot average out. Two
+/// sources' converged tracks of one object then disagree by more than their
+/// shrinking variances allow, and the box gate splits the object. `size_m`
+/// is the standard deviation of the size error (m, every dimension);
+/// `yaw_sys_rad` is that of the heading error. Meant for published boxes,
+/// not for the per-scan measurement noise.
+///
+/// The size error is absolute on purpose. A variance proportional to each
+/// source's own size estimate makes a source that underestimates an object
+/// also claim to be more certain, and covariance intersection, which favors
+/// the more certain input, then pulls the fused size toward the smallest
+/// estimate with an understated variance (seen in `large_objects`: pooled
+/// size NEES up to 8.8 against 3 expected).
+pub fn with_systematic(b: &ObjectBox, size_m: f64, yaw_sys_rad: f64) -> ObjectBox {
+    let mut out = *b;
+    for v in out.size_var.iter_mut() {
+        *v += size_m * size_m;
+    }
+    out.yaw_var += yaw_sys_rad * yaw_sys_rad;
+    out
+}
+
 /// Covariance (in the box's frame) of a systematic center error that does
 /// not average out over scans.
 ///
@@ -356,6 +382,34 @@ mod tests {
             yaw_var: 0.01,
             yaw_ambiguous: amb,
         }
+    }
+
+    #[test]
+    fn systematic_errors_widen_variances_and_let_biased_sources_pass_the_gate() {
+        // Two sources whose converged tracks of one car disagree by 0.5 m in
+        // length (an annotator or detector bias) and 0.1 rad in heading.
+        let mut a = bx(4.5, 0.0, false);
+        let mut b = bx(5.0, 0.1, false);
+        for x in [&mut a, &mut b] {
+            x.size_var = [1e-3; 3];
+            x.yaw_var = 1e-4;
+        }
+        let g = BoxGate::default();
+        assert!(!g.passes(Some(&a), Some(&b)), "confident tracks are split");
+        let (sa, sb) = (
+            with_systematic(&a, 0.3, 0.05),
+            with_systematic(&b, 0.3, 0.05),
+        );
+        assert!((sa.size_var[0] - (1e-3 + 0.09)).abs() < 1e-12);
+        assert!((sa.yaw_var - (1e-4 + 0.0025)).abs() < 1e-12);
+        assert_eq!((sa.size, sa.yaw), (a.size, a.yaw), "only variances change");
+        assert!(
+            g.passes(Some(&sa), Some(&sb)),
+            "declared bias lets them fuse"
+        );
+        // A real truck is still not a car.
+        let truck = with_systematic(&bx(12.0, 0.0, false), 0.3, 0.05);
+        assert!(!g.passes(Some(&sa), Some(&truck)));
     }
 
     #[test]

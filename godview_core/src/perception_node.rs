@@ -20,7 +20,7 @@
 //!   it can touch state; rejections are counted by reason, never silent.
 
 use crate::consistency::{ConsistencyConfig, ConsistencyMonitor};
-use crate::extent::{box_to_enu, center_sys_cov};
+use crate::extent::{box_to_enu, center_sys_cov, with_systematic};
 use crate::filter::CvState;
 use crate::frames::{add_clock_uncertainty, Ecef};
 use crate::local_tracker::{Detection, LocalTrack, LocalTracker, LocalTrackerConfig, ScanOutcome};
@@ -341,7 +341,10 @@ impl PerceptionNode {
 
         let mut reports = Vec::with_capacity(entries.len());
         for (track, state) in entries {
-            let odom_box = track.predicted_box(t_valid);
+            let tc = &self.config.tracker;
+            let odom_box = track
+                .predicted_box(t_valid)
+                .map(|b| with_systematic(&b, tc.box_size_sys_m, tc.box_yaw_sys_rad));
             let mut state = state;
             if let Some(b) = odom_box {
                 let sys = center_sys_cov(&b, self.config.tracker.box_center_sys_frac);
@@ -675,13 +678,16 @@ mod tests {
     }
 
     #[test]
-    fn published_boxes_carry_heading_in_east_north_up_and_systematic_center_error() {
+    fn published_boxes_carry_heading_in_east_north_up_and_systematic_errors() {
         // An agent whose odometry frame is rotated 0.7 rad sees a stationary 12 m
         // truck whose length points 0.2 rad from its odometry x axis: the shared
         // heading is 0.9 rad from East (modulo π, the detector is ambiguous), and
-        // the declared systematic center error widens the report along the truck.
+        // the declared systematic center error widens the report along the truck;
+        // declared systematic size and heading errors widen the box variances.
         let mut cfg = NodeConfig::default();
         cfg.tracker.box_center_sys_frac = 0.25;
+        cfg.tracker.box_size_sys_m = 0.4;
+        cfg.tracker.box_yaw_sys_rad = 0.05;
         let mut plain = Rig::new(8, Vector3::zeros(), 0.7);
         let mut rig = Rig::new(8, Vector3::zeros(), 0.7);
         rig.node = PerceptionNode::new(SigningKey::from_bytes(&[8; 32]), 1, cfg);
@@ -721,6 +727,14 @@ mod tests {
             b.yaw
         );
         assert!((b.size[0] - 12.0).abs() < 0.05);
+        let pb = p.object_box.expect("box published");
+        let added = b.size_var[0] - pb.size_var[0];
+        assert!((added - 0.16).abs() < 1e-4, "size variance added {added}");
+        let added = b.yaw_var - pb.yaw_var;
+        assert!(
+            (added - 0.0025).abs() < 1e-5,
+            "heading variance added {added}"
+        );
         let along = site().ecef_from_enu() * Vector3::new(0.9f64.cos(), 0.9f64.sin(), 0.0);
         let var = |r: &TrackReport| {
             let c = r.covariance();

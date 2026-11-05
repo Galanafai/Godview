@@ -95,10 +95,14 @@ sides have a box.
 
 * **Tracking.** A track refines its size per axis from every box (with a
   small process noise so it stays adaptive) and its heading with a filter
-  that wraps angles, modulo π when ambiguous. Once the track's velocity is
-  well determined and above 1 m/s, the direction of travel picks front from
-  back. The velocity is not fused as a heading measurement, since objects can
-  move sideways.
+  that wraps angles, modulo π when ambiguous. Once the track is at least
+  1 s old and its velocity is well determined and above 1 m/s, the direction
+  of travel picks front from back. The age limit matters because the
+  decision is kept: very young tracks claim far more velocity certainty than
+  they have (a 0.15 s old track reported 10.3 ± 2.6 m/s for an object moving
+  at 1.6 m/s), and one such track once fixed a heading backwards (found by
+  the 100-seed CI sweep). The velocity is not fused as a heading
+  measurement, since objects can move sideways.
 * **Gating.** Association, spawn suppression and duplicate pruning in the
   local tracker, and pair and cluster gating in the world model, also
   require the sizes (3 DOF, 99.99%) and headings (1 DOF, 99.99%) to agree
@@ -110,7 +114,9 @@ sides have a box.
   added to the box's.
 * **Fusion.** Sizes are fused by covariance intersection with a
   trace-minimizing weight; for the scalar heading CI keeps the more certain
-  input, flipped by an unambiguous one if needed.
+  input, flipped by an unambiguous one if needed. Two inputs that both claim
+  to know front from back but disagree leave the fused heading ambiguous, so
+  one wrongly resolved source cannot turn the shared heading around.
 * **Partial views.** A detector that sees only part of an object places
   the center toward the visible side, on every scan. That error does not
   average out, so a filter that treats it as noise becomes confidently wrong,

@@ -183,8 +183,11 @@ fn four_nodes_under_network_faults_share_one_world() {
                 b.size_m
             );
         }
-        // Motion resolves front from back for objects faster than 1 m/s (checked
-        // with margin at 1.5 m/s); slower ones may stay ambiguous.
+        // Motion resolves front from back for objects faster than 1 m/s once
+        // their tracks are at least 1 s old (checked with margin at 1.5 m/s);
+        // slower ones may stay ambiguous. A resolved heading must point the
+        // way some object of that size moves, never backwards (the truck and
+        // the bus have nearly equal sizes, so both are candidates).
         let truth = godview_node::synthetic::Truth::new(&godview_node::synthetic::SyntheticSpec {
             seed: 7,
             ring_agents: 4,
@@ -193,12 +196,28 @@ fn four_nodes_under_network_faults_share_one_world() {
             ..Default::default()
         });
         let fast = truth.objects.iter().filter(|(_, v)| v.norm() > 1.5).count();
-        let resolved = n
-            .final_world
-            .objects
-            .iter()
-            .filter(|o| o.object_box.as_ref().is_some_and(|b| !b.heading_ambiguous))
-            .count();
+        let mut resolved = 0;
+        for o in &n.final_world.objects {
+            let b = o.object_box.as_ref().expect("fused box");
+            if b.heading_ambiguous {
+                continue;
+            }
+            resolved += 1;
+            let err = (0..truth.objects.len())
+                .filter(|&k| {
+                    truth.sizes[k].is_some_and(|s| (0..3).all(|d| (s[d] - b.size_m[d]).abs() < 0.5))
+                })
+                .map(|k| {
+                    godview_core::extent::wrap_pi(b.heading_deg.to_radians() - truth.heading_enu(k))
+                        .abs()
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                err < 30f64.to_radians(),
+                "node {i}: a resolved heading is {:.0} deg from every matching object's direction of travel",
+                err.to_degrees()
+            );
+        }
         assert!(
             resolved >= fast,
             "node {i}: {resolved} headings resolved, {fast} objects move faster than 1.5 m/s"

@@ -173,6 +173,11 @@ pub struct BoxModel {
     pub yaw_q: f64,
     /// Speed above which, if well determined, motion fixes the heading (m/s).
     pub resolve_speed: f64,
+    /// Minimum track age before motion may fix the heading (s). A young
+    /// track's velocity is far less certain than its covariance claims (a
+    /// 0.15 s old track reported 10.3 ± 2.6 m/s for an object moving at
+    /// 1.6 m/s, DST `large_objects` seed 195335910), and a resolution is kept.
+    pub resolve_after_s: f64,
 }
 
 impl Default for BoxModel {
@@ -181,6 +186,7 @@ impl Default for BoxModel {
             size_q: 0.01,
             yaw_q: 0.05,
             resolve_speed: 1.0,
+            resolve_after_s: 1.0,
         }
     }
 }
@@ -223,7 +229,8 @@ impl BoxModel {
     /// three standard deviations of its uncertainty, the heading is flipped
     /// by π if it points against the motion, and marked unambiguous. The
     /// velocity is not fused as a heading measurement (objects can move
-    /// sideways), so the estimators stay independent.
+    /// sideways), so the estimators stay independent. The caller applies
+    /// `resolve_after_s`: young tracks must not decide.
     pub fn resolve_with_velocity(
         &self,
         b: &ObjectBox,
@@ -354,6 +361,10 @@ pub fn fuse_boxes(a: &ObjectBox, b: &ObjectBox) -> ObjectBox {
         out.size_var[i] = v;
     }
     let ambiguous = a.yaw_ambiguous || b.yaw_ambiguous;
+    // Two sources that each claim to know front from back, and disagree, leave
+    // the fused heading ambiguous: one wrongly resolved source must not turn
+    // the shared heading around for everyone.
+    let conflict = !a.yaw_ambiguous && !b.yaw_ambiguous && wrap_pi(a.yaw - b.yaw).abs() > FRAC_PI_2;
     let (keep, other) = if a.yaw_var <= b.yaw_var {
         (a, b)
     } else {
@@ -366,7 +377,7 @@ pub fn fuse_boxes(a: &ObjectBox, b: &ObjectBox) -> ObjectBox {
     }
     out.yaw = yaw;
     out.yaw_var = keep.yaw_var;
-    out.yaw_ambiguous = ambiguous && keep.yaw_ambiguous && other.yaw_ambiguous;
+    out.yaw_ambiguous = conflict || (ambiguous && keep.yaw_ambiguous && other.yaw_ambiguous);
     out
 }
 
@@ -410,6 +421,19 @@ mod tests {
         // A real truck is still not a car.
         let truck = with_systematic(&bx(12.0, 0.0, false), 0.3, 0.05);
         assert!(!g.passes(Some(&sa), Some(&truck)));
+    }
+
+    #[test]
+    fn sources_that_disagree_on_front_and_back_leave_the_heading_ambiguous() {
+        let forward = bx(4.5, 0.1, false);
+        let backward = bx(4.5, 0.1 + PI, false);
+        let f = fuse_boxes(&forward, &backward);
+        assert!(
+            f.yaw_ambiguous,
+            "conflicting resolutions must not pick a side"
+        );
+        assert!(wrap_half_pi(f.yaw - 0.1).abs() < 1e-9, "axis still known");
+        assert!(!fuse_boxes(&forward, &bx(4.5, 0.15, false)).yaw_ambiguous);
     }
 
     #[test]

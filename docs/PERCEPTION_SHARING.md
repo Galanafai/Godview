@@ -18,10 +18,14 @@ by the module documentation in `godview_core` (`frames`, `report`,
 
 Data flows one way: detections become local tracks, local tracks become
 reports, reports are stored, and the world model is a pure function of the
-store, the query time and the agent's trust view. Nothing from L3 is fed back
-into a local track or a report. This is what prevents double counting: a
+store, the query time and the agent's trust view. No estimate from L3 is fed
+back into a local track or a report. This is what prevents double counting: a
 source's information enters any fused estimate at most once, through that
-source's own latest report, however many times it was relayed or echoed.
+source's own latest report, however many times it was relayed or echoed. The
+one thing that does flow back is a label: a report may carry the ID its track
+belongs to in its source's world (section 6, step 5). Names never enter
+gating, clustering or fusion, and a unit test checks that they change no
+estimate or covariance.
 
 ## 2. Frames and uncertainty
 
@@ -123,10 +127,11 @@ report and the node's stdin input all carry boxes.
 ## 4. Reports on the wire
 
 `ReportBatch` is a manually encoded, versioned, signed binary format
-(`"GVR"`, schema 3; 50 byte header, 168 bytes per ECEF report without a box
-and 201 with one, 176 per local report without a box, 64 byte Ed25519
-signature). Schemas 1 (no box) and 2 (no birth time) are still decoded; their
-reports are taken as born at `t_valid`. Every byte is covered by the
+(`"GVR"`, schema 3; 50 byte header, 169 bytes per ECEF report with neither a
+name nor a box, plus 40 for a name and 33 for a box, 177 per local report
+without them, 64 byte Ed25519 signature). Schemas 1 (no box) and 2 (no birth
+time, no name) are still decoded; their reports are taken as born at
+`t_valid`, without a name. Every byte is covered by the
 signature; a test flips each byte in turn and requires rejection.
 
 * `AgentId` is the source's Ed25519 verifying key, so a batch can only be
@@ -137,6 +142,9 @@ signature; a test flips each byte in turn and requires rejection.
 * `born` is when the source created the track (its own clock). It is
   constant over the track's life, must not be later than `t_valid`, and is
   only used to name world objects (section 6).
+* `name` is optional: the ID of the world object the track belonged to in
+  the source's latest world, sent only when that ID is another track's key.
+  It is a label only (section 6).
 * Covariance is sent as the upper triangle in f32, quantized conservatively
   and validated (finite, positive definite, bounded) on receipt.
 * Termination is sent as a `Terminated` tombstone, republished for the
@@ -170,25 +178,45 @@ and query time give a bit-identical result on every agent.
    weight (golden section search, ties broken to 0.5). CI is used because the
    correlation between sources (common localization infrastructure, shared
    process model) is unknown.
-5. Each world object is named after its oldest member: the report whose
-   track was created first, ties broken by the smaller key. The rule needs
-   no memory between snapshots, so agents with the same reports agree on IDs
-   (the snapshot digest includes them).
+5. Each world object gets an ID (`IdRule::Lineage`). Every member claims
+   a name: the name its report carries, or its own key if it carries none.
+   The cluster takes the claim of its oldest member (the report whose track
+   was created first, ties broken by the smaller key). A claim that is the
+   key of a live track in another cluster is refused, because that track's
+   cluster owns it. Clusters are settled in order of their oldest member; a
+   cluster whose claim was refused or already taken moves to its next
+   member's claim, and finally to its oldest member's own key, which no
+   other cluster can take, so IDs are unique. The rule needs no memory
+   between snapshots, so agents with the same reports agree on IDs (the
+   snapshot digest includes them).
 
-**What the ID rule does and does not give.** A source that starts tracking
-an object later never renames it; under the earlier rule (smallest member
-key, kept as `IdRule::SmallestKey` for comparison) about half of all joins
-did. The ID still changes when the track holding it ends, and passes to the
-next-oldest member. When objects drive past a row of sensors, the oldest
-track is usually the first to leave, so the ID changes at almost every
-handoff: in `handoff_ids` over 40 seeds the new rule averaged 41.0 ID changes
-per run against 44.9 for the old one, all of them handoffs, against 24.0
-renames on a join under the old rule. Keeping one ID through a whole chain of
-handoffs needs the name to travel with the reports (a source publishing the
-ID its track currently belongs to); that is not built. The rule also trusts
-each source's birth times: a validly signed source that claims very old
-tracks takes the IDs of the objects it sees, as a source with a small key
-could under the old rule.
+**What the ID rule does and does not give.** A node publishes, with each of
+its tracks, the ID that track belongs to in its own latest world. When the
+track that started an ID ends, the remaining members still carry the name,
+so the object keeps its ID through a chain of handoffs as long as each new
+source is fused with the object before the previous ones leave. In
+`handoff_ids` (objects driving past four short-range agents) objects kept one
+ID for the whole drive past in all 40 seeds run, and no ID was ever matched
+to two physical objects. In the same runs the oldest-track rule (names
+ignored) averaged about 41 ID changes per run and the smallest-key rule about
+45, 24 of them when a source joined.
+
+Limits:
+
+* If coverage has a gap, so that no track of the object survives until the
+  next source picks it up, the name is lost and the object gets a new ID.
+  Recognizing it again would need re-identification, which is not built.
+* A name is only as good as the association that produced it. If a source's
+  track jumps from one object to another, its name can carry an ID to the
+  wrong object. `handoff_ids` checks this does not happen in its geometry;
+  crossing objects at close range are covered only by `crossing_targets`,
+  which checks positions, not IDs.
+* Names and birth times are claims by the source. A validly signed source
+  can claim old tracks or names of ended tracks and so choose the IDs of the
+  objects it sees (a source with a small key could do this under the old
+  rule). It cannot take the ID of a live track in another object, and it
+  cannot change any estimate this way.
+* Names add up to 41 bytes per report.
 
 `WorldObject::to_entity` converts to the consumer `Entity` (geodetic position,
 ENU covariance and, if present, the oriented box) for `SpatialEngine`.
@@ -331,7 +359,7 @@ to legacy scenarios only; perception scenarios have fixed durations.
 | `biased_source` | Unreported 6 m bias detected and excluded by all honest agents; an ablation with trust disabled shows the ghosts. |
 | `crossing_targets` | Two objects within 1.5 m are not merged and keep their identities. |
 | `large_objects` | Cars, vans, trucks and buses as oriented boxes, from detectors that see only part of an object and cannot tell front from back: each is one world object from every side, with size consistent with its uncertainty (pooled NEES below 6) and heading within 15 degrees (modulo 180 unless it moves). The same run without the declared systematic center error must show duplicates. |
-| `handoff_ids` | Objects drive past a row of short-range agents in both directions, so sources keep joining and leaving. An ID changes only when its holder leaves or an older track joins; every object passes through at least three holders. The smallest-key rule must rename objects on a join in the same run. |
+| `handoff_ids` | Objects drive past a row of short-range agents in both directions, so sources keep joining and leaving. Each object keeps one ID for its whole drive past (at most two changes per run tolerated) and no ID is given to two objects. Comparison runs: under the oldest-track rule every change is its holder leaving or an older track joining and each object passes through at least three holders; the smallest-key rule must rename objects on a join. |
 | `object_expiry` | Disappearing objects leave every world within coast plus validity time; new ones appear. |
 | `echo_chamber` | Relayed and repeated reports change nothing: world equals the one built from each source's own reports. |
 | `split_brain` | Partition: each side fuses its own sources; after healing all converge. |

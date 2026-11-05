@@ -17,17 +17,19 @@
 //! one optional field (the box) has a tag byte, so equal content always means
 //! equal bytes, and every decoded value is exactly what the signer signed. The
 //! layout is pinned by a golden-bytes test; changing it requires bumping
-//! [`SCHEMA_VERSION`]. Schemas 1 (no box, no birth time) and 2 (no birth
-//! time) are still decoded; their reports get `born = t_valid`.
+//! [`SCHEMA_VERSION`]. Schemas 1 (no box, no birth time, no name) and 2 (no
+//! birth time, no name) are still decoded; their reports get
+//! `born = t_valid` and no name.
 //!
 //! ```text
 //! batch   := "GVR" schema:u8 source:[u8;32] epoch:u32 sent_at:i64 count:u16 report* signature:[u8;64]
 //! report  := seq:u64 track:u64 t_valid:i64 frame pos:f64×3 vel:f32×3 cov:f32×21
-//!            class:u8 class_prob:f32 p_exist:f32 lifecycle:u8 valid_for_ms:u32 born box
+//!            class:u8 class_prob:f32 p_exist:f32 lifecycle:u8 valid_for_ms:u32 born name box
 //! frame   := 0u8 (ECEF) | 1u8 frame_id:u64 (source-local frame)
 //! box     := 0u8 (none) | 1u8 size:f32×3 size_var:f32×3 yaw:f32 yaw_var:f32 flags:u8
 //!            (schema 2 and later; flags bit 0 = heading ambiguous modulo π)
 //! born    := i64 ns, when the source's track was created (schema 3 and later)
+//! name    := 0u8 (none) | 1u8 source:[u8;32] track:u64 (schema 3 and later)
 //! ```
 //!
 //! A box's heading is counterclockwise from local East at the object for
@@ -173,6 +175,11 @@ pub struct TrackReport {
     /// track's life; the world model names a fused object after its oldest
     /// member. Never after `t_valid`.
     pub born: Timestamp,
+    /// The world-object ID this track belonged to in the source's latest
+    /// world, if that ID is another track's key. A label only: it never
+    /// affects gating, clustering or fusion. It lets an ID outlive the track
+    /// that started it (see [`crate::world_model::IdRule::Lineage`]).
+    pub name: Option<ReportKey>,
     /// Oriented box, if the source's sensors report extent (see [`crate::extent`]).
     pub object_box: Option<ObjectBox>,
 }
@@ -308,6 +315,9 @@ pub enum ReportError {
     /// Unknown box tag.
     #[error("bad box tag {0}")]
     BadBoxTag(u8),
+    /// Unknown name tag.
+    #[error("bad name tag {0}")]
+    BadNameTag(u8),
     /// A track created after the time of its own estimate.
     #[error("track born after its estimate")]
     BornAfterEstimate,
@@ -398,6 +408,14 @@ impl ReportBatch {
             b.push(r.lifecycle.to_u8());
             b.extend_from_slice(&r.valid_for_ms.to_le_bytes());
             b.extend_from_slice(&r.born.as_nanos().to_le_bytes());
+            match r.name {
+                None => b.push(0),
+                Some((src, tr)) => {
+                    b.push(1);
+                    b.extend_from_slice(&src.0);
+                    b.extend_from_slice(&tr.0.to_le_bytes());
+                }
+            }
             match r.object_box {
                 None => b.push(0),
                 Some(x) => {
@@ -469,10 +487,19 @@ impl ReportBatch {
             let p_exist = r.f32()?;
             let lifecycle = TrackLifecycle::from_u8(r.u8()?)?;
             let valid_for_ms = r.u32()?;
-            let born = if schema >= 3 {
-                Timestamp::from_nanos(r.i64()?)
+            let (born, name) = if schema >= 3 {
+                let born = Timestamp::from_nanos(r.i64()?);
+                let name = match r.u8()? {
+                    0 => None,
+                    1 => {
+                        let src = AgentId(r.take::<32>()?);
+                        Some((src, LocalTrackId(r.u64()?)))
+                    }
+                    other => return Err(ReportError::BadNameTag(other)),
+                };
+                (born, name)
             } else {
-                t_valid
+                (t_valid, None)
             };
             let object_box = if schema == SCHEMA_VERSION_V1 {
                 None
@@ -515,6 +542,7 @@ impl ReportBatch {
                 lifecycle,
                 valid_for_ms,
                 born,
+                name,
                 object_box,
             });
         }
@@ -655,6 +683,7 @@ mod tests {
             lifecycle: TrackLifecycle::Confirmed,
             valid_for_ms: 1500,
             born: Timestamp::from_millis(1_704_067_190_000),
+            name: None,
             object_box: None,
         }
     }
@@ -676,6 +705,7 @@ mod tests {
         local.lifecycle = TrackLifecycle::Terminated;
         let mut boxed = report(src, 10, 3);
         boxed.object_box = Some(a_box());
+        boxed.name = Some((AgentId([7; 32]), LocalTrackId(42)));
         ReportBatch {
             source: src,
             epoch: 7,
@@ -703,9 +733,10 @@ mod tests {
         // Changing the wire layout must be deliberate: bump SCHEMA_VERSION and this test.
         let k = key(1);
         let bytes = batch(&k).sign(&k);
-        // header 50 + ECEF report with birth and box (159 + 8 + 1 + 33) +
-        // local-frame report with birth, without box (167 + 8 + 1) + signature 64
-        assert_eq!(bytes.len(), 50 + 201 + 176 + 64);
+        // header 50 + ECEF report with birth, name and box (159 + 8 + 41 + 34)
+        // + local-frame report with birth, no name, no box (167 + 8 + 1 + 1)
+        // + signature 64
+        assert_eq!(bytes.len(), 50 + 242 + 177 + 64);
         assert_eq!(&bytes[..4], b"GVR\x03");
         let crc: u32 = bytes[..bytes.len() - 64]
             .iter()
@@ -760,6 +791,14 @@ mod tests {
             v.extend_from_slice(&r.valid_for_ms.to_le_bytes());
             if schema >= 3 {
                 v.extend_from_slice(&r.born.as_nanos().to_le_bytes());
+                match r.name {
+                    None => v.push(0),
+                    Some((src, tr)) => {
+                        v.push(1);
+                        v.extend_from_slice(&src.0);
+                        v.extend_from_slice(&tr.0.to_le_bytes());
+                    }
+                }
             }
             if schema >= 2 {
                 match r.object_box {
@@ -799,6 +838,7 @@ mod tests {
         // Without a birth time on the wire, a report is taken as born at t_valid.
         for r in &mut b.reports {
             r.born = r.t_valid;
+            r.name = None;
         }
         assert_eq!(ReportBatch::verify_and_decode(&bytes).unwrap(), b);
     }
@@ -812,6 +852,7 @@ mod tests {
         bytes.extend_from_slice(&sig.to_bytes());
         for r in &mut b.reports {
             r.born = r.t_valid;
+            r.name = None;
         }
         let decoded = ReportBatch::verify_and_decode(&bytes).unwrap();
         assert!(decoded.reports[0].object_box.is_some());
@@ -839,7 +880,7 @@ mod tests {
         // A valid batch whose box tag is corrupted (and re-signed) is rejected too.
         let good = batch(&k);
         let mut bytes = reference_encoding(&good, 3);
-        let tag_at = 50 + 159 + 8; // first report's box tag
+        let tag_at = 50 + 159 + 8 + 41; // first report's box tag
         assert_eq!(bytes[tag_at], 1);
         bytes[tag_at] = 7;
         let sig = k.sign(&bytes);

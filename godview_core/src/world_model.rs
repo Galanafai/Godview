@@ -24,13 +24,18 @@
 //!    four sources of one object together when one pair's localization errors
 //!    happen to fall outside a 99% gate, while still refusing to merge
 //!    clusters that disagree as wholes.
-//! 5. **Name** each cluster after its oldest member: the report whose track
-//!    was created first (`born`), ties broken by the smaller key. A source
-//!    joining an object therefore leaves its ID unchanged unless that source
-//!    has tracked it longer; the ID changes when the track holding it ends or
-//!    leaves the cluster, and then passes to the next-oldest member. The
-//!    rule needs no memory between snapshots, so agents with the same reports
-//!    agree on IDs as they agree on everything else.
+//! 5. **Name** each cluster (see [`IdRule::Lineage`]). Every report may
+//!    carry a `name`: the ID its track belonged to in its source's latest
+//!    world. A cluster takes the name carried by its oldest member (its own
+//!    key if it carries none), so an ID started by one track passes to the
+//!    tracks that were fused with it and outlives the track that started it.
+//!    A name that is the key of a live track in another cluster is not
+//!    allowed (that track's cluster owns it); two clusters claiming the same
+//!    name of an ended track are settled in a fixed order, and a cluster that
+//!    loses falls back to its next claim and finally to its oldest member's
+//!    key, which no other cluster can take. The result depends only on the
+//!    reports and the trust view, so agents with the same reports agree on
+//!    IDs as they agree on everything else.
 //! 6. **Fuse** each cluster with Covariance Intersection, members in key
 //!    order, weights chosen to minimize the trace of the fused covariance.
 //!    CI is used here, and only here, because the cross-correlation between
@@ -40,6 +45,9 @@
 //!
 //! Nothing produced here is ever inserted into a report store or a local
 //! filter. That missing feedback path is what rules out rumor propagation.
+//! The one exception is the name label of step 5: a node publishes the ID its
+//! own track belongs to. Names never enter gating, clustering or fusion, so
+//! they cannot change any estimate or covariance; they only choose IDs.
 
 use crate::extent::{fuse_boxes, BoxGate, BoxModel, ObjectBox};
 use crate::frames::{cv_process_noise, cv_transition, ecef_from_enu_rotation, symmetrize, Ecef};
@@ -82,11 +90,15 @@ pub struct WorldModelConfig {
     pub id_rule: IdRule,
 }
 
-/// Which member's key becomes a fused object's ID.
+/// How a fused object's ID is chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IdRule {
-    /// The member whose track was created first (ties: smaller key).
+    /// The name carried by the oldest member, so an ID survives handoffs
+    /// (see the module documentation, step 5).
     #[default]
+    Lineage,
+    /// The key of the member whose track was created first (ties: smaller
+    /// key). Names are ignored: the ID changes when that track leaves.
     OldestTrack,
     /// The smallest member key. The earlier rule, kept for comparison: the
     /// ID changes whenever a source with a smaller key joins.
@@ -120,11 +132,10 @@ pub struct TrustView {
 /// One fused object in the shared world state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorldObject {
-    /// Identity: the key of the oldest member (see [`IdRule`]). Derived, never
-    /// negotiated; unchanged while that member's track stays in the cluster
-    /// and no older track joins.
+    /// Identity, a report key (see [`IdRule`]). Derived from the reports,
+    /// never negotiated, and unique within a snapshot.
     pub id: ReportKey,
-    /// When the track named by `id` was created (its source's clock).
+    /// When the oldest current member's track was created (its source's clock).
     pub born: Timestamp,
     /// Contributing reports `(key, version)` in key order (provenance).
     pub members: Vec<(ReportKey, (u32, u64))>,
@@ -254,6 +265,8 @@ pub(crate) struct Prepared {
     pub p_exist: f32,
     /// When the source created the track.
     pub born: Timestamp,
+    /// The name the source gives this track's object (see [`IdRule::Lineage`]).
+    pub name: Option<ReportKey>,
     /// Box with heading in ENU at the object, predicted to the query time.
     pub object_box: Option<ObjectBox>,
 }
@@ -320,6 +333,7 @@ impl WorldModel {
                 class_prob: r.class_prob,
                 p_exist: r.p_exist,
                 born: r.born,
+                name: r.name,
                 object_box: r.object_box.map(|b| self.config.box_model.predict(&b, dt)),
             });
         }
@@ -347,9 +361,11 @@ impl WorldModel {
     pub fn snapshot(&self, store: &ReportStore, t: Timestamp, trust: &TrustView) -> WorldSnapshot {
         let (items, mut snap) = self.prepare(store, t, trust);
         let clusters = self.cluster(&items);
+        let ids = name_clusters(&items, &clusters, self.config.id_rule);
         snap.objects = clusters
-            .into_iter()
-            .filter_map(|members| fuse_cluster(&items, &members, t, self.config.id_rule))
+            .iter()
+            .zip(ids)
+            .filter_map(|(members, id)| fuse_cluster(&items, members, t, id))
             .collect();
         snap.objects.sort_by_key(|o| o.id);
         snap
@@ -476,20 +492,69 @@ fn fuse_members(
     (x, p, b)
 }
 
-/// Fuses one cluster (member indices in key order) into a world object.
+/// Members of a cluster from oldest to youngest track (ties: smaller key).
+fn by_age(items: &[Prepared], members: &[usize]) -> Vec<usize> {
+    let mut v = members.to_vec();
+    v.sort_by(|a, b| {
+        let (a, b) = (&items[*a], &items[*b]);
+        a.born.cmp(&b.born).then(a.key.cmp(&b.key))
+    });
+    v
+}
+
+/// Chooses each cluster's ID (one per cluster, unique within the snapshot).
+fn name_clusters(items: &[Prepared], clusters: &[Vec<usize>], rule: IdRule) -> Vec<ReportKey> {
+    let aged: Vec<Vec<usize>> = clusters.iter().map(|c| by_age(items, c)).collect();
+    match rule {
+        IdRule::SmallestKey => clusters
+            .iter()
+            .map(|c| {
+                c.iter()
+                    .map(|m| items[*m].key)
+                    .min()
+                    .expect("non-empty cluster")
+            })
+            .collect(),
+        IdRule::OldestTrack => aged.iter().map(|c| items[c[0]].key).collect(),
+        IdRule::Lineage => {
+            // Which cluster each live track is in: a live track's key may only
+            // name its own cluster.
+            let owner: BTreeMap<ReportKey, usize> = clusters
+                .iter()
+                .enumerate()
+                .flat_map(|(ci, c)| c.iter().map(move |m| (items[*m].key, ci)))
+                .collect();
+            // Settle clusters in order of their oldest member.
+            let mut order: Vec<usize> = (0..clusters.len()).collect();
+            order.sort_by(|a, b| {
+                let (a, b) = (&items[aged[*a][0]], &items[aged[*b][0]]);
+                a.born.cmp(&b.born).then(a.key.cmp(&b.key))
+            });
+            let mut taken: BTreeSet<ReportKey> = BTreeSet::new();
+            let mut ids: Vec<ReportKey> = aged.iter().map(|c| items[c[0]].key).collect();
+            for ci in order {
+                let fallback = items[aged[ci][0]].key;
+                let id = aged[ci]
+                    .iter()
+                    .map(|m| items[*m].name.unwrap_or(items[*m].key))
+                    .find(|n| owner.get(n).is_none_or(|o| *o == ci) && !taken.contains(n))
+                    .unwrap_or(fallback);
+                taken.insert(id);
+                ids[ci] = id;
+            }
+            ids
+        }
+    }
+}
+
+/// Fuses one cluster (member indices in key order) into a world object named `id`.
 fn fuse_cluster(
     items: &[Prepared],
     members: &[usize],
     t: Timestamp,
-    rule: IdRule,
+    id: ReportKey,
 ) -> Option<WorldObject> {
-    let holder = members
-        .iter()
-        .map(|m| &items[*m])
-        .min_by(|a, b| match rule {
-            IdRule::OldestTrack => a.born.cmp(&b.born).then(a.key.cmp(&b.key)),
-            IdRule::SmallestKey => a.key.cmp(&b.key),
-        })?;
+    let oldest = &items[*by_age(items, members).first()?];
     let (x, p, object_box) = fuse_members(items, members);
     let best = members.iter().map(|m| &items[*m]).max_by(|a, b| {
         a.class_prob
@@ -497,8 +562,8 @@ fn fuse_cluster(
             .then(b.key.cmp(&a.key))
     })?;
     Some(WorldObject {
-        id: holder.key,
-        born: holder.born,
+        id,
+        born: oldest.born,
         members: members
             .iter()
             .map(|m| (items[*m].key, items[*m].version))
@@ -630,6 +695,7 @@ mod tests {
             lifecycle: TrackLifecycle::Confirmed,
             valid_for_ms: 1500,
             born: Timestamp::from_millis(0),
+            name: None,
             object_box: None,
         }
     }
@@ -793,9 +859,93 @@ mod tests {
         );
     }
 
+    fn named(mut r: TrackReport, name: ReportKey) -> TrackReport {
+        r.name = Some(name);
+        r
+    }
+
+    #[test]
+    fn a_name_outlives_the_track_that_started_it() {
+        let wm = WorldModel::default();
+        let at = Vector3::new(10.0, 5.0, 0.0);
+        let t = Timestamp::from_millis(5000);
+        let a = born_at(report(5, 50, 1, at, 0.25, 5000), 1000);
+        // b and c were fused with a and carry its ID as their name.
+        let b = named(
+            born_at(
+                report(7, 70, 1, at + Vector3::new(0.2, 0.0, 0.0), 0.25, 5000),
+                2000,
+            ),
+            a.key(),
+        );
+        let c = born_at(
+            report(3, 30, 1, at + Vector3::new(0.0, 0.2, 0.0), 0.25, 5000),
+            3000,
+        );
+        let snap = wm.snapshot(&store(&[a, b, c]), t, &TrustView::default());
+        assert_eq!(snap.objects[0].id, a.key());
+        // a's track ends: the object keeps a's ID through b's name.
+        let mut gone = a;
+        gone.seq += 1;
+        gone.lifecycle = TrackLifecycle::Terminated;
+        let snap = wm.snapshot(&store(&[a, gone, b, c]), t, &TrustView::default());
+        assert_eq!((snap.objects.len(), snap.objects[0].id), (1, a.key()));
+        assert_eq!(
+            snap.objects[0].born, b.born,
+            "born is the oldest current member"
+        );
+        // Without the name, the oldest-track rule hands it to b.
+        let oldest = WorldModel::new(WorldModelConfig {
+            id_rule: IdRule::OldestTrack,
+            ..WorldModelConfig::default()
+        });
+        let snap = oldest.snapshot(&store(&[a, gone, b, c]), t, &TrustView::default());
+        assert_eq!(snap.objects[0].id, b.key());
+    }
+
+    #[test]
+    fn names_choose_ids_and_change_nothing_else() {
+        let wm = WorldModel::default();
+        let t = Timestamp::from_millis(5000);
+        let p = Vector3::new(10.0, 5.0, 0.0);
+        let q = Vector3::new(60.0, 5.0, 0.0);
+        let a = born_at(report(5, 50, 1, p, 0.25, 5000), 1000);
+        let b = born_at(report(6, 60, 1, q, 0.25, 5000), 1000);
+        // c, the oldest member near q, names a, whose track is alive in
+        // another object: the name is refused and the next member's claim
+        // (b's own key) names the object.
+        let c = named(
+            born_at(
+                report(9, 90, 1, q + Vector3::new(0.2, 0.0, 0.0), 0.25, 5000),
+                500,
+            ),
+            a.key(),
+        );
+        let snap = wm.snapshot(&store(&[a, b, c]), t, &TrustView::default());
+        let ids: BTreeSet<ReportKey> = snap.objects.iter().map(|o| o.id).collect();
+        assert_eq!(ids, [a.key(), b.key()].into_iter().collect());
+        // Two objects claiming the same ended track's name get distinct IDs:
+        // the one with the older member keeps it.
+        let dead = (AgentId([1; 32]), LocalTrackId(1));
+        let a2 = named(a, dead);
+        let b2 = named(b, dead);
+        let snap = wm.snapshot(&store(&[a2, b2]), t, &TrustView::default());
+        let ids: Vec<ReportKey> = snap.objects.iter().map(|o| o.id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&dead) && ids.contains(&b.key()), "{ids:?}");
+        // Names never change an estimate.
+        let plain = wm.snapshot(&store(&[a, b]), t, &TrustView::default());
+        for (x, y) in plain.objects.iter().zip(&snap.objects) {
+            assert_eq!((x.state, x.cov, &x.members), (y.state, y.cov, &y.members));
+        }
+    }
+
     #[test]
     fn the_id_passes_to_the_next_oldest_member_when_its_holder_leaves() {
-        let wm = WorldModel::default();
+        let wm = WorldModel::new(WorldModelConfig {
+            id_rule: IdRule::OldestTrack,
+            ..WorldModelConfig::default()
+        });
         let at = Vector3::new(10.0, 5.0, 0.0);
         let t = Timestamp::from_millis(5000);
         let a = born_at(report(5, 50, 1, at, 0.25, 5000), 1000);

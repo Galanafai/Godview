@@ -17,7 +17,7 @@ Three things make this hard, and GodView handles each one:
 | Problem | What goes wrong | What GodView does |
 |:--|:--|:--|
 | **Different frames** | Each robot measures in its own drifting coordinate frame, and its own position is uncertain. | Reports are converted to a shared Earth frame (ECEF) with the robot's localization and clock uncertainty folded into each report's covariance. |
-| **Double counting** | Relayed and echoed reports make the fused picture look more certain than it is. | Only each agent's own tracks are ever shared, the fused world is never fed back, and fusion uses covariance intersection, which is safe under unknown correlation. |
+| **Double counting** | Relayed and echoed reports make the fused picture look more certain than it is. | Only each agent's own tracks are ever shared, no fused estimate is ever fed back (only object IDs travel back, as labels), and fusion uses covariance intersection, which is safe under unknown correlation. |
 | **Different sizes** | A truck seen from opposite ends looks like two objects, and a car beside a truck can look like one. | Detections can carry oriented boxes. Sizes and headings must agree for reports to fuse, and a detector's systematic center error from seeing only part of an object is published as uncertainty. |
 | **Untrusted data** | A robot can be miscalibrated, compromised or impersonated. | Every batch is Ed25519-signed and validated; replays and forgeries are rejected; a consistency monitor inflates or excludes sources that disagree with their peers. |
 
@@ -37,7 +37,7 @@ Three things make this hard, and GodView handles each one:
 2. **Signed reports.** Each track is published in ECEF with a full covariance that includes the agent's pose and clock uncertainty, in a versioned binary format with an Ed25519 signature over every byte.
 3. **Cell topics.** Reports travel on one Zenoh topic per H3 cell. A node subscribes only to the cells around itself, so what it receives depends on what is near it, not on the size of the fleet.
 4. **Report store.** Received reports go into a last-writer-wins store keyed by source and track. Duplicated, reordered and relayed messages all converge to the same store.
-5. **World model.** Each agent computes the shared world from its store: predict to a common time, find candidates with an H3 index, gate on position and velocity, cluster with at most one track per source, and fuse by covariance intersection. Each object is named after its longest-tracked member, so a source that joins later never renames it. The same store always gives a bit-identical world, IDs included.
+5. **World model.** Each agent computes the shared world from its store: predict to a common time, find candidates with an H3 index, gate on position and velocity, cluster with at most one track per source, and fuse by covariance intersection. Each report also carries the ID its track belongs to, so an object keeps its ID as it is handed from one agent's sensors to the next. The same store always gives a bit-identical world, IDs included.
 
 The full contract, frames, formats and parameters are in [docs/PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md).
 
@@ -98,7 +98,7 @@ my_detector | target/release/godview-node --connect tcp/<peer>:7447
 - a real radio network;
 - many agents or many objects (scale is not benchmarked);
 - boxes from a real detector (simulated detectors only so far);
-- world-object IDs that survive handoffs: a source joining no longer renames an object, but the ID still changes when the track holding it ends, which happens at almost every handoff when objects drive past a row of sensors;
+- re-identification: an object that drops out of every sensor's view and reappears gets a new ID;
 - Biscuit capability checks per batch;
 - revocations that survive a restart.
 

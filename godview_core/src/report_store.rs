@@ -215,6 +215,7 @@ mod tests {
             lifecycle: TrackLifecycle::Confirmed,
             valid_for_ms: 1000,
             born: Timestamp::from_millis(0),
+            name: None,
             object_box: None,
         }
     }

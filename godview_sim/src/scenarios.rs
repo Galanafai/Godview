@@ -372,7 +372,7 @@ impl ScenarioId {
             ScenarioId::BiasedSource => "Unreported 6 m bias detected and excluded",
             ScenarioId::CrossingTargets => "Objects passing within 1.5 m keep identities",
             ScenarioId::LargeObjects => "Boxes: a truck seen from opposite ends is one object, with its size and heading",
-            ScenarioId::HandoffIds => "IDs survive sources joining and leaving; only a departing holder renames",
+            ScenarioId::HandoffIds => "IDs survive handoffs between agents and never jump between objects",
             ScenarioId::ObjectExpiry => "Disappearing objects dropped, new ones confirmed",
             ScenarioId::EchoChamber => "Relayed echoes never reduce uncertainty",
             ScenarioId::AgentRestart => "Restarted agent's new epoch accepted on reconnection",

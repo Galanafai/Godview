@@ -26,7 +26,8 @@ use crate::frames::{add_clock_uncertainty, Ecef};
 use crate::local_tracker::{Detection, LocalTrack, LocalTracker, LocalTrackerConfig, ScanOutcome};
 use crate::localization::{LocalizationStatus, PoseEstimate};
 use crate::report::{
-    quantize_covariance, AgentId, FrameRef, ReportBatch, ReportError, TrackLifecycle, TrackReport,
+    quantize_covariance, AgentId, FrameRef, LocalTrackId, ReportBatch, ReportError, ReportKey,
+    TrackLifecycle, TrackReport,
 };
 use crate::report_store::{InsertOutcome, ReportStore};
 use crate::topics::topic_cell;
@@ -169,6 +170,10 @@ pub struct PerceptionNode {
     revoked: BTreeSet<AgentId>,
     /// Terminated tracks and the time until which their tombstone is re-published.
     tombstones: Vec<(LocalTrack, Timestamp)>,
+    /// For each own track, the world-object ID it belonged to in this node's
+    /// latest world when that ID is another track's key; published as the
+    /// report's `name` so the ID can outlive the track that started it.
+    names: BTreeMap<LocalTrackId, ReportKey>,
     stats: NodeStats,
 }
 
@@ -188,6 +193,7 @@ impl PerceptionNode {
             config,
             revoked: BTreeSet::new(),
             tombstones: Vec::new(),
+            names: BTreeMap::new(),
             stats: NodeStats::default(),
         }
     }
@@ -251,6 +257,7 @@ impl PerceptionNode {
         self.next_seq = 0;
         self.tracker = LocalTracker::new(self.config.tracker);
         self.tombstones.clear();
+        self.names.clear();
     }
 
     /// Builds, signs and returns a batch reporting every published track at `t_valid`.
@@ -380,6 +387,7 @@ impl PerceptionNode {
                 lifecycle: track.lifecycle,
                 valid_for_ms,
                 born: track.created.min(t_valid),
+                name: self.names.get(&track.id).copied(),
                 object_box: odom_box
                     .map(|b| match global {
                         Some(g) => box_to_enu(&b, &g.ecef_from_odom, &Ecef::new(x[0], x[1], x[2])),
@@ -480,13 +488,28 @@ impl PerceptionNode {
     /// The shared world state at `t`, with this node's trust judgment applied.
     ///
     /// Updates the consistency monitor from the reports live at `t` first.
+    ///
+    /// Also records, for each of this node's own tracks, the ID of the world
+    /// object it belongs to, which the next publish carries as its name.
     pub fn world(&mut self, t: Timestamp) -> WorldSnapshot {
-        if self.config.disable_trust {
-            return self.world.snapshot(&self.store, t, &TrustView::default());
-        }
-        self.monitor.observe(&self.store, t);
-        let view = self.monitor.trust_view();
-        self.world.snapshot(&self.store, t, &view)
+        let snap = if self.config.disable_trust {
+            self.world.snapshot(&self.store, t, &TrustView::default())
+        } else {
+            self.monitor.observe(&self.store, t);
+            let view = self.monitor.trust_view();
+            self.world.snapshot(&self.store, t, &view)
+        };
+        self.names = snap
+            .objects
+            .iter()
+            .flat_map(|o| {
+                o.members
+                    .iter()
+                    .filter(|((src, tr), _)| *src == self.id && (*src, *tr) != o.id)
+                    .map(|((_, tr), _)| (*tr, o.id))
+            })
+            .collect();
+        snap
     }
 
     /// The shared world state at `t` with no trust adjustments.

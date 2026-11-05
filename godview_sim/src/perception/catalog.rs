@@ -1381,10 +1381,12 @@ fn large_objects(seed: u64) -> ScenarioOutcome {
 }
 
 const HANDOFF_IDS: &str = "Objects drive past a row of agents with short sensor range, in both directions, so \
-sources keep joining and leaving each object. A world object's ID changes only when the track holding it leaves the \
-object or an older track joins it: a source that starts tracking an object later never renames it. The earlier \
-smallest-key rule does rename objects in the same run (checked as an ablation). Every object passes through at \
-least three holders, and all agents converge to the same world, IDs included.";
+sources keep joining and leaving each object. With names carried in the reports (lineage), each object keeps one ID \
+for its whole drive past (at most two changes per run are tolerated, for a cluster that splits for one snapshot), \
+and no ID is ever given to two physical objects. In the same run under the oldest-track rule every change is its \
+holder leaving or an older track joining and every object passes through at least three holders (handoffs are \
+exercised), and the smallest-key rule renames objects on a join. All agents converge to the same world, IDs \
+included.";
 
 /// For each agent and object, the IDs it shows over time and the changes the
 /// ID rule cannot explain (not "holder left" and not "an older track joined").
@@ -1467,23 +1469,49 @@ fn handoff_ids(seed: u64) -> ScenarioOutcome {
     spec.objects = objects;
     let rec = run(&spec);
     let agents = [0, 1, 2, 3];
-    let (changes, unexplained, first, holders) = id_history(&rec, &agents);
     let mut c = Checker::new("handoff_ids", seed);
+    // Lineage (the default rule): IDs travel with the reports' names. An ID
+    // must never move to a different physical object.
+    let (changes, _, _, named) = id_history(&rec, &agents);
+    let mut objects_per_id: std::collections::BTreeMap<ReportKey, BTreeSet<u64>> =
+        Default::default();
+    for (truth, id) in &named {
+        objects_per_id.entry(*id).or_default().insert(*truth);
+    }
+    c.check(changes <= 2, || {
+        format!("lineage: {changes} ID changes; objects should keep one ID while they stay covered")
+    });
+    for (id, truths) in &objects_per_id {
+        c.check(truths.len() == 1, || {
+            format!(
+                "ID {}:{} was given to objects {truths:?}",
+                id.0.short(),
+                id.1 .0
+            )
+        });
+    }
+    // Oldest-track rule: every change must be its holder leaving or an older
+    // track joining, and every object must pass through at least three
+    // holders, which shows the run exercises handoffs.
+    let mut oldest = spec.clone();
+    oldest.node.world.id_rule = IdRule::OldestTrack;
+    let oldest_rec = run(&oldest);
+    let (oldest_changes, unexplained, first, holders) = id_history(&oldest_rec, &agents);
     for f in first {
         c.fail(f);
     }
     c.check(unexplained == 0, || {
-        format!("{unexplained} of {changes} ID changes not explained by the holder leaving or an older track joining")
+        format!("oldest-track rule: {unexplained} of {oldest_changes} ID changes not explained by the holder leaving or an older track joining")
     });
-    // Every object is handed through at least three holders (the scenario
-    // exercises leaves, not only joins).
     for id in 0..spec.objects.len() as u64 {
         let n = holders.iter().filter(|(o, _)| *o == id).count();
         c.check(n >= 3, || {
-            format!("object {id} had {n} holders; handoffs not exercised")
+            format!(
+                "object {id} had {n} holders under the oldest-track rule; handoffs not exercised"
+            )
         });
     }
-    // Ablation: the smallest-key rule renames objects when a source joins.
+    // Smallest-key rule: renames objects when a source joins.
     let mut old = spec.clone();
     old.node.world.id_rule = IdRule::SmallestKey;
     let old_rec = run(&old);
@@ -1499,6 +1527,7 @@ fn handoff_ids(seed: u64) -> ScenarioOutcome {
         HANDOFF_IDS,
         vec![
             ("id_changes", changes.to_string()),
+            ("oldest_track_rule_changes", oldest_changes.to_string()),
             (
                 "smallest_key_rule_changes",
                 format!("{old_changes} ({old_unexplained} on a join)"),

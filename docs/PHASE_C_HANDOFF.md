@@ -28,10 +28,11 @@ covariances that are honest (NEES), and with how many ID changes per object?
 ## Plan
 
 Work on a new branch, `feat/v2v4real-replay`, created from
-`feat/boxes-ids-real-data`. Another session is changing the world model's ID
-rule on `feat/boxes-ids-real-data` at the same time, so keep your changes in
-new files where possible and do not edit `report.rs` or `world_model.rs`.
-Rebase onto the updated branch when told it has moved.
+`feat/boxes-ids-real-data`. Another session may keep working on
+`feat/boxes-ids-real-data`, so keep your changes in new files where possible
+and do not edit `report.rs` or `world_model.rs` without asking. World-object
+IDs now follow tracks through handoffs (`IdRule::Lineage`); count ID changes
+per object in the replay, since real data is the first real test of that.
 
 1. **Data.** Get the smallest useful part first: one test split (test1), not
    the whole dataset. The data is on UCLA Box:

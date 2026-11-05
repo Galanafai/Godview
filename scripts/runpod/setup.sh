@@ -5,13 +5,13 @@
 # disk and is wiped when the pod restarts. Rust, the repo and the data are
 # kept under /workspace, which persists.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Galanafai/godview/feat/boxes-ids-real-data/scripts/runpod/setup.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Galanafai/Godview/feat/boxes-ids-real-data/scripts/runpod/setup.sh | bash
 #   source /workspace/godview.env
 set -euo pipefail
 
 WS=${WS:-/workspace}
 BRANCH=${BRANCH:-feat/boxes-ids-real-data}
-REPO_URL=${REPO_URL:-https://github.com/Galanafai/godview.git}
+REPO_URL=${REPO_URL:-https://github.com/Galanafai/Godview.git}
 REPO_DIR=$WS/godview
 DATA_DIR=$WS/data/v2v4real
 

@@ -67,6 +67,16 @@ pub struct BoxSensorSpec {
     /// part must be declared through the tracker's `box_center_sys_frac`
     /// (`partial_view / 2` matches it exactly).
     pub partial_view: f64,
+    /// Systematic size error (m): `size_bias_m · g` is added to each
+    /// dimension, with `g ~ N(0, 1)` drawn once per (agent, object, dimension)
+    /// and kept for the whole run, like an annotator or detector that always
+    /// gets one vehicle's size wrong the same way. It is not in the
+    /// detection's variances; declare it through the tracker's
+    /// `box_size_sys_m` (equal values match exactly).
+    pub size_bias_m: f64,
+    /// Systematic heading error (rad), drawn the same way; declare it through
+    /// the tracker's `box_yaw_sys_rad`.
+    pub yaw_bias_rad: f64,
 }
 
 impl Default for BoxSensorSpec {
@@ -76,8 +86,19 @@ impl Default for BoxSensorSpec {
             sigma_yaw_rad: 0.05,
             ambiguous: true,
             partial_view: 0.0,
+            size_bias_m: 0.0,
+            yaw_bias_rad: 0.0,
         }
     }
+}
+
+/// The fixed bias draws `[g_l, g_w, g_h, g_yaw]` of one (agent, object) pair.
+/// Seeded from the pair alone, so they do not disturb any other noise stream.
+fn bias_draws(seed: u64, agent: usize, object: u64) -> [f64; 4] {
+    let mut rng = ChaCha8Rng::seed_from_u64(
+        seed ^ 0xb1a5_0000_0000_0000 ^ ((agent as u64) << 40) ^ object.wrapping_mul(0x9e37_79b9),
+    );
+    [0; 4].map(|_| randn(&mut rng))
 }
 
 /// Sensor model of an agent.
@@ -698,7 +719,7 @@ pub fn run(spec: &ScenarioSpec) -> RunRecord {
             .iter()
             .map(|e| (e.id, e.position))
             .collect();
-        for ag in agents.iter_mut() {
+        for (ai, ag) in agents.iter_mut().enumerate() {
             if ag.spec.behavior != Behavior::Honest {
                 continue;
             }
@@ -743,7 +764,14 @@ pub fn run(spec: &ScenarioSpec) -> RunRecord {
                         shift = axis * (part * a);
                         r_enu += axis * axis.transpose() * (a * a / 12.0);
                     }
-                    let mut yaw = heading + ny * bs.sigma_yaw_rad - ag.spec.odom_yaw_rad;
+                    let bias = if bs.size_bias_m > 0.0 || bs.yaw_bias_rad > 0.0 {
+                        bias_draws(spec.seed, ai, *id)
+                    } else {
+                        [0.0; 4]
+                    };
+                    let sz = [0, 1, 2].map(|i| (sz[i] + bs.size_bias_m * bias[i]).max(0.2));
+                    let mut yaw = heading + bias[3] * bs.yaw_bias_rad + ny * bs.sigma_yaw_rad
+                        - ag.spec.odom_yaw_rad;
                     if bs.ambiguous && flip < 0.5 {
                         yaw += std::f64::consts::PI;
                     }

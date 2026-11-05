@@ -85,6 +85,13 @@ pub struct LocalTrackerConfig {
     /// does not average out, so it is added to published covariances (see
     /// [`crate::extent::center_sys_cov`]) rather than to the measurement noise.
     pub box_center_sys_frac: f64,
+    /// Systematic size error of the detector (m, standard deviation, every
+    /// dimension; 0 trusts the detector's variances). Added to published size
+    /// variances (see [`crate::extent::with_systematic`]).
+    pub box_size_sys_m: f64,
+    /// Systematic heading error of the detector (rad, standard deviation),
+    /// added to published heading variances.
+    pub box_yaw_sys_rad: f64,
 }
 
 impl Default for LocalTrackerConfig {
@@ -104,6 +111,8 @@ impl Default for LocalTrackerConfig {
             box_gate: BoxGate::default(),
             box_model: BoxModel::default(),
             box_center_sys_frac: 0.0,
+            box_size_sys_m: 0.0,
+            box_yaw_sys_rad: 0.0,
         }
     }
 }

@@ -120,6 +120,29 @@ sides have a box.
   added to published covariances along the box's axes. In the
   `large_objects` scenario, every seed shows the truck or bus duplicated
   without it and none with it.
+* **Systematic size and heading errors.** The same holds for size and
+  heading: a detector or an annotator that gets one vehicle's size wrong by
+  the same amount on every scan produces an error the track cannot average
+  out, so two sources' converged tracks disagree by more than their
+  shrinking variances allow and the box gate splits the object. This was
+  found in real data: in the V2V4Real replay (branch `feat/v2v4real-replay`)
+  the two cars' annotators gave the same vehicle sizes up to about 1 m
+  apart, and the size gate was the largest single cause of split objects.
+  `box_size_sys_m` (m, every dimension) and `box_yaw_sys_rad` declare these
+  errors; they are added to published size and heading variances
+  (`extent::with_systematic`). In `large_objects`, whose simulated detectors
+  now also carry a fixed size (0.4 m) and heading (0.05 rad) bias per agent
+  and object, every sample is split without the declaration and none with
+  it, and the pooled size NEES of fused boxes is 2.4 to 4.2 over 15 seeds
+  (3 expected).
+* **Why the size error is absolute.** A first version declared it as a
+  fraction of each source's own size estimate. Then a source that
+  underestimates a size also claims a smaller variance, covariance
+  intersection favors it, and the fused size is pulled toward the smallest
+  estimate with an understated variance (pooled size NEES up to 8.8 against
+  3). An absolute error gives every source the same variance. The center
+  error above is still a fraction of each source's own length estimate and
+  has the same structure; its effect on position has not been measured.
 
 The world object, the consumer `Entity` (`oriented_box`), the node's JSON
 report and the node's stdin input all carry boxes.

@@ -385,6 +385,9 @@ association and fusion, not perception quality.
   (22.1 s, 10 Hz, 221 frames); short loop:
   [`docs/media/v2v4real_shared_view.gif`](../media/v2v4real_shared_view.gif)
   (8 s at 5 frames per second).
+* 4:5 version for phones: [`docs/media/v2v4real_linkedin.mp4`](../media/v2v4real_linkedin.mp4)
+  (1080x1350, 15 s, frames 41 to 190 of the same dumps; car B alone on top,
+  car B's shared world below; `scripts/v2v4real/render_linkedin.py`).
 * "Car A alone" and "Car B alone" come from a replay with `--no-sharing`
   (each car fuses only its own reports); "Shared view" is car 0's world in
   the normal replay (car 1's shared world is the same up to the 100 ms

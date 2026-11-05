@@ -17,15 +17,17 @@
 
 use super::bus::{LinkFaults, Topology};
 use super::harness::{
-    run, AdversarySpec, AgentSpec, Behavior, LocalizationSpec, ObjectSpec, PartitionSpec,
-    RunRecord, ScenarioSpec, SensorSpec, TruthSample,
+    run, AdversarySpec, AgentSpec, Behavior, BoxSensorSpec, LocalizationSpec, ObjectSpec,
+    PartitionSpec, RunRecord, ScenarioSpec, SensorSpec, TruthSample,
 };
 use super::metrics::mean_chi2_bounds;
 use godview_core::consistency::SourceStatus;
+use godview_core::extent::yaw_residual;
 use godview_core::frames::{EnuFrame, Geodetic};
 use godview_core::godview_space::SpatialEngine;
 use godview_core::perception_node::RejectReason;
-use godview_core::report::ReportError;
+use godview_core::report::{ReportError, ReportKey};
+use godview_core::world_model::IdRule;
 use h3o::Resolution;
 use nalgebra::Vector3;
 use rand::{Rng, SeedableRng};
@@ -128,6 +130,16 @@ pub fn catalog() -> Vec<Entry> {
             name: "crossing_targets",
             invariant: CROSSING,
             run: crossing_targets,
+        },
+        Entry {
+            name: "large_objects",
+            invariant: LARGE_OBJECTS,
+            run: large_objects,
+        },
+        Entry {
+            name: "handoff_ids",
+            invariant: HANDOFF_IDS,
+            run: handoff_ids,
         },
         Entry {
             name: "object_expiry",
@@ -1234,6 +1246,326 @@ fn crossing_targets(seed: u64) -> ScenarioOutcome {
         Some(&rec),
         CROSSING,
         vec![("samples_with_errors", format!("{bad}/{total}"))],
+    )
+}
+
+const LARGE_OBJECTS: &str = "Cars, vans, trucks and buses are reported as oriented boxes by detectors that see only \
+part of an object (the measured center moves up to a quarter of the length toward the sensor, with that uncertainty \
+reported), that get each object's size and heading wrong by a fixed amount per agent (0.4 m per dimension and 0.05 \
+rad, standard deviation, as the human annotators of the V2V4Real dataset do), and that cannot tell front from back. Each \
+object is still one world object, fused from every agent that sees \
+it from whatever side; every world object carries a box whose size is consistent with its reported uncertainty \
+(pooled NEES below 6) and whose heading is within five declared standard deviations of the truth (at least 15 and at most 30 degrees), modulo 180 degrees unless the object \
+moves, in which case front and back are resolved. The same run without declaring the detector's systematic center \
+error must show duplicates, and so must the run without declaring its systematic size and heading errors.";
+
+fn large_objects(seed: u64) -> ScenarioOutcome {
+    let mut spec = ScenarioSpec::new("large_objects", seed);
+    spec.duration_s = 10.0;
+    spec.agents = ring(4, 45.0);
+    let partial_view = 0.5;
+    let (size_bias_m, yaw_bias_rad) = (0.4, 0.05);
+    for a in &mut spec.agents {
+        a.sensor.boxes = Some(BoxSensorSpec {
+            partial_view,
+            size_bias_m,
+            yaw_bias_rad,
+            ..BoxSensorSpec::default()
+        });
+    }
+    // The detector's systematic errors, declared so they are published.
+    spec.node.tracker.box_center_sys_frac = partial_view / 2.0;
+    spec.node.tracker.box_size_sys_m = size_bias_m;
+    spec.node.tracker.box_yaw_sys_rad = yaw_bias_rad;
+    let sizes = [
+        (4.5, 1.8, 1.5),
+        (12.0, 2.5, 3.5),
+        (12.0, 2.6, 3.2),
+        (5.5, 2.0, 2.2),
+    ];
+    spec.objects = separated_objects(seed, 4, 25.0, 2.0, spec.duration_s, 16.0)
+        .into_iter()
+        .zip(sizes)
+        .map(|(o, (l, w, h))| o.with_size(l, w, h))
+        .collect();
+    let rec = run(&spec);
+    // Ablations: the same run without declaring the systematic center error,
+    // and without declaring the systematic size and heading errors. Each must
+    // split objects into duplicates, which shows the threat is exercised and
+    // that the declaration is what handles it.
+    let duplicate_samples = |r: &RunRecord| {
+        r.samples
+            .iter()
+            .filter(|s| s.t_s >= 2.5)
+            .flat_map(|s| (0..4).map(move |a| (s, a)))
+            .filter(|(s, a)| r.score(s, *a, CUTOFF_M, globally_observed).false_estimates > 0)
+            .count()
+    };
+    let mut blind = spec.clone();
+    blind.node.tracker.box_center_sys_frac = 0.0;
+    let ablation_dups = duplicate_samples(&run(&blind));
+    let mut blind_size = spec.clone();
+    blind_size.node.tracker.box_size_sys_m = 0.0;
+    blind_size.node.tracker.box_yaw_sys_rad = 0.0;
+    let size_ablation_dups = duplicate_samples(&run(&blind_size));
+    let mut c = Checker::new("large_objects", seed);
+    c.check(ablation_dups > 0, || {
+        "without the declared systematic center error no duplicate appeared; partial views not exercised"
+            .into()
+    });
+    c.check(size_ablation_dups > 0, || {
+        "without the declared systematic size and heading errors no duplicate appeared; biases not exercised"
+            .into()
+    });
+    c.tracked_world(
+        &rec,
+        &[0, 1, 2, 3],
+        2.5,
+        f64::INFINITY,
+        2.0,
+        globally_observed,
+    );
+    let mut size_nees = Vec::new();
+    let mut worst_heading = 0.0f64;
+    let mut heading_nees = Vec::new();
+    for s in rec.samples.iter().filter(|s| s.t_s >= 3.0) {
+        let truths: Vec<&TruthSample> = s.truths.iter().filter(|t| globally_observed(t)).collect();
+        for a in 0..4 {
+            let sc = rec.score(s, a, CUTOFF_M, globally_observed);
+            let objects = &s.agents[a].world.objects;
+            for &(e, ti) in &sc.pairs {
+                let (Some(b), Some((size, heading))) =
+                    (objects[e].object_box, truths[ti].object_box)
+                else {
+                    c.fail(format!(
+                        "t={:.2}s agent {a}: world object without a box",
+                        s.t_s
+                    ));
+                    continue;
+                };
+                size_nees.push(
+                    (0..3)
+                        .map(|i| (b.size[i] - size[i]).powi(2) / b.size_var[i])
+                        .sum::<f64>(),
+                );
+                let err = yaw_residual(b.yaw, heading, b.yaw_ambiguous).abs();
+                worst_heading = worst_heading.max(err);
+                heading_nees.push(err * err / b.yaw_var);
+                // Within five declared standard deviations, never tighter than
+                // 15 degrees and never looser than 30: a fused heading comes
+                // from one source, so it carries that source's whole bias, and
+                // a 4-sigma bias draw (seen in CI) must not fail an honest
+                // estimate, while a backwards or grossly wrong heading must.
+                let bound = (5.0 * b.yaw_var.sqrt()).clamp(15f64.to_radians(), 30f64.to_radians());
+                c.check(err < bound, || {
+                    format!(
+                        "t={:.2}s agent {a}: heading {:.1} deg off, bound {:.1} (ambiguous: {})",
+                        s.t_s,
+                        err.to_degrees(),
+                        bound.to_degrees(),
+                        b.yaw_ambiguous
+                    )
+                });
+            }
+        }
+    }
+    let pooled = size_nees.iter().sum::<f64>() / size_nees.len().max(1) as f64;
+    c.check(!size_nees.is_empty() && pooled < 6.0, || {
+        format!(
+            "pooled size NEES {pooled:.2} over {} estimates",
+            size_nees.len()
+        )
+    });
+    c.converged(&rec);
+    c.finish(
+        Some(&rec),
+        LARGE_OBJECTS,
+        vec![
+            (
+                "pooled_size_nees",
+                format!("{pooled:.2} (n={})", size_nees.len()),
+            ),
+            (
+                "worst_heading_deg",
+                format!("{:.1}", worst_heading.to_degrees()),
+            ),
+            (
+                "pooled_heading_nees",
+                format!(
+                    "{:.2} (expect 1)",
+                    heading_nees.iter().sum::<f64>() / heading_nees.len().max(1) as f64
+                ),
+            ),
+            (
+                "mean_rms_m",
+                format!("{:.3}", mean_rms(&rec, &[0, 1, 2, 3], 2.5)),
+            ),
+            (
+                "ablation_duplicate_agent_samples",
+                ablation_dups.to_string(),
+            ),
+            (
+                "size_ablation_duplicate_agent_samples",
+                size_ablation_dups.to_string(),
+            ),
+        ],
+    )
+}
+
+const HANDOFF_IDS: &str = "Objects drive past a row of agents with short sensor range, in both directions, so \
+sources keep joining and leaving each object. With names carried in the reports (lineage), each object keeps one ID \
+for its whole drive past (at most two changes per run are tolerated, for a cluster that splits for one snapshot), \
+and no ID is ever given to two physical objects. In the same run under the oldest-track rule every change is its \
+holder leaving or an older track joining and every object passes through at least three holders (handoffs are \
+exercised), and the smallest-key rule renames objects on a join. All agents converge to the same world, IDs \
+included.";
+
+/// For each agent and object, the IDs it shows over time and the changes the
+/// ID rule cannot explain (not "holder left" and not "an older track joined").
+fn id_history(
+    rec: &RunRecord,
+    agents: &[usize],
+) -> (usize, usize, Vec<String>, BTreeSet<(u64, ReportKey)>) {
+    type Seen = (ReportKey, godview_env::Timestamp, BTreeSet<ReportKey>);
+    let mut changes = 0;
+    let mut unexplained = 0;
+    let mut first = Vec::new();
+    let mut holders = BTreeSet::new();
+    for &a in agents {
+        let mut prev: std::collections::BTreeMap<u64, (usize, Seen)> = Default::default();
+        for (si, s) in rec.samples.iter().enumerate() {
+            let truths: Vec<&TruthSample> =
+                s.truths.iter().filter(|t| globally_observed(t)).collect();
+            let sc = rec.score(s, a, CUTOFF_M, globally_observed);
+            for &(e, ti) in &sc.pairs {
+                let o = &s.agents[a].world.objects[e];
+                let id = truths[ti].id;
+                let members: BTreeSet<ReportKey> = o.members.iter().map(|(k, _)| *k).collect();
+                holders.insert((id, o.id));
+                if let Some((pi, (pid, pborn, _))) = prev.get(&id) {
+                    if *pi + 1 == si && *pid != o.id {
+                        changes += 1;
+                        let holder_left = !members.contains(pid);
+                        let older_joined = o.born < *pborn;
+                        if !holder_left && !older_joined {
+                            unexplained += 1;
+                            if first.len() < 4 {
+                                first.push(format!(
+                                    "t={:.2}s agent {a} object {id}: renamed while its holder stayed and the new \
+                                     holder is younger",
+                                    s.t_s
+                                ));
+                            }
+                        }
+                    }
+                }
+                prev.insert(id, (si, (o.id, o.born, members)));
+            }
+        }
+    }
+    (changes, unexplained, first, holders)
+}
+
+fn handoff_ids(seed: u64) -> ScenarioOutcome {
+    let mut spec = ScenarioSpec::new("handoff_ids", seed);
+    // Long enough for the leading objects to pass all four agents, short
+    // enough that none leaves the covered road (the tracking checks would then
+    // see its coasting track as a false estimate, which is not this test).
+    spec.duration_s = 26.0;
+    spec.agents = (0..4)
+        .map(|i| {
+            let mut a = AgentSpec::at(Vector3::new(40.0 * i as f64, -12.0, 2.0));
+            a.odom_yaw_rad = 0.9 * i as f64 - 1.3;
+            a.odom_offset_enu = Vector3::new(-2.0 * i as f64, 3.0 * i as f64, 0.5);
+            a.sensor.range_m = 32.0;
+            a
+        })
+        .collect();
+    // Eastbound on y = 0, westbound on y = 6, both directions so that every
+    // pair of neighbors has a joiner with the smaller key in one direction.
+    let mut rng = ChaCha8Rng::seed_from_u64(seed ^ 0x1d5);
+    let mut objects = Vec::new();
+    for (x0, y, dir) in [
+        (-40.0, 0.0, 1.0),
+        (-72.0, 0.0, 1.0),
+        (160.0, 6.0, -1.0),
+        (192.0, 6.0, -1.0),
+    ] {
+        let speed = rng.gen_range(6.5..7.5);
+        let x0 = x0 + rng.gen_range(-2.0..2.0);
+        objects.push(ObjectSpec::moving(
+            Vector3::new(x0, y, 1.0),
+            Vector3::new(dir * speed, 0.0, 0.0),
+        ));
+    }
+    spec.objects = objects;
+    let rec = run(&spec);
+    let agents = [0, 1, 2, 3];
+    let mut c = Checker::new("handoff_ids", seed);
+    // Lineage (the default rule): IDs travel with the reports' names. An ID
+    // must never move to a different physical object.
+    let (changes, _, _, named) = id_history(&rec, &agents);
+    let mut objects_per_id: std::collections::BTreeMap<ReportKey, BTreeSet<u64>> =
+        Default::default();
+    for (truth, id) in &named {
+        objects_per_id.entry(*id).or_default().insert(*truth);
+    }
+    c.check(changes <= 2, || {
+        format!("lineage: {changes} ID changes; objects should keep one ID while they stay covered")
+    });
+    for (id, truths) in &objects_per_id {
+        c.check(truths.len() == 1, || {
+            format!(
+                "ID {}:{} was given to objects {truths:?}",
+                id.0.short(),
+                id.1 .0
+            )
+        });
+    }
+    // Oldest-track rule: every change must be its holder leaving or an older
+    // track joining, and every object must pass through at least three
+    // holders, which shows the run exercises handoffs.
+    let mut oldest = spec.clone();
+    oldest.node.world.id_rule = IdRule::OldestTrack;
+    let oldest_rec = run(&oldest);
+    let (oldest_changes, unexplained, first, holders) = id_history(&oldest_rec, &agents);
+    for f in first {
+        c.fail(f);
+    }
+    c.check(unexplained == 0, || {
+        format!("oldest-track rule: {unexplained} of {oldest_changes} ID changes not explained by the holder leaving or an older track joining")
+    });
+    for id in 0..spec.objects.len() as u64 {
+        let n = holders.iter().filter(|(o, _)| *o == id).count();
+        c.check(n >= 3, || {
+            format!(
+                "object {id} had {n} holders under the oldest-track rule; handoffs not exercised"
+            )
+        });
+    }
+    // Smallest-key rule: renames objects when a source joins.
+    let mut old = spec.clone();
+    old.node.world.id_rule = IdRule::SmallestKey;
+    let old_rec = run(&old);
+    let (old_changes, old_unexplained, _, _) = id_history(&old_rec, &agents);
+    c.check(old_unexplained > 0, || {
+        "the smallest-key rule never renamed an object on a join; joins not exercised".into()
+    });
+    let rms = mean_rms(&rec, &agents, 2.0);
+    c.check(rms < 1.0, || format!("mean matched RMS {rms:.3} m"));
+    c.converged(&rec);
+    c.finish(
+        Some(&rec),
+        HANDOFF_IDS,
+        vec![
+            ("id_changes", changes.to_string()),
+            ("oldest_track_rule_changes", oldest_changes.to_string()),
+            (
+                "smallest_key_rule_changes",
+                format!("{old_changes} ({old_unexplained} on a join)"),
+            ),
+            ("mean_rms_m", format!("{rms:.3}")),
+        ],
     )
 }
 

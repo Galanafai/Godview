@@ -20,12 +20,14 @@
 //!   it can touch state; rejections are counted by reason, never silent.
 
 use crate::consistency::{ConsistencyConfig, ConsistencyMonitor};
+use crate::extent::{box_to_enu, center_sys_cov, with_systematic};
 use crate::filter::CvState;
 use crate::frames::{add_clock_uncertainty, Ecef};
 use crate::local_tracker::{Detection, LocalTrack, LocalTracker, LocalTrackerConfig, ScanOutcome};
 use crate::localization::{LocalizationStatus, PoseEstimate};
 use crate::report::{
-    quantize_covariance, AgentId, FrameRef, ReportBatch, ReportError, TrackLifecycle, TrackReport,
+    quantize_covariance, AgentId, FrameRef, LocalTrackId, ReportBatch, ReportError, ReportKey,
+    TrackLifecycle, TrackReport,
 };
 use crate::report_store::{InsertOutcome, ReportStore};
 use crate::topics::topic_cell;
@@ -168,6 +170,10 @@ pub struct PerceptionNode {
     revoked: BTreeSet<AgentId>,
     /// Terminated tracks and the time until which their tombstone is re-published.
     tombstones: Vec<(LocalTrack, Timestamp)>,
+    /// For each own track, the world-object ID it belonged to in this node's
+    /// latest world when that ID is another track's key; published as the
+    /// report's `name` so the ID can outlive the track that started it.
+    names: BTreeMap<LocalTrackId, ReportKey>,
     stats: NodeStats,
 }
 
@@ -187,6 +193,7 @@ impl PerceptionNode {
             config,
             revoked: BTreeSet::new(),
             tombstones: Vec::new(),
+            names: BTreeMap::new(),
             stats: NodeStats::default(),
         }
     }
@@ -250,6 +257,7 @@ impl PerceptionNode {
         self.next_seq = 0;
         self.tracker = LocalTracker::new(self.config.tracker);
         self.tombstones.clear();
+        self.names.clear();
     }
 
     /// Builds, signs and returns a batch reporting every published track at `t_valid`.
@@ -333,6 +341,16 @@ impl PerceptionNode {
 
         let mut reports = Vec::with_capacity(entries.len());
         for (track, state) in entries {
+            let tc = &self.config.tracker;
+            let odom_box = track
+                .predicted_box(t_valid)
+                .map(|b| with_systematic(&b, tc.box_size_sys_m, tc.box_yaw_sys_rad));
+            let mut state = state;
+            if let Some(b) = odom_box {
+                let sys = center_sys_cov(&b, self.config.tracker.box_center_sys_frac);
+                let mut pp = state.p.fixed_view_mut::<3, 3>(0, 0);
+                pp += sys;
+            }
             let (frame, x, mut p) = match global {
                 Some(g) => {
                     let (x, p) = g.ecef_from_odom.transform_state(&state.x, &state.p);
@@ -371,6 +389,15 @@ impl PerceptionNode {
                 p_exist,
                 lifecycle: track.lifecycle,
                 valid_for_ms,
+                born: track.created.min(t_valid),
+                name: self.names.get(&track.id).copied(),
+                object_box: odom_box
+                    .map(|b| match global {
+                        Some(g) => box_to_enu(&b, &g.ecef_from_odom, &Ecef::new(x[0], x[1], x[2])),
+                        None => b,
+                    })
+                    .map(|b| b.quantized())
+                    .filter(|b| b.is_valid()),
             };
             if report.validate().is_err() {
                 continue;
@@ -464,13 +491,28 @@ impl PerceptionNode {
     /// The shared world state at `t`, with this node's trust judgment applied.
     ///
     /// Updates the consistency monitor from the reports live at `t` first.
+    ///
+    /// Also records, for each of this node's own tracks, the ID of the world
+    /// object it belongs to, which the next publish carries as its name.
     pub fn world(&mut self, t: Timestamp) -> WorldSnapshot {
-        if self.config.disable_trust {
-            return self.world.snapshot(&self.store, t, &TrustView::default());
-        }
-        self.monitor.observe(&self.store, t);
-        let view = self.monitor.trust_view();
-        self.world.snapshot(&self.store, t, &view)
+        let snap = if self.config.disable_trust {
+            self.world.snapshot(&self.store, t, &TrustView::default())
+        } else {
+            self.monitor.observe(&self.store, t);
+            let view = self.monitor.trust_view();
+            self.world.snapshot(&self.store, t, &view)
+        };
+        self.names = snap
+            .objects
+            .iter()
+            .flat_map(|o| {
+                o.members
+                    .iter()
+                    .filter(|((src, tr), _)| *src == self.id && (*src, *tr) != o.id)
+                    .map(|((_, tr), _)| (*tr, o.id))
+            })
+            .collect();
+        snap
     }
 
     /// The shared world state at `t` with no trust adjustments.
@@ -536,6 +578,7 @@ mod tests {
                         r: Matrix3::identity() * 0.04,
                         class_id: 1,
                         class_prob: 0.9,
+                        object_box: None,
                     }
                 })
                 .collect();
@@ -632,6 +675,78 @@ mod tests {
         }
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].cell, None);
+    }
+
+    #[test]
+    fn published_boxes_carry_heading_in_east_north_up_and_systematic_errors() {
+        // An agent whose odometry frame is rotated 0.7 rad sees a stationary 12 m
+        // truck whose length points 0.2 rad from its odometry x axis: the shared
+        // heading is 0.9 rad from East (modulo π, the detector is ambiguous), and
+        // the declared systematic center error widens the report along the truck;
+        // declared systematic size and heading errors widen the box variances.
+        let mut cfg = NodeConfig::default();
+        cfg.tracker.box_center_sys_frac = 0.25;
+        cfg.tracker.box_size_sys_m = 0.4;
+        cfg.tracker.box_yaw_sys_rad = 0.05;
+        let mut plain = Rig::new(8, Vector3::zeros(), 0.7);
+        let mut rig = Rig::new(8, Vector3::zeros(), 0.7);
+        rig.node = PerceptionNode::new(SigningKey::from_bytes(&[8; 32]), 1, cfg);
+        let truth = Vector3::new(20.0, 10.0, 1.0);
+        let mut last = (None, None);
+        for k in 0..6 {
+            let t = Timestamp::from_millis(k * 100);
+            for (r, out) in [(&mut plain, &mut last.0), (&mut rig, &mut last.1)] {
+                let z = r.odom.inverse().transform_point(&truth);
+                r.next_obs += 1;
+                r.node.ingest(&[Detection {
+                    obs_id: r.next_obs,
+                    t,
+                    z,
+                    r: Matrix3::identity() * 0.04,
+                    class_id: 1,
+                    class_prob: 0.9,
+                    object_box: Some(crate::extent::ObjectBox {
+                        size: [12.0, 2.5, 3.5],
+                        size_var: [0.04; 3],
+                        yaw: 0.2,
+                        yaw_var: 0.0025,
+                        yaw_ambiguous: true,
+                    }),
+                }]);
+                r.node.maintain(t);
+                *out = r.node.publish(t, Some(&r.pose(t))).or(out.take());
+            }
+        }
+        let decode =
+            |b: Option<Vec<u8>>| ReportBatch::verify_and_decode(&b.unwrap()).unwrap().reports[0];
+        let (p, s) = (decode(last.0), decode(last.1));
+        let b = s.object_box.expect("box published");
+        assert!(
+            crate::extent::wrap_half_pi(b.yaw - 0.9).abs() < 1e-3,
+            "yaw {}",
+            b.yaw
+        );
+        assert!((b.size[0] - 12.0).abs() < 0.05);
+        let pb = p.object_box.expect("box published");
+        let added = b.size_var[0] - pb.size_var[0];
+        assert!((added - 0.16).abs() < 1e-4, "size variance added {added}");
+        let added = b.yaw_var - pb.yaw_var;
+        assert!(
+            (added - 0.0025).abs() < 1e-5,
+            "heading variance added {added}"
+        );
+        let along = site().ecef_from_enu() * Vector3::new(0.9f64.cos(), 0.9f64.sin(), 0.0);
+        let var = |r: &TrackReport| {
+            let c = r.covariance();
+            let pp: Matrix3<f64> = c.fixed_view::<3, 3>(0, 0).into_owned();
+            along.dot(&(pp * along))
+        };
+        assert!(
+            var(&s) - var(&p) > 1.5f64.powi(2) * 0.99,
+            "systematic error added along the length: {} vs {}",
+            var(&s),
+            var(&p)
+        );
     }
 
     #[test]

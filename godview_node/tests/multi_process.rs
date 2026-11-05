@@ -166,6 +166,62 @@ fn four_nodes_under_network_faults_share_one_world() {
             "node {i}: {:?}",
             n.final_world.objects
         );
+        // Every object carries a fused box whose size matches one of the scene's vehicles.
+        for o in &n.final_world.objects {
+            let b = o.object_box.as_ref().expect("fused box");
+            let nearest = godview_node::synthetic::SIZES
+                .iter()
+                .map(|s| {
+                    (0..3)
+                        .map(|k| (s[k] - b.size_m[k]).abs())
+                        .fold(0.0, f64::max)
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                nearest < 0.5,
+                "node {i}: box {:?} matches no vehicle",
+                b.size_m
+            );
+        }
+        // Motion resolves front from back for objects faster than 1 m/s once
+        // their tracks are at least 1 s old (checked with margin at 1.5 m/s);
+        // slower ones may stay ambiguous. A resolved heading must point the
+        // way some object of that size moves, never backwards (the truck and
+        // the bus have nearly equal sizes, so both are candidates).
+        let truth = godview_node::synthetic::Truth::new(&godview_node::synthetic::SyntheticSpec {
+            seed: 7,
+            ring_agents: 4,
+            objects: 4,
+            duration_s: 9.5,
+            ..Default::default()
+        });
+        let fast = truth.objects.iter().filter(|(_, v)| v.norm() > 1.5).count();
+        let mut resolved = 0;
+        for o in &n.final_world.objects {
+            let b = o.object_box.as_ref().expect("fused box");
+            if b.heading_ambiguous {
+                continue;
+            }
+            resolved += 1;
+            let err = (0..truth.objects.len())
+                .filter(|&k| {
+                    truth.sizes[k].is_some_and(|s| (0..3).all(|d| (s[d] - b.size_m[d]).abs() < 0.5))
+                })
+                .map(|k| {
+                    godview_core::extent::wrap_pi(b.heading_deg.to_radians() - truth.heading_enu(k))
+                        .abs()
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                err < 30f64.to_radians(),
+                "node {i}: a resolved heading is {:.0} deg from every matching object's direction of travel",
+                err.to_degrees()
+            );
+        }
+        assert!(
+            resolved >= fast,
+            "node {i}: {resolved} headings resolved, {fast} objects move faster than 1.5 m/s"
+        );
         // During the run (real time, 20% loss): at most 5% of ticks with an
         // error after warm-up, never more than 3 in a row.
         let t = &n.tracking;
@@ -274,7 +330,7 @@ fn a_node_fed_json_lines_on_stdin_fuses_with_a_synthetic_peer() {
     // writes JSON lines into a node's stdin, while a synthetic node watches the
     // same scene. Each must end up fusing the other's reports.
     use godview_core::frames::{EnuFrame, Pose3};
-    use godview_node::input::{InputDetection, InputFrame, InputPose};
+    use godview_node::input::{InputBox, InputDetection, InputFrame, InputPose};
     use godview_node::synthetic::{site, SyntheticSpec, Truth};
     use nalgebra::Vector3;
     use std::io::Write;
@@ -362,6 +418,17 @@ fn a_node_fed_json_lines_on_stdin_fuses_with_a_synthetic_peer() {
                     sigma_m: 0.3,
                     class_id: 1,
                     class_prob: 0.9,
+                    // Boxes the same as the synthetic peer's objects, heading in this
+                    // agent's odometry frame (rotated 30 degrees from East).
+                    object_box: truth.sizes[j].map(|size| InputBox {
+                        length_m: size[0],
+                        width_m: size[1],
+                        height_m: size[2],
+                        yaw_deg: truth.heading_enu(j).to_degrees() - yaw_deg,
+                        sigma_size_m: 0.2,
+                        sigma_yaw_deg: 3.0,
+                        yaw_ambiguous: false,
+                    }),
                 }
             })
             .collect();
@@ -424,6 +491,19 @@ fn a_node_fed_json_lines_on_stdin_fuses_with_a_synthetic_peer() {
             "{name}: {:?}",
             r.final_world.objects
         );
+        // Boxes arrive through both inputs and over the wire, and fuse.
+        for o in &r.final_world.objects {
+            let b = o.object_box.as_ref().expect("fused box");
+            let nearest = godview_node::synthetic::SIZES
+                .iter()
+                .map(|s| (s[0] - b.size_m[0]).abs())
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                nearest < 0.5,
+                "{name}: box length {} matches no object",
+                b.size_m[0]
+            );
+        }
     }
     let _ = std::fs::remove_dir_all(dir);
 }

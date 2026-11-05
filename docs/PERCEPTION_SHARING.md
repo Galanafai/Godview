@@ -18,10 +18,14 @@ by the module documentation in `godview_core` (`frames`, `report`,
 
 Data flows one way: detections become local tracks, local tracks become
 reports, reports are stored, and the world model is a pure function of the
-store, the query time and the agent's trust view. Nothing from L3 is fed back
-into a local track or a report. This is what prevents double counting: a
+store, the query time and the agent's trust view. No estimate from L3 is fed
+back into a local track or a report. This is what prevents double counting: a
 source's information enters any fused estimate at most once, through that
-source's own latest report, however many times it was relayed or echoed.
+source's own latest report, however many times it was relayed or echoed. The
+one thing that does flow back is a label: a report may carry the ID its track
+belongs to in its source's world (section 6, step 5). Names never enter
+gating, clustering or fusion, and a unit test checks that they change no
+estimate or covariance.
 
 ## 2. Frames and uncertainty
 
@@ -80,18 +84,96 @@ object in the odometry frame.
 * Lifecycle: `Tentative` until 3 hits, `Confirmed`, `Coasting` after 0.3 s
   without data, `Terminated` after 1.5 s.
 
+## 3a. Object extent (oriented boxes)
+
+Detections may carry an oriented box (`extent::ObjectBox`): length, width and
+height with variances, and a heading with a variance. Many detectors cannot
+tell front from back, so a heading can be marked ambiguous (known modulo π).
+Points without a box remain the base case (radar tracks, aircraft, anything a
+sensor reports without a size), and every rule below applies only when both
+sides have a box.
+
+* **Tracking.** A track refines its size per axis from every box (with a
+  small process noise so it stays adaptive) and its heading with a filter
+  that wraps angles, modulo π when ambiguous. Once the track is at least
+  1 s old and its velocity is well determined and above 1 m/s, the direction
+  of travel picks front from back. The age limit matters because the
+  decision is kept: very young tracks claim far more velocity certainty than
+  they have (a 0.15 s old track reported 10.3 ± 2.6 m/s for an object moving
+  at 1.6 m/s), and one such track once fixed a heading backwards (found by
+  the 100-seed CI sweep). The velocity is not fused as a heading
+  measurement, since objects can move sideways.
+* **Gating.** Association, spawn suppression and duplicate pruning in the
+  local tracker, and pair and cluster gating in the world model, also
+  require the sizes (3 DOF, 99.99%) and headings (1 DOF, 99.99%) to agree
+  within their uncertainty. A car beside a truck is not merged even when
+  poor localization makes their positions indistinguishable (unit test
+  `box_gate_keeps_a_car_and_a_truck_apart_when_position_cannot`).
+* **Shared frame.** A report's heading is counterclockwise from East at the
+  object, converted with the agent's pose; the pose's heading uncertainty is
+  added to the box's.
+* **Fusion.** Sizes are fused by covariance intersection with a
+  trace-minimizing weight; for the scalar heading CI keeps the more certain
+  input, flipped by an unambiguous one if needed. Two inputs that both claim
+  to know front from back but disagree leave the fused heading ambiguous, so
+  one wrongly resolved source cannot turn the shared heading around.
+* **Partial views.** A detector that sees only part of an object places
+  the center toward the visible side, on every scan. That error does not
+  average out, so a filter that treats it as noise becomes confidently wrong,
+  and two agents viewing a truck from opposite ends then report it twice. A
+  detector's systematic center error is declared as `box_center_sys_frac` (a
+  standard deviation in fractions of the half-length and half-width) and
+  added to published covariances along the box's axes. In the
+  `large_objects` scenario, every seed shows the truck or bus duplicated
+  without it and none with it.
+* **Systematic size and heading errors.** The same holds for size and
+  heading: a detector or an annotator that gets one vehicle's size wrong by
+  the same amount on every scan produces an error the track cannot average
+  out, so two sources' converged tracks disagree by more than their
+  shrinking variances allow and the box gate splits the object. This was
+  found in real data: in the V2V4Real replay (branch `feat/v2v4real-replay`)
+  the two cars' annotators gave the same vehicle sizes up to about 1 m
+  apart, and the size gate was the largest single cause of split objects.
+  `box_size_sys_m` (m, every dimension) and `box_yaw_sys_rad` declare these
+  errors; they are added to published size and heading variances
+  (`extent::with_systematic`). In `large_objects`, whose simulated detectors
+  now also carry a fixed size (0.4 m) and heading (0.05 rad) bias per agent
+  and object, every sample is split without the declaration and none with
+  it, and the pooled size NEES of fused boxes is 2.4 to 4.2 over 15 seeds
+  (3 expected).
+* **Why the size error is absolute.** A first version declared it as a
+  fraction of each source's own size estimate. Then a source that
+  underestimates a size also claims a smaller variance, covariance
+  intersection favors it, and the fused size is pulled toward the smallest
+  estimate with an understated variance (pooled size NEES up to 8.8 against
+  3). An absolute error gives every source the same variance. The center
+  error above is still a fraction of each source's own length estimate and
+  has the same structure; its effect on position has not been measured.
+
+The world object, the consumer `Entity` (`oriented_box`), the node's JSON
+report and the node's stdin input all carry boxes.
+
 ## 4. Reports on the wire
 
 `ReportBatch` is a manually encoded, versioned, signed binary format
-(`"GVR"`, schema 1; 50 byte header, 159 bytes per ECEF report, 167 per local
-report, 64 byte Ed25519 signature). Every byte is covered by the signature; a
-test flips each byte in turn and requires rejection.
+(`"GVR"`, schema 3; 50 byte header, 169 bytes per ECEF report with neither a
+name nor a box, plus 40 for a name and 33 for a box, 177 per local report
+without them, 64 byte Ed25519 signature). Schemas 1 (no box) and 2 (no birth
+time, no name) are still decoded; their reports are taken as born at
+`t_valid`, without a name. Every byte is covered by the
+signature; a test flips each byte in turn and requires rejection.
 
 * `AgentId` is the source's Ed25519 verifying key, so a batch can only be
   signed by the source it names.
 * A report is identified by `(source, local track id)` and versioned by
   `(epoch, seq)`. The epoch increases on restart, so a restarted agent that
   reuses track ids replaces its old reports instead of colliding with them.
+* `born` is when the source created the track (its own clock). It is
+  constant over the track's life, must not be later than `t_valid`, and is
+  only used to name world objects (section 6).
+* `name` is optional: the ID of the world object the track belonged to in
+  the source's latest world, sent only when that ID is another track's key.
+  It is a label only (section 6).
 * Covariance is sent as the upper triangle in f32, quantized conservatively
   and validated (finite, positive definite, bounded) on receipt.
 * Termination is sent as a `Terminated` tombstone, republished for the
@@ -117,7 +199,7 @@ and query time give a bit-identical result on every agent.
 2. Candidate pairs are found with `SpatialIndex` (H3 partition over exact
    ECEF positions, with exact 3-D distance filtering, so pairs across cell
    edges are never lost) and gated on position and velocity (chi-square,
-   3 DOF, 99.99%).
+   3 DOF, 99.99%), and on box size and heading when both reports have boxes.
 3. Clusters are built under the constraint that a cluster holds at most one
    track per source; two clusters merge only if their fused estimates also
    gate.
@@ -125,10 +207,48 @@ and query time give a bit-identical result on every agent.
    weight (golden section search, ties broken to 0.5). CI is used because the
    correlation between sources (common localization infrastructure, shared
    process model) is unknown.
-5. World object ids are derived deterministically from the members.
+5. Each world object gets an ID (`IdRule::Lineage`). Every member claims
+   a name: the name its report carries, or its own key if it carries none.
+   The cluster takes the claim of its oldest member (the report whose track
+   was created first, ties broken by the smaller key). A claim that is the
+   key of a live track in another cluster is refused, because that track's
+   cluster owns it. Clusters are settled in order of their oldest member; a
+   cluster whose claim was refused or already taken moves to its next
+   member's claim, and finally to its oldest member's own key, which no
+   other cluster can take, so IDs are unique. The rule needs no memory
+   between snapshots, so agents with the same reports agree on IDs (the
+   snapshot digest includes them).
 
-`WorldObject::to_entity` converts to the consumer `Entity` (geodetic position
-and ENU covariance) for `SpatialEngine`.
+**What the ID rule does and does not give.** A node publishes, with each of
+its tracks, the ID that track belongs to in its own latest world. When the
+track that started an ID ends, the remaining members still carry the name,
+so the object keeps its ID through a chain of handoffs as long as each new
+source is fused with the object before the previous ones leave. In
+`handoff_ids` (objects driving past four short-range agents) objects kept one
+ID for the whole drive past in all 40 seeds run, and no ID was ever matched
+to two physical objects. In the same runs the oldest-track rule (names
+ignored) averaged about 41 ID changes per run and the smallest-key rule about
+45, 24 of them when a source joined.
+
+Limits:
+
+* If coverage has a gap, so that no track of the object survives until the
+  next source picks it up, the name is lost and the object gets a new ID.
+  Recognizing it again would need re-identification, which is not built.
+* A name is only as good as the association that produced it. If a source's
+  track jumps from one object to another, its name can carry an ID to the
+  wrong object. `handoff_ids` checks this does not happen in its geometry;
+  crossing objects at close range are covered only by `crossing_targets`,
+  which checks positions, not IDs.
+* Names and birth times are claims by the source. A validly signed source
+  can claim old tracks or names of ended tracks and so choose the IDs of the
+  objects it sees (a source with a small key could do this under the old
+  rule). It cannot take the ID of a live track in another object, and it
+  cannot change any estimate this way.
+* Names add up to 41 bytes per report.
+
+`WorldObject::to_entity` converts to the consumer `Entity` (geodetic position,
+ENU covariance and, if present, the oriented box) for `SpatialEngine`.
 
 ## 7. Trust
 
@@ -251,7 +371,7 @@ cargo run --release -p godview_sim -- --scenario split_brain --seed 3
 cargo run --release -p godview_sim -- --scenario legacy --seed 42
 ```
 
-`all` runs the 17 perception scenarios below. The 16 scenarios that exercise
+`all` runs the 19 perception scenarios below. The 16 scenarios that exercise
 the legacy `TrackManager` path are kept under `legacy`. `--duration` applies
 to legacy scenarios only; perception scenarios have fixed durations.
 
@@ -267,6 +387,8 @@ to legacy scenarios only; perception scenarios have fixed durations.
 | `slow_loris` | 50% loss: soft state keeps every object present. |
 | `biased_source` | Unreported 6 m bias detected and excluded by all honest agents; an ablation with trust disabled shows the ghosts. |
 | `crossing_targets` | Two objects within 1.5 m are not merged and keep their identities. |
+| `large_objects` | Cars, vans, trucks and buses as oriented boxes, from detectors that see only part of an object and cannot tell front from back: each is one world object from every side, with size consistent with its uncertainty (pooled NEES below 6) and heading within 15 degrees (modulo 180 unless it moves). The same run without the declared systematic center error must show duplicates. |
+| `handoff_ids` | Objects drive past a row of short-range agents in both directions, so sources keep joining and leaving. Each object keeps one ID for its whole drive past (at most two changes per run tolerated) and no ID is given to two objects. Comparison runs: under the oldest-track rule every change is its holder leaving or an older track joining and each object passes through at least three holders; the smallest-key rule must rename objects on a join. |
 | `object_expiry` | Disappearing objects leave every world within coast plus validity time; new ones appear. |
 | `echo_chamber` | Relayed and repeated reports change nothing: world equals the one built from each source's own reports. |
 | `split_brain` | Partition: each side fuses its own sources; after healing all converge. |

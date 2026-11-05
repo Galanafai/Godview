@@ -166,6 +166,7 @@ pub async fn run_carla_mode() -> Result<()> {
             timestamp,
             confidence: detection.confidence,  // Entity uses f32
             position_cov_enu: None,
+            oriented_box: None,
         };
 
         // ========== UPDATE SPATIAL ENGINE ==========

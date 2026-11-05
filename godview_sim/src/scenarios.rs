@@ -119,6 +119,11 @@ pub enum ScenarioId {
     /// Two objects pass within 1.5 m of each other.
     CrossingTargets,
 
+    /// Cars, trucks and buses reported as oriented boxes, seen from different sides.
+    LargeObjects,
+    /// Objects handed between agents keep their IDs.
+    HandoffIds,
+
     /// Objects disappear and appear.
     ObjectExpiry,
 
@@ -143,6 +148,8 @@ impl ScenarioId {
             ScenarioId::SlowLoris,
             ScenarioId::BiasedSource,
             ScenarioId::CrossingTargets,
+            ScenarioId::LargeObjects,
+            ScenarioId::HandoffIds,
             ScenarioId::ObjectExpiry,
             ScenarioId::EchoChamber,
             ScenarioId::SplitBrain,
@@ -191,6 +198,8 @@ impl ScenarioId {
             ScenarioId::SlowLoris => "slow_loris",
             ScenarioId::BiasedSource => "biased_source",
             ScenarioId::CrossingTargets => "crossing_targets",
+            ScenarioId::LargeObjects => "large_objects",
+            ScenarioId::HandoffIds => "handoff_ids",
             ScenarioId::ObjectExpiry => "object_expiry",
             ScenarioId::EchoChamber => "echo_chamber",
             ScenarioId::SplitBrain => "split_brain",
@@ -318,6 +327,8 @@ impl ScenarioId {
             ScenarioId::NetworkFaults => "network_faults",
             ScenarioId::BiasedSource => "biased_source",
             ScenarioId::CrossingTargets => "crossing_targets",
+            ScenarioId::LargeObjects => "large_objects",
+            ScenarioId::HandoffIds => "handoff_ids",
             ScenarioId::ObjectExpiry => "object_expiry",
             ScenarioId::EchoChamber => "echo_chamber",
             ScenarioId::AgentRestart => "agent_restart",
@@ -360,6 +371,8 @@ impl ScenarioId {
             ScenarioId::NetworkFaults => "Loss, duplication, corruption and reordering together",
             ScenarioId::BiasedSource => "Unreported 6 m bias detected and excluded",
             ScenarioId::CrossingTargets => "Objects passing within 1.5 m keep identities",
+            ScenarioId::LargeObjects => "Boxes: a truck seen from opposite ends is one object, with its size and heading",
+            ScenarioId::HandoffIds => "IDs survive handoffs between agents and never jump between objects",
             ScenarioId::ObjectExpiry => "Disappearing objects dropped, new ones confirmed",
             ScenarioId::EchoChamber => "Relayed echoes never reduce uncertainty",
             ScenarioId::AgentRestart => "Restarted agent's new epoch accepted on reconnection",
@@ -433,6 +446,8 @@ impl std::str::FromStr for ScenarioId {
             "network_faults" => Ok(ScenarioId::NetworkFaults),
             "biased_source" => Ok(ScenarioId::BiasedSource),
             "crossing_targets" => Ok(ScenarioId::CrossingTargets),
+            "large_objects" => Ok(ScenarioId::LargeObjects),
+            "handoff_ids" => Ok(ScenarioId::HandoffIds),
             "object_expiry" => Ok(ScenarioId::ObjectExpiry),
             "echo_chamber" => Ok(ScenarioId::EchoChamber),
             "agent_restart" => Ok(ScenarioId::AgentRestart),

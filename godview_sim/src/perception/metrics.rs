@@ -37,6 +37,8 @@ pub struct Score {
     pub unmatched_truths: Vec<usize>,
     /// Indices of estimates left unmatched.
     pub unmatched_estimates: Vec<usize>,
+    /// Matched `(estimate, truth)` index pairs.
+    pub pairs: Vec<(usize, usize)>,
 }
 
 /// Scores estimates (position and optional position covariance) against truths.
@@ -70,6 +72,7 @@ pub fn score(estimates: &[(Ecef, Option<Matrix3<f64>>)], truths: &[Ecef], cutoff
         .filter(|e| !pairs.iter().any(|(ei, _)| ei == e))
         .collect();
     s.matched = pairs.len();
+    s.pairs = pairs.clone();
     s.missed = truths.len() - pairs.len();
     s.false_estimates = estimates.len() - pairs.len();
     s.rms_matched = if s.matched > 0 {

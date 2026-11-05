@@ -4,15 +4,22 @@ version = "0.1.0"
 edition = "2021"
 description = "Deterministic Simulation Testing (DST) harness for GodView"
 license = "MIT"
+default-run = "godview-sim"
 
 [[bin]]
 name = "godview-sim"
 path = "src/main.rs"
 
+[[bin]]
+name = "v2v4real-replay"
+path = "src/bin/v2v4real_replay.rs"
+
 [dependencies]
 # Core GodView
 godview_core = { path = "../godview_core" }
 godview_env = { path = "../godview_env" }
+# JSON-lines input parser, shared with the Zenoh node (V2V4Real replay)
+godview_node = { path = "../godview_node" }
 
 # Deterministic Simulation Runtime
 madsim = "0.2"

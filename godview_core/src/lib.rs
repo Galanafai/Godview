@@ -6,6 +6,7 @@
 //! 3. **Phantom Hazards Problem**: Cryptographic provenance via CapBAC + Ed25519
 //! 4. **Duplicate Ghost Problem**: Distributed data association via GNN + CI + Highlander
 
+pub mod extent;
 pub mod frames;
 pub mod filter;
 pub mod godview_time;

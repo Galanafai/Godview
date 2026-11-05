@@ -24,7 +24,19 @@
 //!    four sources of one object together when one pair's localization errors
 //!    happen to fall outside a 99% gate, while still refusing to merge
 //!    clusters that disagree as wholes.
-//! 5. **Fuse** each cluster with Covariance Intersection, members in key
+//! 5. **Name** each cluster (see [`IdRule::Lineage`]). Every report may
+//!    carry a `name`: the ID its track belonged to in its source's latest
+//!    world. A cluster takes the name carried by its oldest member (its own
+//!    key if it carries none), so an ID started by one track passes to the
+//!    tracks that were fused with it and outlives the track that started it.
+//!    A name that is the key of a live track in another cluster is not
+//!    allowed (that track's cluster owns it); two clusters claiming the same
+//!    name of an ended track are settled in a fixed order, and a cluster that
+//!    loses falls back to its next claim and finally to its oldest member's
+//!    key, which no other cluster can take. The result depends only on the
+//!    reports and the trust view, so agents with the same reports agree on
+//!    IDs as they agree on everything else.
+//! 6. **Fuse** each cluster with Covariance Intersection, members in key
 //!    order, weights chosen to minimize the trace of the fused covariance.
 //!    CI is used here, and only here, because the cross-correlation between
 //!    different sources' tracks of one object is unknown (shared process
@@ -33,7 +45,11 @@
 //!
 //! Nothing produced here is ever inserted into a report store or a local
 //! filter. That missing feedback path is what rules out rumor propagation.
+//! The one exception is the name label of step 5: a node publishes the ID its
+//! own track belongs to. Names never enter gating, clustering or fusion, so
+//! they cannot change any estimate or covariance; they only choose IDs.
 
+use crate::extent::{fuse_boxes, BoxGate, BoxModel, ObjectBox};
 use crate::frames::{cv_process_noise, cv_transition, ecef_from_enu_rotation, symmetrize, Ecef};
 use crate::godview_space::Entity;
 use crate::report::{AgentId, FrameRef, ReportKey, TrackLifecycle};
@@ -66,6 +82,27 @@ pub struct WorldModelConfig {
     pub gate_vel_chi2: f64,
     /// Reports stamped more than this far after the query time are ignored (s).
     pub max_future_skew_s: f64,
+    /// Box consistency required to fuse two reports or two clusters.
+    pub box_gate: BoxGate,
+    /// Box process noise used when predicting reports to the query time.
+    pub box_model: BoxModel,
+    /// Which member names a fused object.
+    pub id_rule: IdRule,
+}
+
+/// How a fused object's ID is chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IdRule {
+    /// The name carried by the oldest member, so an ID survives handoffs
+    /// (see the module documentation, step 5).
+    #[default]
+    Lineage,
+    /// The key of the member whose track was created first (ties: smaller
+    /// key). Names are ignored: the ID changes when that track leaves.
+    OldestTrack,
+    /// The smallest member key. The earlier rule, kept for comparison: the
+    /// ID changes whenever a source with a smaller key joins.
+    SmallestKey,
 }
 
 impl Default for WorldModelConfig {
@@ -76,6 +113,9 @@ impl Default for WorldModelConfig {
             gate_pos_chi2: 21.11,
             gate_vel_chi2: 21.11,
             max_future_skew_s: 0.5,
+            box_gate: BoxGate::default(),
+            box_model: BoxModel::default(),
+            id_rule: IdRule::default(),
         }
     }
 }
@@ -92,9 +132,11 @@ pub struct TrustView {
 /// One fused object in the shared world state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorldObject {
-    /// Identity: the smallest member key. Derived, never negotiated; stable
-    /// while that member's track lives.
+    /// Identity, a report key (see [`IdRule`]). Derived from the reports,
+    /// never negotiated, and unique within a snapshot.
     pub id: ReportKey,
+    /// When the oldest current member's track was created (its source's clock).
+    pub born: Timestamp,
     /// Contributing reports `(key, version)` in key order (provenance).
     pub members: Vec<(ReportKey, (u32, u64))>,
     /// Query time.
@@ -109,6 +151,8 @@ pub struct WorldObject {
     pub class_prob: f32,
     /// Highest member existence probability.
     pub p_exist: f32,
+    /// Fused box, heading counterclockwise from local East at the object.
+    pub object_box: Option<ObjectBox>,
 }
 
 impl WorldObject {
@@ -157,6 +201,14 @@ impl WorldObject {
                 pc[(1, 2)] as f32,
                 pc[(2, 2)] as f32,
             ]),
+            oriented_box: self.object_box.map(|b| {
+                [
+                    b.size[0] as f32,
+                    b.size[1] as f32,
+                    b.size[2] as f32,
+                    b.yaw as f32,
+                ]
+            }),
         }
     }
 }
@@ -184,6 +236,9 @@ impl WorldSnapshot {
         let mut h = Fnv::new();
         h.u64(self.t.as_nanos() as u64);
         for o in &self.objects {
+            h.bytes(&o.id.0 .0);
+            h.u64(o.id.1 .0);
+            h.u64(o.born.as_nanos() as u64);
             for ((src, tr), (e, s)) in &o.members {
                 h.bytes(&src.0);
                 h.u64(tr.0);
@@ -208,6 +263,12 @@ pub(crate) struct Prepared {
     pub class_id: u8,
     pub class_prob: f32,
     pub p_exist: f32,
+    /// When the source created the track.
+    pub born: Timestamp,
+    /// The name the source gives this track's object (see [`IdRule::Lineage`]).
+    pub name: Option<ReportKey>,
+    /// Box with heading in ENU at the object, predicted to the query time.
+    pub object_box: Option<ObjectBox>,
 }
 
 /// The L3 fusion engine.
@@ -258,7 +319,8 @@ impl WorldModel {
                 snap.skipped_untrusted += 1;
                 continue;
             }
-            let (x, mut p) = self.predict(&r.state(), &r.covariance(), t.secs_since(r.t_valid));
+            let dt = t.secs_since(r.t_valid);
+            let (x, mut p) = self.predict(&r.state(), &r.covariance(), dt);
             if let Some(f) = trust.inflate.get(&r.source) {
                 p *= f.max(1.0);
             }
@@ -270,6 +332,9 @@ impl WorldModel {
                 class_id: r.class_id,
                 class_prob: r.class_prob,
                 p_exist: r.p_exist,
+                born: r.born,
+                name: r.name,
+                object_box: r.object_box.map(|b| self.config.box_model.predict(&b, dt)),
             });
         }
         (items, snap)
@@ -296,9 +361,11 @@ impl WorldModel {
     pub fn snapshot(&self, store: &ReportStore, t: Timestamp, trust: &TrustView) -> WorldSnapshot {
         let (items, mut snap) = self.prepare(store, t, trust);
         let clusters = self.cluster(&items);
+        let ids = name_clusters(&items, &clusters, self.config.id_rule);
         snap.objects = clusters
-            .into_iter()
-            .filter_map(|members| fuse_cluster(&items, &members, t))
+            .iter()
+            .zip(ids)
+            .filter_map(|(members, id)| fuse_cluster(&items, members, t, id))
             .collect();
         snap.objects.sort_by_key(|o| o.id);
         snap
@@ -306,7 +373,13 @@ impl WorldModel {
 
     /// Whether two prepared reports may describe the same object.
     pub(crate) fn gates(&self, a: &Prepared, b: &Prepared) -> Option<f64> {
-        if a.key.0 == b.key.0 || a.class_id != b.class_id {
+        if a.key.0 == b.key.0
+            || a.class_id != b.class_id
+            || !self
+                .config
+                .box_gate
+                .passes(a.object_box.as_ref(), b.object_box.as_ref())
+        {
             return None;
         }
         self.gate_states(&a.x, &a.p, &b.x, &b.p)
@@ -364,8 +437,8 @@ impl WorldModel {
 
         let mut cluster_of: Vec<usize> = (0..items.len()).collect();
         let mut members: Vec<Vec<usize>> = (0..items.len()).map(|i| vec![i]).collect();
-        let mut fused: Vec<(Vector6<f64>, Matrix6<f64>)> =
-            items.iter().map(|it| (it.x, it.p)).collect();
+        let mut fused: Vec<(Vector6<f64>, Matrix6<f64>, Option<ObjectBox>)> =
+            items.iter().map(|it| (it.x, it.p, it.object_box)).collect();
         for (_, i, j) in pairs {
             let (ci, cj) = (cluster_of[i], cluster_of[j]);
             if ci == cj {
@@ -380,7 +453,9 @@ impl WorldModel {
                 continue;
             }
             let (a, b) = (&fused[ci], &fused[cj]);
-            if self.gate_states(&a.0, &a.1, &b.0, &b.1).is_none() {
+            if self.gate_states(&a.0, &a.1, &b.0, &b.1).is_none()
+                || !self.config.box_gate.passes(a.2.as_ref(), b.2.as_ref())
+            {
                 continue;
             }
             let (keep, gone) = if ci < cj { (ci, cj) } else { (cj, ci) };
@@ -397,29 +472,98 @@ impl WorldModel {
 }
 
 /// CI-fuses members (indices in key order) in key order.
-fn fuse_members(items: &[Prepared], members: &[usize]) -> (Vector6<f64>, Matrix6<f64>) {
+fn fuse_members(
+    items: &[Prepared],
+    members: &[usize],
+) -> (Vector6<f64>, Matrix6<f64>, Option<ObjectBox>) {
     let first = &items[members[0]];
-    let (mut x, mut p) = (first.x, first.p);
+    let (mut x, mut p, mut b) = (first.x, first.p, first.object_box);
     for m in &members[1..] {
         let it = &items[*m];
         let (nx, np) = covariance_intersection(&x, &p, &it.x, &it.p);
         x = nx;
         p = np;
+        b = match (b, it.object_box) {
+            (Some(a), Some(c)) => Some(fuse_boxes(&a, &c)),
+            (None, c) => c,
+            (a, None) => a,
+        };
     }
-    (x, p)
+    (x, p, b)
 }
 
-/// Fuses one cluster (member indices in key order) into a world object.
-fn fuse_cluster(items: &[Prepared], members: &[usize], t: Timestamp) -> Option<WorldObject> {
-    let first = items.get(*members.first()?)?;
-    let (x, p) = fuse_members(items, members);
+/// Members of a cluster from oldest to youngest track (ties: smaller key).
+fn by_age(items: &[Prepared], members: &[usize]) -> Vec<usize> {
+    let mut v = members.to_vec();
+    v.sort_by(|a, b| {
+        let (a, b) = (&items[*a], &items[*b]);
+        a.born.cmp(&b.born).then(a.key.cmp(&b.key))
+    });
+    v
+}
+
+/// Chooses each cluster's ID (one per cluster, unique within the snapshot).
+fn name_clusters(items: &[Prepared], clusters: &[Vec<usize>], rule: IdRule) -> Vec<ReportKey> {
+    let aged: Vec<Vec<usize>> = clusters.iter().map(|c| by_age(items, c)).collect();
+    match rule {
+        IdRule::SmallestKey => clusters
+            .iter()
+            .map(|c| {
+                c.iter()
+                    .map(|m| items[*m].key)
+                    .min()
+                    .expect("non-empty cluster")
+            })
+            .collect(),
+        IdRule::OldestTrack => aged.iter().map(|c| items[c[0]].key).collect(),
+        IdRule::Lineage => {
+            // Which cluster each live track is in: a live track's key may only
+            // name its own cluster.
+            let owner: BTreeMap<ReportKey, usize> = clusters
+                .iter()
+                .enumerate()
+                .flat_map(|(ci, c)| c.iter().map(move |m| (items[*m].key, ci)))
+                .collect();
+            // Settle clusters in order of their oldest member.
+            let mut order: Vec<usize> = (0..clusters.len()).collect();
+            order.sort_by(|a, b| {
+                let (a, b) = (&items[aged[*a][0]], &items[aged[*b][0]]);
+                a.born.cmp(&b.born).then(a.key.cmp(&b.key))
+            });
+            let mut taken: BTreeSet<ReportKey> = BTreeSet::new();
+            let mut ids: Vec<ReportKey> = aged.iter().map(|c| items[c[0]].key).collect();
+            for ci in order {
+                let fallback = items[aged[ci][0]].key;
+                let id = aged[ci]
+                    .iter()
+                    .map(|m| items[*m].name.unwrap_or(items[*m].key))
+                    .find(|n| owner.get(n).is_none_or(|o| *o == ci) && !taken.contains(n))
+                    .unwrap_or(fallback);
+                taken.insert(id);
+                ids[ci] = id;
+            }
+            ids
+        }
+    }
+}
+
+/// Fuses one cluster (member indices in key order) into a world object named `id`.
+fn fuse_cluster(
+    items: &[Prepared],
+    members: &[usize],
+    t: Timestamp,
+    id: ReportKey,
+) -> Option<WorldObject> {
+    let oldest = &items[*by_age(items, members).first()?];
+    let (x, p, object_box) = fuse_members(items, members);
     let best = members.iter().map(|m| &items[*m]).max_by(|a, b| {
         a.class_prob
             .total_cmp(&b.class_prob)
             .then(b.key.cmp(&a.key))
     })?;
     Some(WorldObject {
-        id: first.key,
+        id,
+        born: oldest.born,
         members: members
             .iter()
             .map(|m| (items[*m].key, items[*m].version))
@@ -433,6 +577,7 @@ fn fuse_cluster(items: &[Prepared], members: &[usize], t: Timestamp) -> Option<W
             .iter()
             .map(|m| items[*m].p_exist)
             .fold(0.0, f32::max),
+        object_box,
     })
 }
 
@@ -549,6 +694,9 @@ mod tests {
             p_exist: 0.9,
             lifecycle: TrackLifecycle::Confirmed,
             valid_for_ms: 1500,
+            born: Timestamp::from_millis(0),
+            name: None,
+            object_box: None,
         }
     }
 
@@ -558,6 +706,89 @@ mod tests {
             s.insert(*r);
         }
         s
+    }
+
+    fn boxed(mut r: TrackReport, length: f64, yaw: f64) -> TrackReport {
+        r.object_box = Some(ObjectBox {
+            size: [length, 2.0, 2.0],
+            size_var: [0.04; 3],
+            yaw,
+            yaw_var: 0.0025,
+            yaw_ambiguous: true,
+        });
+        r
+    }
+
+    #[test]
+    fn box_gate_keeps_a_car_and_a_truck_apart_when_position_cannot() {
+        // Two sources with poor localization (1 m) each report a car and a truck
+        // 3 m apart. Position alone gates every cross pair; with source 2's
+        // errors pushing its car toward source 1's truck, position-only
+        // clustering pairs the wrong ones. Boxes refuse those pairs.
+        let car_1 = boxed(
+            report(1, 1, 1, Vector3::new(0.0, 0.0, 0.0), 1.0, 1000),
+            4.5,
+            0.0,
+        );
+        let truck_1 = boxed(
+            report(1, 2, 2, Vector3::new(0.0, 3.0, 0.0), 1.0, 1000),
+            12.0,
+            0.0,
+        );
+        let car_2 = boxed(
+            report(2, 1, 1, Vector3::new(0.0, 2.2, 0.0), 1.0, 1000),
+            4.6,
+            3.1,
+        );
+        let truck_2 = boxed(
+            report(2, 2, 2, Vector3::new(0.0, 5.0, 0.0), 1.0, 1000),
+            11.8,
+            0.05,
+        );
+        let st = store(&[car_1, truck_1, car_2, truck_2]);
+        let t = Timestamp::from_millis(1000);
+        let members = |cfg: WorldModelConfig| -> Vec<Vec<u64>> {
+            let snap = WorldModel::new(cfg).snapshot(&st, t, &TrustView::default());
+            snap.objects
+                .iter()
+                .map(|o| {
+                    o.members
+                        .iter()
+                        .map(|((s, tr), _)| s.0[0] as u64 * 10 + tr.0)
+                        .collect()
+                })
+                .collect()
+        };
+        let with = members(WorldModelConfig::default());
+        assert_eq!(
+            with,
+            vec![vec![11, 21], vec![12, 22]],
+            "cars with cars, trucks with trucks"
+        );
+        let without = members(WorldModelConfig {
+            box_gate: BoxGate::disabled(),
+            ..WorldModelConfig::default()
+        });
+        assert!(
+            without.contains(&vec![12, 21]),
+            "position alone pairs truck 1 with car 2: {without:?}"
+        );
+        let snap = WorldModel::default().snapshot(&st, t, &TrustView::default());
+        let truck = snap
+            .objects
+            .iter()
+            .find(|o| o.members.len() == 2 && o.object_box.unwrap().size[0] > 8.0)
+            .unwrap();
+        let b = truck.object_box.unwrap();
+        assert!(
+            (b.size[0] - 11.9).abs() < 0.11,
+            "fused truck length {}",
+            b.size[0]
+        );
+        assert_eq!(
+            truck.to_entity().oriented_box.map(|o| o[0] > 8.0),
+            Some(true)
+        );
     }
 
     #[test]
@@ -577,12 +808,170 @@ mod tests {
         assert_eq!(
             fused.id,
             (AgentId([1; 32]), LocalTrackId(10)),
-            "id is the smallest member key"
+            "tracks born together: the smaller key names the object"
         );
         let tr = fused.cov.fixed_view::<3, 3>(0, 0).trace();
         assert!(tr <= 0.75 + 1e-6, "fused no worse than either input");
         let mid = site().to_ecef(&Vector3::new(10.2, 5.1, 0.0));
         assert!(fused.position().distance(&mid) < 1e-3);
+    }
+
+    fn born_at(mut r: TrackReport, born_ms: i64) -> TrackReport {
+        r.born = Timestamp::from_millis(born_ms);
+        r
+    }
+
+    #[test]
+    fn a_source_joining_later_does_not_rename_the_object() {
+        let wm = WorldModel::default();
+        let old_rule = WorldModel::new(WorldModelConfig {
+            id_rule: IdRule::SmallestKey,
+            ..WorldModelConfig::default()
+        });
+        let at = Vector3::new(10.0, 5.0, 0.0);
+        let first = born_at(report(9, 90, 1, at, 0.25, 5000), 1000);
+        let t = Timestamp::from_millis(5000);
+        let alone = wm.snapshot(&store(&[first]), t, &TrustView::default());
+        assert_eq!(alone.objects[0].id, first.key());
+        // A source with a smaller key starts tracking the same object later.
+        let joiner = born_at(
+            report(1, 10, 1, at + Vector3::new(0.3, 0.0, 0.0), 0.25, 5000),
+            4000,
+        );
+        let both = store(&[first, joiner]);
+        let snap = wm.snapshot(&both, t, &TrustView::default());
+        assert_eq!(snap.objects.len(), 1);
+        assert_eq!(snap.objects[0].members.len(), 2);
+        assert_eq!(
+            snap.objects[0].id,
+            first.key(),
+            "the oldest track keeps the ID"
+        );
+        assert_eq!(snap.objects[0].born, first.born);
+        // The earlier rule renames the object as soon as the smaller key joins.
+        let snap = old_rule.snapshot(&both, t, &TrustView::default());
+        assert_eq!(snap.objects[0].id, joiner.key());
+        // The same reports give the same IDs whatever order they arrived in.
+        let reversed = store(&[joiner, first]);
+        assert_eq!(
+            wm.snapshot(&reversed, t, &TrustView::default()).digest(),
+            wm.snapshot(&both, t, &TrustView::default()).digest()
+        );
+    }
+
+    fn named(mut r: TrackReport, name: ReportKey) -> TrackReport {
+        r.name = Some(name);
+        r
+    }
+
+    #[test]
+    fn a_name_outlives_the_track_that_started_it() {
+        let wm = WorldModel::default();
+        let at = Vector3::new(10.0, 5.0, 0.0);
+        let t = Timestamp::from_millis(5000);
+        let a = born_at(report(5, 50, 1, at, 0.25, 5000), 1000);
+        // b and c were fused with a and carry its ID as their name.
+        let b = named(
+            born_at(
+                report(7, 70, 1, at + Vector3::new(0.2, 0.0, 0.0), 0.25, 5000),
+                2000,
+            ),
+            a.key(),
+        );
+        let c = born_at(
+            report(3, 30, 1, at + Vector3::new(0.0, 0.2, 0.0), 0.25, 5000),
+            3000,
+        );
+        let snap = wm.snapshot(&store(&[a, b, c]), t, &TrustView::default());
+        assert_eq!(snap.objects[0].id, a.key());
+        // a's track ends: the object keeps a's ID through b's name.
+        let mut gone = a;
+        gone.seq += 1;
+        gone.lifecycle = TrackLifecycle::Terminated;
+        let snap = wm.snapshot(&store(&[a, gone, b, c]), t, &TrustView::default());
+        assert_eq!((snap.objects.len(), snap.objects[0].id), (1, a.key()));
+        assert_eq!(
+            snap.objects[0].born, b.born,
+            "born is the oldest current member"
+        );
+        // Without the name, the oldest-track rule hands it to b.
+        let oldest = WorldModel::new(WorldModelConfig {
+            id_rule: IdRule::OldestTrack,
+            ..WorldModelConfig::default()
+        });
+        let snap = oldest.snapshot(&store(&[a, gone, b, c]), t, &TrustView::default());
+        assert_eq!(snap.objects[0].id, b.key());
+    }
+
+    #[test]
+    fn names_choose_ids_and_change_nothing_else() {
+        let wm = WorldModel::default();
+        let t = Timestamp::from_millis(5000);
+        let p = Vector3::new(10.0, 5.0, 0.0);
+        let q = Vector3::new(60.0, 5.0, 0.0);
+        let a = born_at(report(5, 50, 1, p, 0.25, 5000), 1000);
+        let b = born_at(report(6, 60, 1, q, 0.25, 5000), 1000);
+        // c, the oldest member near q, names a, whose track is alive in
+        // another object: the name is refused and the next member's claim
+        // (b's own key) names the object.
+        let c = named(
+            born_at(
+                report(9, 90, 1, q + Vector3::new(0.2, 0.0, 0.0), 0.25, 5000),
+                500,
+            ),
+            a.key(),
+        );
+        let snap = wm.snapshot(&store(&[a, b, c]), t, &TrustView::default());
+        let ids: BTreeSet<ReportKey> = snap.objects.iter().map(|o| o.id).collect();
+        assert_eq!(ids, [a.key(), b.key()].into_iter().collect());
+        // Two objects claiming the same ended track's name get distinct IDs:
+        // the one with the older member keeps it.
+        let dead = (AgentId([1; 32]), LocalTrackId(1));
+        let a2 = named(a, dead);
+        let b2 = named(b, dead);
+        let snap = wm.snapshot(&store(&[a2, b2]), t, &TrustView::default());
+        let ids: Vec<ReportKey> = snap.objects.iter().map(|o| o.id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&dead) && ids.contains(&b.key()), "{ids:?}");
+        // Names never change an estimate.
+        let plain = wm.snapshot(&store(&[a, b]), t, &TrustView::default());
+        for (x, y) in plain.objects.iter().zip(&snap.objects) {
+            assert_eq!((x.state, x.cov, &x.members), (y.state, y.cov, &y.members));
+        }
+    }
+
+    #[test]
+    fn the_id_passes_to_the_next_oldest_member_when_its_holder_leaves() {
+        let wm = WorldModel::new(WorldModelConfig {
+            id_rule: IdRule::OldestTrack,
+            ..WorldModelConfig::default()
+        });
+        let at = Vector3::new(10.0, 5.0, 0.0);
+        let t = Timestamp::from_millis(5000);
+        let a = born_at(report(5, 50, 1, at, 0.25, 5000), 1000);
+        let b = born_at(
+            report(7, 70, 1, at + Vector3::new(0.2, 0.0, 0.0), 0.25, 5000),
+            2000,
+        );
+        let c = born_at(
+            report(3, 30, 1, at + Vector3::new(0.0, 0.2, 0.0), 0.25, 5000),
+            3000,
+        );
+        let snap = wm.snapshot(&store(&[a, b, c]), t, &TrustView::default());
+        assert_eq!((snap.objects.len(), snap.objects[0].id), (1, a.key()));
+        // The holder's track ends: the next-oldest member takes over, not the smallest key.
+        let mut gone = a;
+        gone.seq += 1;
+        gone.lifecycle = TrackLifecycle::Terminated;
+        let snap = wm.snapshot(&store(&[a, gone, b, c]), t, &TrustView::default());
+        assert_eq!((snap.objects.len(), snap.objects[0].id), (1, b.key()));
+        // Excluding the holder's source has the same effect.
+        let trust = TrustView {
+            excluded: [AgentId([5; 32])].into_iter().collect(),
+            ..TrustView::default()
+        };
+        let snap = wm.snapshot(&store(&[a, b, c]), t, &trust);
+        assert_eq!(snap.objects[0].id, b.key());
     }
 
     #[test]

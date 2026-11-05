@@ -148,6 +148,10 @@ def main():
                 'detected_by': sorted(c for c, l in labs.items() if l['detected']),
                 'points': [labs[c]['points'] if c in labs else 0 for c in (0, 1)],
                 'cav': cav,
+                # Each car's own label (for the systematic size and heading rule).
+                'per_car': {str(c): {'size': l['size'].tolist(),
+                                     'yaw_enu_deg': float(wrap(l['yaw_map'] + fit['rot_deg'])),
+                                     'points': l['points']} for c, l in labs.items()},
             })
         # Per-frame relative offset of linked objects, rotated into ENU.
         off = None

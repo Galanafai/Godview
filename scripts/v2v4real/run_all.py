@@ -6,6 +6,10 @@ Declarations of the pose uncertainty (see docs/results/v2v4real.md):
   scenario k only and scored on the other two scenarios;
 * cross_h*_v*: the smallest and largest leave-one-out horizontal and
   vertical sigmas crossed, to separate the two (scored on scenarios 0, 3);
+* sys_from_<k>_pose_*: declared systematic box size and heading errors
+  (box_size_sys_m, box_yaw_sys_rad) chosen from scenario k's label
+  disagreement, with the nominal pose and with loo_<k>, scored on the
+  other two scenarios, all gates on;
 * reference_rtk: the RTK headline figure, to show what an understated sigma
   does (not a candidate declaration: the measured offsets rule it out).
 
@@ -46,11 +50,14 @@ def convert(sc_dir, out_dir, decl):
                     '--sigma-yaw-deg', str(decl['sigma_yaw_deg'])], check=True, stdout=subprocess.DEVNULL)
 
 
-def replay(out_dir, ablate=None):
-    res = os.path.join(out_dir, 'result%s.json' % ('_' + ablate if ablate else ''))
+def replay(out_dir, ablate=None, sys_err=None, tag=''):
+    res = os.path.join(out_dir, 'result%s%s.json' % (tag, '_' + ablate if ablate else ''))
     cmd = [REPLAY, '--dir', out_dir, '--out', res, '--delay-ms', str(DELAY_MS)]
     if ablate:
         cmd += ['--ablate', ablate]
+    if sys_err:
+        cmd += ['--box-size-sys-m', str(sys_err['box_size_sys_m']),
+                '--box-yaw-sys-deg', str(sys_err['box_yaw_sys_deg'])]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
     with open(res) as fh:
         return json.load(fh)
@@ -63,6 +70,52 @@ def loo_sigma(truth):
     return {'sigma_h': round(float(np.sqrt(np.mean(np.sum(d[:, :2] ** 2, axis=1)) / 4.0)), 2),
             'sigma_v': round(float(np.sqrt(np.mean(d[:, 2] ** 2) / 2.0)), 2),
             'sigma_yaw_deg': NOMINAL['sigma_yaw_deg'], 'pairs': int(len(d))}
+
+
+# The car that car 0 misannotated while it turned (docs/PHASE_C_HANDOFF.md,
+# "Heading tail in scenario 3"): its heading disagreement is reported
+# separately so it does not set the heading value alone.
+TURNING_CAR = ('10-29-43_3', '0:3')
+
+
+def box_sys(truth, name):
+    """Systematic box errors from the two cars' label disagreement on objects
+    both labeled, over all pair-frames of one scenario: the std of the
+    per-axis size difference, pooled over axes (one sample of all three
+    axes' differences), divided by sqrt(2); the same for the heading
+    difference (wrapped to +-180 deg). Returns the values without and with
+    the turning car."""
+    ds, dy, dy_turn = [], [], []
+    per_obj = {}
+    for f in truth['frames']:
+        for o in f['objects']:
+            pc = o['per_car']
+            if '0' not in pc or '1' not in pc:
+                continue
+            d = np.array(pc['0']['size']) - np.array(pc['1']['size'])
+            h = (pc['0']['yaw_enu_deg'] - pc['1']['yaw_enu_deg'] + 180.0) % 360.0 - 180.0
+            if (name, o['gid']) == TURNING_CAR:
+                dy_turn.append(h)
+            else:
+                dy.append(h)
+            ds.append(d)
+            per_obj.setdefault(o['gid'], []).append(np.r_[d, h])
+    ds = np.array(ds)
+    out = {
+        'pair_frames': int(len(ds)), 'objects': len(per_obj),
+        'box_size_sys_m': round(float(np.std(ds.reshape(-1)) / np.sqrt(2)), 3) if len(ds) else 0.0,
+        'box_yaw_sys_deg': round(float(np.std(dy) / np.sqrt(2)), 2) if dy else 0.0,
+        'size_diff_mean_lwh_m': np.round(ds.mean(0), 3).tolist() if len(ds) else None,
+        'size_diff_std_lwh_m': np.round(ds.std(0), 3).tolist() if len(ds) else None,
+        'heading_diff_mean_deg': round(float(np.mean(dy)), 2) if dy else None,
+        'per_object_mean_diff_lwh_m_yaw_deg': {g: np.round(np.mean(v, axis=0), 3).tolist() for g, v in per_obj.items()},
+    }
+    if dy_turn:
+        allh = dy + dy_turn
+        out['turning_car'] = {'pair_frames': len(dy_turn),
+                              'heading_diff_deg_min_max': [round(min(dy_turn), 1), round(max(dy_turn), 1)],
+                              'box_yaw_sys_deg_if_included': round(float(np.std(allh) / np.sqrt(2)), 2)}
+    return out
 
 
 def pool(results):
@@ -107,15 +160,17 @@ def main():
     names = [os.path.basename(s.rstrip('/')) for s in scen]
     summary = {'delay_ms': DELAY_MS, 'scenarios': [short(n) for n in names], 'declarations': {}}
 
-    def run_decl(label, decl, which):
+    def run_decl(label, decl, which, sys_err=None, conv=None, ablations=(None, 'no-size-gate')):
         entry = {'declared': decl, 'scored_on': [short(names[i]) for i in which], 'runs': {}}
-        for ablate in (None, 'no-size-gate'):
+        if sys_err:
+            entry['box_systematic'] = sys_err
+        for ablate in ablations:
             res = []
             for i in which:
-                od = os.path.join(work, label, short(names[i]))
-                if ablate is None:
+                od = os.path.join(work, conv or label, short(names[i]))
+                if ablate is None and conv is None:
                     convert(scen[i], od, decl)
-                res.append(replay(od, ablate))
+                res.append(replay(od, ablate, sys_err, tag='_' + label if conv else ''))
             entry['runs']['default' if ablate is None else ablate] = {
                 'pooled': pool(res), 'per_scenario': [strip(r) for r in res]}
         summary['declarations'][label] = entry
@@ -147,6 +202,24 @@ def main():
         for sv in (lo['sigma_v'], hi['sigma_v']):
             decl = {'sigma_h': sh, 'sigma_v': sv, 'sigma_yaw_deg': NOMINAL['sigma_yaw_deg']}
             run_decl('cross_h%.2f_v%.2f' % (sh, sv), decl, [0, 1])
+
+    # After commit 17c51aa: declared systematic size and heading errors, chosen
+    # by the same leave-one-out rule from the label disagreement of one
+    # scenario, with the nominal pose and with the leave-one-out pose from the
+    # same scenario. All gates on.
+    summary['box_systematic_by_scenario'] = {}
+    for k in range(len(scen)):
+        sk = box_sys(truths[k], short(names[k]))
+        summary['box_systematic_by_scenario'][short(names[k])] = sk
+        sys_err = {'box_size_sys_m': sk['box_size_sys_m'], 'box_yaw_sys_deg': sk['box_yaw_sys_deg'],
+                   'chosen_from': short(names[k])}
+        print('box systematic from %s: size %.3f m, yaw %.2f deg %s' % (
+            short(names[k]), sk['box_size_sys_m'], sk['box_yaw_sys_deg'], sk.get('turning_car', '')))
+        others = [i for i in range(len(scen)) if i != k]
+        run_decl('sys_from_%s_pose_nominal' % short(names[k]), NOMINAL, others, sys_err, conv='nominal',
+                 ablations=(None,))
+        run_decl('sys_from_%s_pose_loo' % short(names[k]), summary['declarations']['loo_from_' + short(names[k])]['declared'],
+                 others, sys_err, conv='loo_from_' + short(names[k]), ablations=(None,))
 
     summary['relative_offset'] = {}
     summary['gps_fit'] = {}

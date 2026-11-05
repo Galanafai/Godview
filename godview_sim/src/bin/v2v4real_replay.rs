@@ -42,6 +42,8 @@ struct Args {
     cutoff_m: f64,
     seed: u64,
     ablate: Vec<String>,
+    box_size_sys_m: f64,
+    box_yaw_sys_deg: f64,
 }
 
 fn parse_args() -> Args {
@@ -52,6 +54,8 @@ fn parse_args() -> Args {
         cutoff_m: 5.0,
         seed: 1,
         ablate: Vec::new(),
+        box_size_sys_m: 0.0,
+        box_yaw_sys_deg: 0.0,
     };
     let v: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -63,6 +67,9 @@ fn parse_args() -> Args {
             "--delay-ms" => a.delay_ms = val.parse().expect("--delay-ms"),
             "--cutoff-m" => a.cutoff_m = val.parse().expect("--cutoff-m"),
             "--seed" => a.seed = val.parse().expect("--seed"),
+            // Declared systematic box errors of the detector (tracker config).
+            "--box-size-sys-m" => a.box_size_sys_m = val.parse().expect("--box-size-sys-m"),
+            "--box-yaw-sys-deg" => a.box_yaw_sys_deg = val.parse().expect("--box-yaw-sys-deg"),
             // Diagnostics only (world model): no-box-gate, no-size-gate, no-yaw-gate,
             // no-vel-gate, no-pos-gate.
             "--ablate" => a.ablate.push(val),
@@ -161,6 +168,8 @@ fn main() {
 
     let mut keys = DeterministicKeyProvider::new(args.seed);
     let mut config = NodeConfig::default();
+    config.tracker.box_size_sys_m = args.box_size_sys_m;
+    config.tracker.box_yaw_sys_rad = args.box_yaw_sys_deg.to_radians();
     for a in &args.ablate {
         match a.as_str() {
             "no-box-gate" => config.world.box_gate = godview_core::extent::BoxGate::disabled(),
@@ -384,6 +393,8 @@ fn main() {
         "declared": truth["declared"],
         "delay_ms": args.delay_ms,
         "ablations": args.ablate,
+        "box_size_sys_m": args.box_size_sys_m,
+        "box_yaw_sys_deg": args.box_yaw_sys_deg,
         "cutoff_m": args.cutoff_m,
         "expected_rule": format!("detected by at least one car in this and the previous {} frames", EXPECT_HISTORY - 1),
         "batches_rejected": rejected,

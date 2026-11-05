@@ -67,6 +67,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -159,6 +161,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -251,6 +255,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -390,6 +396,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -484,6 +492,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -578,6 +588,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -729,6 +741,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -821,6 +835,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -913,6 +929,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -1052,6 +1070,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -1146,6 +1166,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -1240,6 +1262,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -1390,6 +1414,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -1482,6 +1508,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -1619,6 +1647,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -1713,6 +1743,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -1863,6 +1895,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -1955,6 +1989,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -2092,6 +2128,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -2186,6 +2224,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -2336,6 +2376,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -2428,6 +2470,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -2565,6 +2609,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -2659,6 +2705,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -2807,6 +2855,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -2899,6 +2949,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -3036,6 +3088,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -3130,6 +3184,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -3278,6 +3334,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -3370,6 +3428,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -3507,6 +3567,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -3601,6 +3663,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -3749,6 +3813,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -3841,6 +3907,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -3978,6 +4046,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -4072,6 +4142,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -4220,6 +4292,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -4312,6 +4386,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -4449,6 +4525,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -4543,6 +4621,8 @@
         0,
         0
        ],
+       "box_size_sys_m": 0.0,
+       "box_yaw_sys_deg": 0.0,
        "cars": [
         {
          "car": 0,
@@ -4631,6 +4711,1621 @@
       }
      ]
     }
+   }
+  },
+  "sys_from_09-54-40_0_pose_nominal": {
+   "declared": {
+    "sigma_h": 1.27,
+    "sigma_v": 2.0,
+    "sigma_yaw_deg": 0.1
+   },
+   "scored_on": [
+    "10-29-43_3",
+    "10-29-43_4"
+   ],
+   "runs": {
+    "default": {
+     "pooled": {
+      "frames": 516,
+      "matched": 1846,
+      "missed": 0,
+      "duplicates": 244,
+      "duplicates_split_across_cars": 192,
+      "false_estimates": 327,
+      "false_estimates_with_id_of_a_previously_matched_object": 304,
+      "matched_not_expected": 93,
+      "self_in_own_world": 504,
+      "detected_by_both_matched": 424,
+      "detected_by_both_fused_into_one": 268,
+      "matched_never_detected_by_own_sensor": 389,
+      "objects_gained_only_through_sharing": 12,
+      "matched_not_detected_by_own_sensor_this_frame": 459,
+      "objects_with_id": 34,
+      "id_changes_total": 76,
+      "objects_with_id_change": 16,
+      "n_nees": 1846,
+      "n_box": 1846,
+      "n_both_labeled": 446,
+      "rms_m": 1.0106409619877619,
+      "nees_pos_3d_mean": 0.39334119443556215,
+      "nees_pos_h_2d_mean": 0.24110112115489762,
+      "nees_pos_v_1d_mean": 0.15224070783031335,
+      "nees_pos_3d_mean_both_labeled": 1.2555361221927466,
+      "rms_m_both_labeled": 1.8280551049727851,
+      "size_nees_3d_mean": 2.852844461578132,
+      "heading_err_deg_p95_worst_car": 6.193333302627534,
+      "heading_err_deg_median_by_car": [
+       1.84,
+       1.53,
+       1.74,
+       1.63
+      ],
+      "heading_err_deg_max": 46.51209290176334,
+      "id_changes_per_object": 2.235294117647059,
+      "fused_fraction_when_both_detect": 0.6320754716981132
+     },
+     "per_scenario": [
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.049,
+       "box_yaw_sys_deg": 3.08,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 89,
+         "detected_by_both_matched": 150,
+         "duplicates": 92,
+         "duplicates_split_across_cars": 79,
+         "false_estimates": 146,
+         "false_estimates_with_id_of_a_previously_matched_object": 134,
+         "frames": 114,
+         "heading_err_deg_max": 46.51209290176334,
+         "heading_err_deg_median": 1.8440300166762271,
+         "heading_err_deg_p95": 6.193333302627534,
+         "id_changes_per_object": 2.272727272727273,
+         "id_changes_total": 25,
+         "matched": 584,
+         "matched_never_detected_by_own_sensor": 238,
+         "matched_not_detected_by_own_sensor_this_frame": 306,
+         "matched_not_expected": 42,
+         "missed": 0,
+         "n_both_labeled": 161,
+         "n_box": 584,
+         "n_nees": 584,
+         "nees_pos_3d_mean": 0.572029752665532,
+         "nees_pos_3d_mean_both_labeled": 1.7046427860033329,
+         "nees_pos_3d_p95": 2.4717029385115494,
+         "nees_pos_h_2d_mean": 0.35275978370110245,
+         "nees_pos_v_1d_mean": 0.2192727274425629,
+         "objects_gained_only_through_sharing": 5,
+         "objects_with_id": 11,
+         "objects_with_id_change": 6,
+         "rms_m": 1.217691988461903,
+         "rms_m_both_labeled": 2.115174235791315,
+         "self_in_own_world": 111,
+         "size_nees_3d_mean": 2.818929703494582
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 94,
+         "detected_by_both_matched": 150,
+         "duplicates": 92,
+         "duplicates_split_across_cars": 79,
+         "false_estimates": 138,
+         "false_estimates_with_id_of_a_previously_matched_object": 127,
+         "frames": 114,
+         "heading_err_deg_max": 46.512086071574174,
+         "heading_err_deg_median": 1.5297349538088318,
+         "heading_err_deg_p95": 5.150324283944395,
+         "id_changes_per_object": 2.727272727272727,
+         "id_changes_total": 30,
+         "matched": 584,
+         "matched_never_detected_by_own_sensor": 15,
+         "matched_not_detected_by_own_sensor_this_frame": 17,
+         "matched_not_expected": 44,
+         "missed": 0,
+         "n_both_labeled": 161,
+         "n_box": 584,
+         "n_nees": 584,
+         "nees_pos_3d_mean": 0.5489981807269878,
+         "nees_pos_3d_mean_both_labeled": 1.6527327951990594,
+         "nees_pos_3d_p95": 2.5562246611525663,
+         "nees_pos_h_2d_mean": 0.3204535422377091,
+         "nees_pos_v_1d_mean": 0.22854460075293737,
+         "objects_gained_only_through_sharing": 2,
+         "objects_with_id": 11,
+         "objects_with_id_change": 7,
+         "rms_m": 1.2086262903878953,
+         "rms_m_both_labeled": 2.104144081965227,
+         "self_in_own_world": 111,
+         "size_nees_3d_mean": 2.8931340031649655
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 1.27,
+        "pose_sigma_v_m": 2.0,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-10-29-43_3"
+      },
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.049,
+       "box_yaw_sys_deg": 3.08,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 44,
+         "detected_by_both_matched": 62,
+         "duplicates": 29,
+         "duplicates_split_across_cars": 16,
+         "false_estimates": 21,
+         "false_estimates_with_id_of_a_previously_matched_object": 21,
+         "frames": 144,
+         "heading_err_deg_max": 8.798432295067,
+         "heading_err_deg_median": 1.7418833973423036,
+         "heading_err_deg_p95": 4.755397237023384,
+         "id_changes_per_object": 2.0,
+         "id_changes_total": 12,
+         "matched": 339,
+         "matched_never_detected_by_own_sensor": 79,
+         "matched_not_detected_by_own_sensor_this_frame": 79,
+         "matched_not_expected": 5,
+         "missed": 0,
+         "n_both_labeled": 62,
+         "n_box": 339,
+         "n_nees": 339,
+         "nees_pos_3d_mean": 0.09801089217262686,
+         "nees_pos_3d_mean_both_labeled": 0.1547689382847336,
+         "nees_pos_3d_p95": 0.2683805933382984,
+         "nees_pos_h_2d_mean": 0.07520083326509344,
+         "nees_pos_v_1d_mean": 0.022809793344973954,
+         "objects_gained_only_through_sharing": 1,
+         "objects_with_id": 6,
+         "objects_with_id_change": 1,
+         "rms_m": 0.4676705038630636,
+         "rms_m_both_labeled": 0.66863048210416,
+         "self_in_own_world": 141,
+         "size_nees_3d_mean": 2.9546175641433536
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 41,
+         "detected_by_both_matched": 62,
+         "duplicates": 31,
+         "duplicates_split_across_cars": 18,
+         "false_estimates": 22,
+         "false_estimates_with_id_of_a_previously_matched_object": 22,
+         "frames": 144,
+         "heading_err_deg_max": 9.105208013015314,
+         "heading_err_deg_median": 1.6305728069857761,
+         "heading_err_deg_p95": 4.002539012229253,
+         "id_changes_per_object": 1.5,
+         "id_changes_total": 9,
+         "matched": 339,
+         "matched_never_detected_by_own_sensor": 57,
+         "matched_not_detected_by_own_sensor_this_frame": 57,
+         "matched_not_expected": 2,
+         "missed": 0,
+         "n_both_labeled": 62,
+         "n_box": 339,
+         "n_nees": 339,
+         "nees_pos_3d_mean": 0.1126897916822878,
+         "nees_pos_3d_mean_both_labeled": 0.15864464114074828,
+         "nees_pos_3d_p95": 0.3552940390102557,
+         "nees_pos_h_2d_mean": 0.07794396704073267,
+         "nees_pos_v_1d_mean": 0.03474485853876153,
+         "objects_gained_only_through_sharing": 4,
+         "objects_with_id": 6,
+         "objects_with_id_change": 2,
+         "rms_m": 0.5218440173095225,
+         "rms_m_both_labeled": 0.690900518350235,
+         "self_in_own_world": 141,
+         "size_nees_3d_mean": 2.740089431089848
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 1.27,
+        "pose_sigma_v_m": 2.0,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-10-29-43_4"
+      }
+     ]
+    }
+   },
+   "box_systematic": {
+    "box_size_sys_m": 0.049,
+    "box_yaw_sys_deg": 3.08,
+    "chosen_from": "09-54-40_0"
+   }
+  },
+  "sys_from_09-54-40_0_pose_loo": {
+   "declared": {
+    "sigma_h": 0.73,
+    "sigma_v": 0.93,
+    "sigma_yaw_deg": 0.1,
+    "pairs": 290,
+    "chosen_from": "09-54-40_0"
+   },
+   "scored_on": [
+    "10-29-43_3",
+    "10-29-43_4"
+   ],
+   "runs": {
+    "default": {
+     "pooled": {
+      "frames": 516,
+      "matched": 1846,
+      "missed": 0,
+      "duplicates": 267,
+      "duplicates_split_across_cars": 205,
+      "false_estimates": 342,
+      "false_estimates_with_id_of_a_previously_matched_object": 319,
+      "matched_not_expected": 93,
+      "self_in_own_world": 504,
+      "detected_by_both_matched": 424,
+      "detected_by_both_fused_into_one": 240,
+      "matched_never_detected_by_own_sensor": 389,
+      "objects_gained_only_through_sharing": 12,
+      "matched_not_detected_by_own_sensor_this_frame": 459,
+      "objects_with_id": 34,
+      "id_changes_total": 67,
+      "objects_with_id_change": 16,
+      "n_nees": 1846,
+      "n_box": 1846,
+      "n_both_labeled": 446,
+      "rms_m": 0.9928653725433108,
+      "nees_pos_3d_mean": 1.3122878541228291,
+      "nees_pos_h_2d_mean": 0.6803535818068481,
+      "nees_pos_v_1d_mean": 0.6319850872580943,
+      "nees_pos_3d_mean_both_labeled": 4.221699240071721,
+      "rms_m_both_labeled": 1.7872830459008677,
+      "size_nees_3d_mean": 2.8217440522507427,
+      "heading_err_deg_p95_worst_car": 6.193333302627534,
+      "heading_err_deg_median_by_car": [
+       1.83,
+       1.54,
+       1.74,
+       1.63
+      ],
+      "heading_err_deg_max": 46.51209290176334,
+      "id_changes_per_object": 1.9705882352941178,
+      "fused_fraction_when_both_detect": 0.5660377358490566
+     },
+     "per_scenario": [
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.049,
+       "box_yaw_sys_deg": 3.08,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 78,
+         "detected_by_both_matched": 150,
+         "duplicates": 102,
+         "duplicates_split_across_cars": 85,
+         "false_estimates": 152,
+         "false_estimates_with_id_of_a_previously_matched_object": 140,
+         "frames": 114,
+         "heading_err_deg_max": 46.51209290176334,
+         "heading_err_deg_median": 1.8321805775451259,
+         "heading_err_deg_p95": 6.193333302627534,
+         "id_changes_per_object": 2.0,
+         "id_changes_total": 22,
+         "matched": 584,
+         "matched_never_detected_by_own_sensor": 238,
+         "matched_not_detected_by_own_sensor_this_frame": 306,
+         "matched_not_expected": 42,
+         "missed": 0,
+         "n_both_labeled": 161,
+         "n_box": 584,
+         "n_nees": 584,
+         "nees_pos_3d_mean": 1.8809962981716926,
+         "nees_pos_3d_mean_both_labeled": 5.620151249506073,
+         "nees_pos_3d_p95": 8.55048391599392,
+         "nees_pos_h_2d_mean": 0.9851563637713101,
+         "nees_pos_v_1d_mean": 0.8959477481008695,
+         "objects_gained_only_through_sharing": 5,
+         "objects_with_id": 11,
+         "objects_with_id_change": 6,
+         "rms_m": 1.1897093244348078,
+         "rms_m_both_labeled": 2.0566003975990483,
+         "self_in_own_world": 111,
+         "size_nees_3d_mean": 2.7726104799537183
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 77,
+         "detected_by_both_matched": 150,
+         "duplicates": 105,
+         "duplicates_split_across_cars": 86,
+         "false_estimates": 147,
+         "false_estimates_with_id_of_a_previously_matched_object": 136,
+         "frames": 114,
+         "heading_err_deg_max": 46.512086071574174,
+         "heading_err_deg_median": 1.5442025012968215,
+         "heading_err_deg_p95": 5.150324283944395,
+         "id_changes_per_object": 2.1818181818181817,
+         "id_changes_total": 24,
+         "matched": 584,
+         "matched_never_detected_by_own_sensor": 15,
+         "matched_not_detected_by_own_sensor_this_frame": 17,
+         "matched_not_expected": 44,
+         "missed": 0,
+         "n_both_labeled": 161,
+         "n_box": 584,
+         "n_nees": 584,
+         "nees_pos_3d_mean": 1.8705436323742706,
+         "nees_pos_3d_mean_both_labeled": 5.627809808197181,
+         "nees_pos_3d_p95": 9.016983716975327,
+         "nees_pos_h_2d_mean": 0.9168182699000591,
+         "nees_pos_v_1d_mean": 0.9537864920411496,
+         "objects_gained_only_through_sharing": 2,
+         "objects_with_id": 11,
+         "objects_with_id_change": 7,
+         "rms_m": 1.1898810351929594,
+         "rms_m_both_labeled": 2.065026708060208,
+         "self_in_own_world": 111,
+         "size_nees_3d_mean": 2.841146110920965
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 0.73,
+        "pose_sigma_v_m": 0.93,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-10-29-43_3"
+      },
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.049,
+       "box_yaw_sys_deg": 3.08,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 44,
+         "detected_by_both_matched": 62,
+         "duplicates": 29,
+         "duplicates_split_across_cars": 16,
+         "false_estimates": 21,
+         "false_estimates_with_id_of_a_previously_matched_object": 21,
+         "frames": 144,
+         "heading_err_deg_max": 8.798432295067,
+         "heading_err_deg_median": 1.7418833973423036,
+         "heading_err_deg_p95": 4.755397237023384,
+         "id_changes_per_object": 2.0,
+         "id_changes_total": 12,
+         "matched": 339,
+         "matched_never_detected_by_own_sensor": 79,
+         "matched_not_detected_by_own_sensor_this_frame": 79,
+         "matched_not_expected": 5,
+         "missed": 0,
+         "n_both_labeled": 62,
+         "n_box": 339,
+         "n_nees": 339,
+         "nees_pos_3d_mean": 0.31214772089709975,
+         "nees_pos_3d_mean_both_labeled": 0.5674688520045973,
+         "nees_pos_3d_p95": 0.8322976609363146,
+         "nees_pos_h_2d_mean": 0.21099030780814956,
+         "nees_pos_v_1d_mean": 0.10115428425001646,
+         "objects_gained_only_through_sharing": 1,
+         "objects_with_id": 6,
+         "objects_with_id_change": 1,
+         "rms_m": 0.46738202025086034,
+         "rms_m_both_labeled": 0.667526638278915,
+         "self_in_own_world": 141,
+         "size_nees_3d_mean": 2.9546175641433536
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 41,
+         "detected_by_both_matched": 62,
+         "duplicates": 31,
+         "duplicates_split_across_cars": 18,
+         "false_estimates": 22,
+         "false_estimates_with_id_of_a_previously_matched_object": 22,
+         "frames": 144,
+         "heading_err_deg_max": 9.105208013015314,
+         "heading_err_deg_median": 1.6305728069857761,
+         "heading_err_deg_p95": 4.002539012229253,
+         "id_changes_per_object": 1.5,
+         "id_changes_total": 9,
+         "matched": 339,
+         "matched_never_detected_by_own_sensor": 57,
+         "matched_not_detected_by_own_sensor_this_frame": 57,
+         "matched_not_expected": 2,
+         "missed": 0,
+         "n_both_labeled": 62,
+         "n_box": 339,
+         "n_nees": 339,
+         "nees_pos_3d_mean": 0.37099109701411076,
+         "nees_pos_3d_mean_both_labeled": 0.5931139025399779,
+         "nees_pos_3d_p95": 1.1842554711726745,
+         "nees_pos_h_2d_mean": 0.21726788083893572,
+         "nees_pos_v_1d_mean": 0.15371201319984484,
+         "objects_gained_only_through_sharing": 4,
+         "objects_with_id": 6,
+         "objects_with_id_change": 2,
+         "rms_m": 0.5216952566075012,
+         "rms_m_both_labeled": 0.6902859747451832,
+         "self_in_own_world": 141,
+         "size_nees_3d_mean": 2.740089431089848
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 0.73,
+        "pose_sigma_v_m": 0.93,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-10-29-43_4"
+      }
+     ]
+    }
+   },
+   "box_systematic": {
+    "box_size_sys_m": 0.049,
+    "box_yaw_sys_deg": 3.08,
+    "chosen_from": "09-54-40_0"
+   }
+  },
+  "sys_from_10-29-43_3_pose_nominal": {
+   "declared": {
+    "sigma_h": 1.27,
+    "sigma_v": 2.0,
+    "sigma_yaw_deg": 0.1
+   },
+   "scored_on": [
+    "09-54-40_0",
+    "10-29-43_4"
+   ],
+   "runs": {
+    "default": {
+     "pooled": {
+      "frames": 582,
+      "matched": 1833,
+      "missed": 3,
+      "duplicates": 66,
+      "duplicates_split_across_cars": 34,
+      "false_estimates": 107,
+      "false_estimates_with_id_of_a_previously_matched_object": 107,
+      "matched_not_expected": 13,
+      "self_in_own_world": 282,
+      "detected_by_both_matched": 697,
+      "detected_by_both_fused_into_one": 684,
+      "matched_never_detected_by_own_sensor": 426,
+      "objects_gained_only_through_sharing": 11,
+      "matched_not_detected_by_own_sensor_this_frame": 426,
+      "objects_with_id": 28,
+      "id_changes_total": 20,
+      "objects_with_id_change": 9,
+      "n_nees": 1833,
+      "n_box": 1833,
+      "n_both_labeled": 697,
+      "rms_m": 0.7185390781995037,
+      "nees_pos_3d_mean": 0.23080744494730415,
+      "nees_pos_h_2d_mean": 0.17556231819929838,
+      "nees_pos_v_1d_mean": 0.055245831596176354,
+      "nees_pos_3d_mean_both_labeled": 0.4168913148024339,
+      "rms_m_both_labeled": 0.9818072414403362,
+      "size_nees_3d_mean": 0.4969793685026352,
+      "heading_err_deg_p95_worst_car": 7.988373181569385,
+      "heading_err_deg_median_by_car": [
+       1.82,
+       2.04,
+       1.74,
+       1.55
+      ],
+      "heading_err_deg_max": 15.38240367322695,
+      "id_changes_per_object": 0.7142857142857143,
+      "fused_fraction_when_both_detect": 0.9813486370157819
+     },
+     "per_scenario": [
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.181,
+       "box_yaw_sys_deg": 1.74,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 284,
+         "detected_by_both_matched": 287,
+         "duplicates": 18,
+         "duplicates_split_across_cars": 15,
+         "false_estimates": 32,
+         "false_estimates_with_id_of_a_previously_matched_object": 32,
+         "frames": 147,
+         "heading_err_deg_max": 8.228761357270368,
+         "heading_err_deg_median": 1.8176244646928381,
+         "heading_err_deg_p95": 5.252781296451368,
+         "id_changes_per_object": 1.0,
+         "id_changes_total": 8,
+         "matched": 579,
+         "matched_never_detected_by_own_sensor": 235,
+         "matched_not_detected_by_own_sensor_this_frame": 235,
+         "matched_not_expected": 3,
+         "missed": 0,
+         "n_both_labeled": 287,
+         "n_box": 579,
+         "n_nees": 579,
+         "nees_pos_3d_mean": 0.2930004339626924,
+         "nees_pos_3d_mean_both_labeled": 0.43771819069544277,
+         "nees_pos_3d_p95": 0.9029173583361119,
+         "nees_pos_h_2d_mean": 0.22644296265960628,
+         "nees_pos_v_1d_mean": 0.06655870418765851,
+         "objects_gained_only_through_sharing": 2,
+         "objects_with_id": 8,
+         "objects_with_id_change": 3,
+         "rms_m": 0.8040696664044794,
+         "rms_m_both_labeled": 0.9962768957486294,
+         "self_in_own_world": 0,
+         "size_nees_3d_mean": 0.41062290043838007
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 284,
+         "detected_by_both_matched": 286,
+         "duplicates": 19,
+         "duplicates_split_across_cars": 16,
+         "false_estimates": 32,
+         "false_estimates_with_id_of_a_previously_matched_object": 32,
+         "frames": 147,
+         "heading_err_deg_max": 15.38240367322695,
+         "heading_err_deg_median": 2.04146646167397,
+         "heading_err_deg_p95": 7.988373181569385,
+         "id_changes_per_object": 0.875,
+         "id_changes_total": 7,
+         "matched": 576,
+         "matched_never_detected_by_own_sensor": 55,
+         "matched_not_detected_by_own_sensor_this_frame": 55,
+         "matched_not_expected": 3,
+         "missed": 3,
+         "n_both_labeled": 286,
+         "n_box": 576,
+         "n_nees": 576,
+         "nees_pos_3d_mean": 0.31572460996748264,
+         "nees_pos_3d_mean_both_labeled": 0.5083167678580456,
+         "nees_pos_3d_p95": 0.9192860896052641,
+         "nees_pos_h_2d_mean": 0.24136806581554104,
+         "nees_pos_v_1d_mean": 0.07435837164368754,
+         "objects_gained_only_through_sharing": 4,
+         "objects_with_id": 8,
+         "objects_with_id_change": 3,
+         "rms_m": 0.837971050367164,
+         "rms_m_both_labeled": 1.0718595061129326,
+         "self_in_own_world": 0,
+         "size_nees_3d_mean": 0.40771909072027884
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 1.27,
+        "pose_sigma_v_m": 2.0,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-09-54-40_0"
+      },
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.181,
+       "box_yaw_sys_deg": 1.74,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 58,
+         "detected_by_both_matched": 62,
+         "duplicates": 15,
+         "duplicates_split_across_cars": 2,
+         "false_estimates": 21,
+         "false_estimates_with_id_of_a_previously_matched_object": 21,
+         "frames": 144,
+         "heading_err_deg_max": 8.798432295067,
+         "heading_err_deg_median": 1.7418833973423036,
+         "heading_err_deg_p95": 4.755397237023384,
+         "id_changes_per_object": 0.3333333333333333,
+         "id_changes_total": 2,
+         "matched": 339,
+         "matched_never_detected_by_own_sensor": 79,
+         "matched_not_detected_by_own_sensor_this_frame": 79,
+         "matched_not_expected": 5,
+         "missed": 0,
+         "n_both_labeled": 62,
+         "n_box": 339,
+         "n_nees": 339,
+         "nees_pos_3d_mean": 0.0988003297659114,
+         "nees_pos_3d_mean_both_labeled": 0.1590853793189828,
+         "nees_pos_3d_p95": 0.2683805933382984,
+         "nees_pos_h_2d_mean": 0.0761331923822155,
+         "nees_pos_v_1d_mean": 0.022666780116590363,
+         "objects_gained_only_through_sharing": 1,
+         "objects_with_id": 6,
+         "objects_with_id_change": 1,
+         "rms_m": 0.4686715437050625,
+         "rms_m_both_labeled": 0.6724520220306566,
+         "self_in_own_world": 141,
+         "size_nees_3d_mean": 0.659345831921756
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 58,
+         "detected_by_both_matched": 62,
+         "duplicates": 14,
+         "duplicates_split_across_cars": 1,
+         "false_estimates": 22,
+         "false_estimates_with_id_of_a_previously_matched_object": 22,
+         "frames": 144,
+         "heading_err_deg_max": 6.945531533812632,
+         "heading_err_deg_median": 1.5511687012915882,
+         "heading_err_deg_p95": 4.002539012229253,
+         "id_changes_per_object": 0.5,
+         "id_changes_total": 3,
+         "matched": 339,
+         "matched_never_detected_by_own_sensor": 57,
+         "matched_not_detected_by_own_sensor_this_frame": 57,
+         "matched_not_expected": 2,
+         "missed": 0,
+         "n_both_labeled": 62,
+         "n_box": 339,
+         "n_nees": 339,
+         "nees_pos_3d_mean": 0.11230710381149155,
+         "nees_pos_3d_mean_both_labeled": 0.15655220262139455,
+         "nees_pos_3d_p95": 0.34615119659082527,
+         "nees_pos_h_2d_mean": 0.07627756859020399,
+         "nees_pos_v_1d_mean": 0.03602849281666321,
+         "objects_gained_only_through_sharing": 4,
+         "objects_with_id": 6,
+         "objects_with_id_change": 2,
+         "rms_m": 0.5240760426943524,
+         "rms_m_both_labeled": 0.7000771956293163,
+         "self_in_own_world": 141,
+         "size_nees_3d_mean": 0.6337701765048741
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 1.27,
+        "pose_sigma_v_m": 2.0,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-10-29-43_4"
+      }
+     ]
+    }
+   },
+   "box_systematic": {
+    "box_size_sys_m": 0.181,
+    "box_yaw_sys_deg": 1.74,
+    "chosen_from": "10-29-43_3"
+   }
+  },
+  "sys_from_10-29-43_3_pose_loo": {
+   "declared": {
+    "sigma_h": 1.31,
+    "sigma_v": 2.33,
+    "sigma_yaw_deg": 0.1,
+    "pairs": 170,
+    "chosen_from": "10-29-43_3"
+   },
+   "scored_on": [
+    "09-54-40_0",
+    "10-29-43_4"
+   ],
+   "runs": {
+    "default": {
+     "pooled": {
+      "frames": 582,
+      "matched": 1833,
+      "missed": 3,
+      "duplicates": 66,
+      "duplicates_split_across_cars": 34,
+      "false_estimates": 107,
+      "false_estimates_with_id_of_a_previously_matched_object": 107,
+      "matched_not_expected": 13,
+      "self_in_own_world": 282,
+      "detected_by_both_matched": 697,
+      "detected_by_both_fused_into_one": 684,
+      "matched_never_detected_by_own_sensor": 426,
+      "objects_gained_only_through_sharing": 11,
+      "matched_not_detected_by_own_sensor_this_frame": 426,
+      "objects_with_id": 28,
+      "id_changes_total": 20,
+      "objects_with_id_change": 9,
+      "n_nees": 1833,
+      "n_box": 1833,
+      "n_both_labeled": 697,
+      "rms_m": 0.7185430479543753,
+      "nees_pos_3d_mean": 0.20614888146033103,
+      "nees_pos_h_2d_mean": 0.16533288506801613,
+      "nees_pos_v_1d_mean": 0.04081648600020575,
+      "nees_pos_3d_mean_both_labeled": 0.36908474853437306,
+      "rms_m_both_labeled": 0.9818148818570961,
+      "size_nees_3d_mean": 0.4969793685026352,
+      "heading_err_deg_p95_worst_car": 7.988373181569385,
+      "heading_err_deg_median_by_car": [
+       1.82,
+       2.04,
+       1.74,
+       1.55
+      ],
+      "heading_err_deg_max": 15.38240367322695,
+      "id_changes_per_object": 0.7142857142857143,
+      "fused_fraction_when_both_detect": 0.9813486370157819
+     },
+     "per_scenario": [
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.181,
+       "box_yaw_sys_deg": 1.74,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 284,
+         "detected_by_both_matched": 287,
+         "duplicates": 18,
+         "duplicates_split_across_cars": 15,
+         "false_estimates": 32,
+         "false_estimates_with_id_of_a_previously_matched_object": 32,
+         "frames": 147,
+         "heading_err_deg_max": 8.228761357270368,
+         "heading_err_deg_median": 1.8176244646928381,
+         "heading_err_deg_p95": 5.252781296451368,
+         "id_changes_per_object": 1.0,
+         "id_changes_total": 8,
+         "matched": 579,
+         "matched_never_detected_by_own_sensor": 235,
+         "matched_not_detected_by_own_sensor_this_frame": 235,
+         "matched_not_expected": 3,
+         "missed": 0,
+         "n_both_labeled": 287,
+         "n_box": 579,
+         "n_nees": 579,
+         "nees_pos_3d_mean": 0.26240555237643354,
+         "nees_pos_3d_mean_both_labeled": 0.3890613773626395,
+         "nees_pos_3d_p95": 0.7933140962323306,
+         "nees_pos_h_2d_mean": 0.21323933546698004,
+         "nees_pos_v_1d_mean": 0.049167074638706156,
+         "objects_gained_only_through_sharing": 2,
+         "objects_with_id": 8,
+         "objects_with_id_change": 3,
+         "rms_m": 0.804069666456981,
+         "rms_m_both_labeled": 0.996276895834113,
+         "self_in_own_world": 0,
+         "size_nees_3d_mean": 0.41062290043838007
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 284,
+         "detected_by_both_matched": 286,
+         "duplicates": 19,
+         "duplicates_split_across_cars": 16,
+         "false_estimates": 32,
+         "false_estimates_with_id_of_a_previously_matched_object": 32,
+         "frames": 147,
+         "heading_err_deg_max": 15.38240367322695,
+         "heading_err_deg_median": 2.04146646167397,
+         "heading_err_deg_p95": 7.988373181569385,
+         "id_changes_per_object": 0.875,
+         "id_changes_total": 7,
+         "matched": 576,
+         "matched_never_detected_by_own_sensor": 55,
+         "matched_not_detected_by_own_sensor_this_frame": 55,
+         "matched_not_expected": 3,
+         "missed": 3,
+         "n_both_labeled": 286,
+         "n_box": 576,
+         "n_nees": 576,
+         "nees_pos_3d_mean": 0.2822023102149652,
+         "nees_pos_3d_mean_both_labeled": 0.45233131960670314,
+         "nees_pos_3d_p95": 0.8554228837186404,
+         "nees_pos_h_2d_mean": 0.22727102283166342,
+         "nees_pos_v_1d_mean": 0.05493255874916851,
+         "objects_gained_only_through_sharing": 4,
+         "objects_with_id": 8,
+         "objects_with_id_change": 3,
+         "rms_m": 0.8379712030512657,
+         "rms_m_both_labeled": 1.071859746516778,
+         "self_in_own_world": 0,
+         "size_nees_3d_mean": 0.40771909072027884
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 1.31,
+        "pose_sigma_v_m": 2.33,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-09-54-40_0"
+      },
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.181,
+       "box_yaw_sys_deg": 1.74,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 58,
+         "detected_by_both_matched": 62,
+         "duplicates": 15,
+         "duplicates_split_across_cars": 2,
+         "false_estimates": 21,
+         "false_estimates_with_id_of_a_previously_matched_object": 21,
+         "frames": 144,
+         "heading_err_deg_max": 8.798432295067,
+         "heading_err_deg_median": 1.7418833973423036,
+         "heading_err_deg_p95": 4.755397237023384,
+         "id_changes_per_object": 0.3333333333333333,
+         "id_changes_total": 2,
+         "matched": 339,
+         "matched_never_detected_by_own_sensor": 79,
+         "matched_not_detected_by_own_sensor_this_frame": 79,
+         "matched_not_expected": 5,
+         "missed": 0,
+         "n_both_labeled": 62,
+         "n_box": 339,
+         "n_nees": 339,
+         "nees_pos_3d_mean": 0.0884782799101656,
+         "nees_pos_3d_mean_both_labeled": 0.1338161937898135,
+         "nees_pos_3d_p95": 0.24510395795542494,
+         "nees_pos_h_2d_mean": 0.07172525813523448,
+         "nees_pos_v_1d_mean": 0.016752772480984363,
+         "objects_gained_only_through_sharing": 1,
+         "objects_with_id": 6,
+         "objects_with_id_change": 1,
+         "rms_m": 0.4686907808756437,
+         "rms_m_both_labeled": 0.6725253284028948,
+         "self_in_own_world": 141,
+         "size_nees_3d_mean": 0.659345831921756
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 58,
+         "detected_by_both_matched": 62,
+         "duplicates": 14,
+         "duplicates_split_across_cars": 1,
+         "false_estimates": 22,
+         "false_estimates_with_id_of_a_previously_matched_object": 22,
+         "frames": 144,
+         "heading_err_deg_max": 6.945531533812632,
+         "heading_err_deg_median": 1.5511687012915882,
+         "heading_err_deg_p95": 4.002539012229253,
+         "id_changes_per_object": 0.5,
+         "id_changes_total": 3,
+         "matched": 339,
+         "matched_never_detected_by_own_sensor": 57,
+         "matched_not_detected_by_own_sensor_this_frame": 57,
+         "matched_not_expected": 2,
+         "missed": 0,
+         "n_both_labeled": 62,
+         "n_box": 339,
+         "n_nees": 339,
+         "nees_pos_3d_mean": 0.0985115555087481,
+         "nees_pos_3d_mean_both_labeled": 0.12787246778862807,
+         "nees_pos_3d_p95": 0.2955244301499359,
+         "nees_pos_h_2d_mean": 0.0718779688360163,
+         "nees_pos_v_1d_mean": 0.026632858147467596,
+         "objects_gained_only_through_sharing": 4,
+         "objects_with_id": 6,
+         "objects_with_id_change": 2,
+         "rms_m": 0.5240878533697503,
+         "rms_m_both_labeled": 0.7001255372290096,
+         "self_in_own_world": 141,
+         "size_nees_3d_mean": 0.6337701765048741
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 1.31,
+        "pose_sigma_v_m": 2.33,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-10-29-43_4"
+      }
+     ]
+    }
+   },
+   "box_systematic": {
+    "box_size_sys_m": 0.181,
+    "box_yaw_sys_deg": 1.74,
+    "chosen_from": "10-29-43_3"
+   }
+  },
+  "sys_from_10-29-43_4_pose_nominal": {
+   "declared": {
+    "sigma_h": 1.27,
+    "sigma_v": 2.0,
+    "sigma_yaw_deg": 0.1
+   },
+   "scored_on": [
+    "09-54-40_0",
+    "10-29-43_3"
+   ],
+   "runs": {
+    "default": {
+     "pooled": {
+      "frames": 522,
+      "matched": 2310,
+      "missed": 16,
+      "duplicates": 173,
+      "duplicates_split_across_cars": 144,
+      "false_estimates": 313,
+      "false_estimates_with_id_of_a_previously_matched_object": 305,
+      "matched_not_expected": 86,
+      "self_in_own_world": 222,
+      "detected_by_both_matched": 873,
+      "detected_by_both_fused_into_one": 779,
+      "matched_never_detected_by_own_sensor": 532,
+      "objects_gained_only_through_sharing": 13,
+      "matched_not_detected_by_own_sensor_this_frame": 601,
+      "objects_with_id": 38,
+      "id_changes_total": 57,
+      "objects_with_id_change": 18,
+      "n_nees": 2310,
+      "n_box": 2310,
+      "n_both_labeled": 895,
+      "rms_m": 1.0474370927499213,
+      "nees_pos_3d_mean": 0.44139412698960345,
+      "nees_pos_h_2d_mean": 0.2905125072208719,
+      "nees_pos_v_1d_mean": 0.15088255827388425,
+      "nees_pos_3d_mean_both_labeled": 0.9169395803704857,
+      "rms_m_both_labeled": 1.521092262849943,
+      "size_nees_3d_mean": 0.5311520581811927,
+      "heading_err_deg_p95_worst_car": 7.988373181569385,
+      "heading_err_deg_median_by_car": [
+       1.82,
+       2.06,
+       1.89,
+       1.53
+      ],
+      "heading_err_deg_max": 46.51209290176334,
+      "id_changes_per_object": 1.5,
+      "fused_fraction_when_both_detect": 0.8923253150057274
+     },
+     "per_scenario": [
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.183,
+       "box_yaw_sys_deg": 1.47,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 284,
+         "detected_by_both_matched": 287,
+         "duplicates": 18,
+         "duplicates_split_across_cars": 15,
+         "false_estimates": 32,
+         "false_estimates_with_id_of_a_previously_matched_object": 32,
+         "frames": 147,
+         "heading_err_deg_max": 8.228761357270368,
+         "heading_err_deg_median": 1.8176244646928381,
+         "heading_err_deg_p95": 5.252781296451368,
+         "id_changes_per_object": 1.0,
+         "id_changes_total": 8,
+         "matched": 579,
+         "matched_never_detected_by_own_sensor": 235,
+         "matched_not_detected_by_own_sensor_this_frame": 235,
+         "matched_not_expected": 3,
+         "missed": 0,
+         "n_both_labeled": 287,
+         "n_box": 579,
+         "n_nees": 579,
+         "nees_pos_3d_mean": 0.2930004339626924,
+         "nees_pos_3d_mean_both_labeled": 0.43771819069544277,
+         "nees_pos_3d_p95": 0.9029173583361119,
+         "nees_pos_h_2d_mean": 0.22644296265960628,
+         "nees_pos_v_1d_mean": 0.06655870418765851,
+         "objects_gained_only_through_sharing": 2,
+         "objects_with_id": 8,
+         "objects_with_id_change": 3,
+         "rms_m": 0.8040696664044794,
+         "rms_m_both_labeled": 0.9962768957486294,
+         "self_in_own_world": 0,
+         "size_nees_3d_mean": 0.40329143759008346
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 284,
+         "detected_by_both_matched": 286,
+         "duplicates": 19,
+         "duplicates_split_across_cars": 16,
+         "false_estimates": 32,
+         "false_estimates_with_id_of_a_previously_matched_object": 32,
+         "frames": 147,
+         "heading_err_deg_max": 15.38240367322695,
+         "heading_err_deg_median": 2.060492091606474,
+         "heading_err_deg_p95": 7.988373181569385,
+         "id_changes_per_object": 0.875,
+         "id_changes_total": 7,
+         "matched": 576,
+         "matched_never_detected_by_own_sensor": 55,
+         "matched_not_detected_by_own_sensor_this_frame": 55,
+         "matched_not_expected": 3,
+         "missed": 3,
+         "n_both_labeled": 286,
+         "n_box": 576,
+         "n_nees": 576,
+         "nees_pos_3d_mean": 0.31572460996748264,
+         "nees_pos_3d_mean_both_labeled": 0.5083167678580456,
+         "nees_pos_3d_p95": 0.9192860896052641,
+         "nees_pos_h_2d_mean": 0.24136806581554104,
+         "nees_pos_v_1d_mean": 0.07435837164368754,
+         "objects_gained_only_through_sharing": 4,
+         "objects_with_id": 8,
+         "objects_with_id_change": 3,
+         "rms_m": 0.837971050367164,
+         "rms_m_both_labeled": 1.0718595061129326,
+         "self_in_own_world": 0,
+         "size_nees_3d_mean": 0.4003644159336314
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 1.27,
+        "pose_sigma_v_m": 2.0,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-09-54-40_0"
+      },
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.183,
+       "box_yaw_sys_deg": 1.47,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 103,
+         "detected_by_both_matched": 150,
+         "duplicates": 71,
+         "duplicates_split_across_cars": 59,
+         "false_estimates": 127,
+         "false_estimates_with_id_of_a_previously_matched_object": 123,
+         "frames": 114,
+         "heading_err_deg_max": 46.51209290176334,
+         "heading_err_deg_median": 1.8941964850717359,
+         "heading_err_deg_p95": 6.252745403946125,
+         "id_changes_per_object": 2.272727272727273,
+         "id_changes_total": 25,
+         "matched": 578,
+         "matched_never_detected_by_own_sensor": 233,
+         "matched_not_detected_by_own_sensor_this_frame": 300,
+         "matched_not_expected": 39,
+         "missed": 6,
+         "n_both_labeled": 161,
+         "n_box": 578,
+         "n_nees": 578,
+         "nees_pos_3d_mean": 0.5898118565760301,
+         "nees_pos_3d_mean_both_labeled": 1.72978539598401,
+         "nees_pos_3d_p95": 2.497714787788731,
+         "nees_pos_h_2d_mean": 0.36483602509888474,
+         "nees_pos_v_1d_mean": 0.22497842425133496,
+         "objects_gained_only_through_sharing": 5,
+         "objects_with_id": 11,
+         "objects_with_id_change": 7,
+         "rms_m": 1.2355600400339095,
+         "rms_m_both_labeled": 2.1273534696857173,
+         "self_in_own_world": 111,
+         "size_nees_3d_mean": 0.6958150962170255
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 108,
+         "detected_by_both_matched": 150,
+         "duplicates": 65,
+         "duplicates_split_across_cars": 54,
+         "false_estimates": 122,
+         "false_estimates_with_id_of_a_previously_matched_object": 118,
+         "frames": 114,
+         "heading_err_deg_max": 46.512086071574174,
+         "heading_err_deg_median": 1.5297349538088318,
+         "heading_err_deg_p95": 5.238813759870282,
+         "id_changes_per_object": 1.5454545454545454,
+         "id_changes_total": 17,
+         "matched": 577,
+         "matched_never_detected_by_own_sensor": 9,
+         "matched_not_detected_by_own_sensor_this_frame": 11,
+         "matched_not_expected": 41,
+         "missed": 7,
+         "n_both_labeled": 161,
+         "n_box": 577,
+         "n_nees": 577,
+         "nees_pos_3d_mean": 0.5670789491150254,
+         "nees_pos_3d_mean_both_labeled": 1.684234530069354,
+         "nees_pos_3d_p95": 2.5562246611525663,
+         "nees_pos_h_2d_mean": 0.32941107085510407,
+         "nees_pos_v_1d_mean": 0.2376659767833322,
+         "objects_gained_only_through_sharing": 2,
+         "objects_with_id": 11,
+         "objects_with_id_change": 5,
+         "rms_m": 1.2301621023252904,
+         "rms_m_both_labeled": 2.1274698773083447,
+         "self_in_own_world": 111,
+         "size_nees_3d_mean": 0.6250684278036126
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 1.27,
+        "pose_sigma_v_m": 2.0,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-10-29-43_3"
+      }
+     ]
+    }
+   },
+   "box_systematic": {
+    "box_size_sys_m": 0.183,
+    "box_yaw_sys_deg": 1.47,
+    "chosen_from": "10-29-43_4"
+   }
+  },
+  "sys_from_10-29-43_4_pose_loo": {
+   "declared": {
+    "sigma_h": 0.29,
+    "sigma_v": 0.57,
+    "sigma_yaw_deg": 0.1,
+    "pairs": 62,
+    "chosen_from": "10-29-43_4"
+   },
+   "scored_on": [
+    "09-54-40_0",
+    "10-29-43_3"
+   ],
+   "runs": {
+    "default": {
+     "pooled": {
+      "frames": 522,
+      "matched": 2323,
+      "missed": 3,
+      "duplicates": 359,
+      "duplicates_split_across_cars": 311,
+      "false_estimates": 361,
+      "false_estimates_with_id_of_a_previously_matched_object": 358,
+      "matched_not_expected": 92,
+      "self_in_own_world": 222,
+      "detected_by_both_matched": 873,
+      "detected_by_both_fused_into_one": 629,
+      "matched_never_detected_by_own_sensor": 543,
+      "objects_gained_only_through_sharing": 13,
+      "matched_not_detected_by_own_sensor_this_frame": 613,
+      "objects_with_id": 38,
+      "id_changes_total": 100,
+      "objects_with_id_change": 21,
+      "n_nees": 2323,
+      "n_box": 2323,
+      "n_both_labeled": 895,
+      "rms_m": 0.9987816902913754,
+      "nees_pos_3d_mean": 4.784598932806873,
+      "nees_pos_h_2d_mean": 3.366211536410822,
+      "nees_pos_v_1d_mean": 1.419002809852311,
+      "nees_pos_3d_mean_both_labeled": 10.0925314244433,
+      "rms_m_both_labeled": 1.446514300452848,
+      "size_nees_3d_mean": 0.5397544847559652,
+      "heading_err_deg_p95_worst_car": 7.684309340753887,
+      "heading_err_deg_median_by_car": [
+       1.82,
+       2.06,
+       1.89,
+       1.6
+      ],
+      "heading_err_deg_max": 46.51209290176334,
+      "id_changes_per_object": 2.6315789473684212,
+      "fused_fraction_when_both_detect": 0.720504009163803
+     },
+     "per_scenario": [
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.183,
+       "box_yaw_sys_deg": 1.47,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 273,
+         "detected_by_both_matched": 287,
+         "duplicates": 29,
+         "duplicates_split_across_cars": 26,
+         "false_estimates": 31,
+         "false_estimates_with_id_of_a_previously_matched_object": 31,
+         "frames": 147,
+         "heading_err_deg_max": 10.603489374696828,
+         "heading_err_deg_median": 1.8215897205080611,
+         "heading_err_deg_p95": 5.325619884430916,
+         "id_changes_per_object": 2.875,
+         "id_changes_total": 23,
+         "matched": 579,
+         "matched_never_detected_by_own_sensor": 235,
+         "matched_not_detected_by_own_sensor_this_frame": 235,
+         "matched_not_expected": 3,
+         "missed": 0,
+         "n_both_labeled": 287,
+         "n_box": 579,
+         "n_nees": 579,
+         "nees_pos_3d_mean": 3.5882192953387175,
+         "nees_pos_3d_mean_both_labeled": 5.637724357232946,
+         "nees_pos_3d_p95": 11.463476745185641,
+         "nees_pos_h_2d_mean": 2.85459138017065,
+         "nees_pos_v_1d_mean": 0.7338081454800905,
+         "objects_gained_only_through_sharing": 2,
+         "objects_with_id": 8,
+         "objects_with_id_change": 4,
+         "rms_m": 0.8033092088479613,
+         "rms_m_both_labeled": 0.9950385273934805,
+         "self_in_own_world": 0,
+         "size_nees_3d_mean": 0.40221684406688446
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 273,
+         "detected_by_both_matched": 286,
+         "duplicates": 28,
+         "duplicates_split_across_cars": 25,
+         "false_estimates": 32,
+         "false_estimates_with_id_of_a_previously_matched_object": 32,
+         "frames": 147,
+         "heading_err_deg_max": 15.38240367322695,
+         "heading_err_deg_median": 2.0611041249774416,
+         "heading_err_deg_p95": 7.684309340753887,
+         "id_changes_per_object": 2.0,
+         "id_changes_total": 16,
+         "matched": 576,
+         "matched_never_detected_by_own_sensor": 55,
+         "matched_not_detected_by_own_sensor_this_frame": 55,
+         "matched_not_expected": 3,
+         "missed": 3,
+         "n_both_labeled": 286,
+         "n_box": 576,
+         "n_nees": 576,
+         "nees_pos_3d_mean": 3.8270786656618623,
+         "nees_pos_3d_mean_both_labeled": 6.310393655817095,
+         "nees_pos_3d_p95": 11.83296370177532,
+         "nees_pos_h_2d_mean": 3.020961213853345,
+         "nees_pos_v_1d_mean": 0.8063665082449467,
+         "objects_gained_only_through_sharing": 4,
+         "objects_with_id": 8,
+         "objects_with_id_change": 4,
+         "rms_m": 0.8325094093237781,
+         "rms_m_both_labeled": 1.063253530095408,
+         "self_in_own_world": 0,
+         "size_nees_3d_mean": 0.4011466998202939
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 0.29,
+        "pose_sigma_v_m": 0.57,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-09-54-40_0"
+      },
+      {
+       "ablations": [],
+       "batches_rejected": [
+        0,
+        0
+       ],
+       "box_size_sys_m": 0.183,
+       "box_yaw_sys_deg": 1.47,
+       "cars": [
+        {
+         "car": 0,
+         "detected_by_both_fused_into_one": 45,
+         "detected_by_both_matched": 150,
+         "duplicates": 148,
+         "duplicates_split_across_cars": 127,
+         "false_estimates": 151,
+         "false_estimates_with_id_of_a_previously_matched_object": 149,
+         "frames": 114,
+         "heading_err_deg_max": 46.51209290176334,
+         "heading_err_deg_median": 1.8941964850717359,
+         "heading_err_deg_p95": 6.373206759555201,
+         "id_changes_per_object": 2.6363636363636362,
+         "id_changes_total": 29,
+         "matched": 584,
+         "matched_never_detected_by_own_sensor": 238,
+         "matched_not_detected_by_own_sensor_this_frame": 306,
+         "matched_not_expected": 42,
+         "missed": 0,
+         "n_both_labeled": 161,
+         "n_box": 584,
+         "n_nees": 584,
+         "nees_pos_3d_mean": 6.028508641295715,
+         "nees_pos_3d_mean_both_labeled": 17.79169333493029,
+         "nees_pos_3d_p95": 27.125876240534197,
+         "nees_pos_h_2d_mean": 3.970004780874313,
+         "nees_pos_v_1d_mean": 2.0597431773243002,
+         "objects_gained_only_through_sharing": 5,
+         "objects_with_id": 11,
+         "objects_with_id_change": 6,
+         "rms_m": 1.1654882439813938,
+         "rms_m_both_labeled": 1.991840877121444,
+         "self_in_own_world": 111,
+         "size_nees_3d_mean": 0.6971682952847987
+        },
+        {
+         "car": 1,
+         "detected_by_both_fused_into_one": 38,
+         "detected_by_both_matched": 150,
+         "duplicates": 154,
+         "duplicates_split_across_cars": 133,
+         "false_estimates": 147,
+         "false_estimates_with_id_of_a_previously_matched_object": 146,
+         "frames": 114,
+         "heading_err_deg_max": 46.512086071574174,
+         "heading_err_deg_median": 1.601486724626753,
+         "heading_err_deg_p95": 5.317983201183125,
+         "id_changes_per_object": 2.909090909090909,
+         "id_changes_total": 32,
+         "matched": 584,
+         "matched_never_detected_by_own_sensor": 15,
+         "matched_not_detected_by_own_sensor_this_frame": 17,
+         "matched_not_expected": 44,
+         "missed": 0,
+         "n_both_labeled": 161,
+         "n_box": 584,
+         "n_nees": 584,
+         "nees_pos_3d_mean": 5.671229436594724,
+         "nees_pos_3d_mean_both_labeled": 17.05312746499026,
+         "nees_pos_3d_p95": 27.95484289864237,
+         "nees_pos_h_2d_mean": 3.610179004714739,
+         "nees_pos_v_1d_mean": 2.061834737581277,
+         "objects_gained_only_through_sharing": 2,
+         "objects_with_id": 11,
+         "objects_with_id_change": 7,
+         "rms_m": 1.134165753777103,
+         "rms_m_both_labeled": 1.9725767600145534,
+         "self_in_own_world": 111,
+         "size_nees_3d_mean": 0.6554098147783719
+        }
+       ],
+       "cutoff_m": 5.0,
+       "declared": {
+        "det_sigma_m": 0.3,
+        "pose_sigma_h_m": 0.29,
+        "pose_sigma_v_m": 0.57,
+        "pose_sigma_yaw_deg": 0.1,
+        "seed": 1,
+        "size_sigma_m": 0.2,
+        "yaw_sigma_deg": 3.0
+       },
+       "delay_ms": 100,
+       "expected_rule": "detected by at least one car in this and the previous 3 frames",
+       "scenario": "testoutput_CAV_data_2022-03-15-10-29-43_3"
+      }
+     ]
+    }
+   },
+   "box_systematic": {
+    "box_size_sys_m": 0.183,
+    "box_yaw_sys_deg": 1.47,
+    "chosen_from": "10-29-43_4"
+   }
+  }
+ },
+ "box_systematic_by_scenario": {
+  "09-54-40_0": {
+   "pair_frames": 290,
+   "objects": 2,
+   "box_size_sys_m": 0.049,
+   "box_yaw_sys_deg": 3.08,
+   "size_diff_mean_lwh_m": [
+    -0.073,
+    -0.019,
+    -0.102
+   ],
+   "size_diff_std_lwh_m": [
+    0.019,
+    0.018,
+    0.102
+   ],
+   "heading_diff_mean_deg": -1.08,
+   "per_object_mean_diff_lwh_m_yaw_deg": {
+    "0:1": [
+     -0.091,
+     -0.016,
+     -0.002,
+     -2.306
+    ],
+    "0:2": [
+     -0.054,
+     -0.021,
+     -0.205,
+     0.18
+    ]
+   }
+  },
+  "10-29-43_3": {
+   "pair_frames": 170,
+   "objects": 5,
+   "box_size_sys_m": 0.181,
+   "box_yaw_sys_deg": 1.74,
+   "size_diff_mean_lwh_m": [
+    -0.129,
+    0.066,
+    -0.051
+   ],
+   "size_diff_std_lwh_m": [
+    0.347,
+    0.097,
+    0.221
+   ],
+   "heading_diff_mean_deg": -0.07,
+   "per_object_mean_diff_lwh_m_yaw_deg": {
+    "0:3": [
+     -0.188,
+     0.0,
+     -0.002,
+     20.195
+    ],
+    "0:4": [
+     -1.058,
+     -0.484,
+     -0.222,
+     0.895
+    ],
+    "0:5": [
+     0.342,
+     0.057,
+     -0.494,
+     -1.021
+    ],
+    "0:2": [
+     0.13,
+     0.034,
+     0.061,
+     -1.123
+    ],
+    "0:8": [
+     -0.479,
+     0.157,
+     0.079,
+     1.134
+    ]
+   },
+   "turning_car": {
+    "pair_frames": 33,
+    "heading_diff_deg_min_max": [
+     0.9,
+     47.7
+    ],
+    "box_yaw_sys_deg_if_included": 8.01
+   }
+  },
+  "10-29-43_4": {
+   "pair_frames": 62,
+   "objects": 1,
+   "box_size_sys_m": 0.183,
+   "box_yaw_sys_deg": 1.47,
+   "size_diff_mean_lwh_m": [
+    -0.034,
+    -0.018,
+    0.524
+   ],
+   "size_diff_std_lwh_m": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "heading_diff_mean_deg": 0.33,
+   "per_object_mean_diff_lwh_m_yaw_deg": {
+    "0:2": [
+     -0.034,
+     -0.018,
+     0.524,
+     0.328
+    ]
    }
   }
  },

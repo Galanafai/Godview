@@ -1,6 +1,8 @@
 # V2V4Real replay, test1 split (version 1 detections)
 
-Measured 2026-11-05 on branch `feat/v2v4real-replay`. Raw numbers:
+Measured 2026-11-05 on branch `feat/v2v4real-replay`. "Before" is the
+first replay; "After" adds the declared systematic box errors of commit
+17c51aa (merged from `feat/boxes-ids-real-data`). Raw numbers:
 `docs/results/v2v4real_summary.json`. Data format findings:
 `docs/PHASE_C_HANDOFF.md`, "Findings".
 
@@ -12,7 +14,9 @@ Measured 2026-11-05 on branch `feat/v2v4real-replay`. Raw numbers:
 * Each car is one GodView `PerceptionNode`, fed through the same JSON-lines
   parser as `godview-node` (`godview_node::input::parse_line`). Peer batches
   arrive 100 ms after publishing. Default `NodeConfig` everywhere, except in
-  the runs marked "no size gate" (a diagnostic, not a proposed setting).
+  the runs marked "no size gate" (a diagnostic, not a proposed setting) and
+  the "After" runs, which set the tracker's `box_size_sys_m` and
+  `box_yaw_sys_rad` (all gates on).
 * Detections (version 1): a car detects a labeled box if the box is within
   120 m and holds at least 5 of the car's own lidar points; the detection is
   the label plus seeded Gaussian noise (position 0.3 m, size 0.2 m, heading
@@ -67,7 +71,9 @@ single point L1 1.5 m RMS. The exact unit version and correction mode used
 in the dataset are not documented. The V2V4Real paper itself could not be
 fetched (too large).
 
-## Results, default configuration
+## Before: results, default configuration
+
+No systematic box errors declared.
 
 Counts are summed over both cars and the scored scenarios. RMS and NEES are
 given as "all matched / objects labeled by both cars". Only the second is
@@ -98,7 +104,7 @@ Per scenario, nominal declaration, default configuration:
 | 10-29-43_4 | 0 | 339 | 56 | 21 | 0.66 | 0.15 | 17 / 62 | 23 / 6 |
 | 10-29-43_4 | 1 | 339 | 50 | 22 | 0.68 | 0.15 | 22 / 62 | 15 / 6 |
 
-## Diagnostics
+## Before: diagnostics
 
 Size gate disabled in the world model (everything else the same):
 
@@ -119,6 +125,78 @@ were fused into one:
 | 1.31 / 0.57 | 661 / 873 | 722 / 873 | 0.27 / 1.44 |
 | 0.29 / 2.33 | 633 / 873 | 703 / 873 | 3.36 / 0.10 |
 | 0.29 / 0.57 | 611 / 873 | 629 / 873 | 3.34 / 1.39 |
+
+## After: declared systematic box size and heading errors
+
+Commit 17c51aa adds `box_size_sys_m` (m, every dimension) and
+`box_yaw_sys_rad` to the tracker configuration. They are added to the
+published box variances, so two sources' converged tracks keep a floor on
+their size and heading uncertainty. The replay sets them in `NodeConfig`
+(the JSON-lines input has no field for them).
+
+**Rule, leave one out like the pose sigma.** From one scenario, over every
+pair-frame of an object both cars labeled: the per-axis size differences of
+the two cars' labels (length, width, height) are pooled into one sample, and
+its standard deviation divided by sqrt(2) is `box_size_sys_m`. The same on
+the heading difference gives `box_yaw_sys_rad`. The values are scored on the
+other two scenarios, with the nominal pose and with the leave-one-out pose
+from the same scenario. All gates on.
+
+| chosen from | pair-frames (objects) | box_size_sys_m | box_yaw_sys | notes |
+|---|---|---|---|---|
+| 09-54-40_0 | 290 (2) | 0.049 m | 3.08 deg | both objects' sizes agree to 0.1 to 0.2 m |
+| 10-29-43_3 | 170 (5) | 0.181 m | 1.74 deg | turning car excluded from heading (below) |
+| 10-29-43_4 | 62 (1) | 0.183 m | 1.47 deg | one object; its sizes differ by a constant -0.03, -0.02, +0.52 m, so the value comes from the spread across its three axes, not over time |
+
+The misannotated turning car (car 0 id 3, 10-29-43_3) is reported
+separately: 33 pair-frames with heading differences of 0.9 to 47.7 deg.
+Including it would set the heading value from 10-29-43_3 to 8.01 deg instead
+of 1.74. (33 pair-frames here against 17 in the Findings, because the
+converter links the car 1 label for the whole scenario once `ass_id` links
+it.)
+
+Results, all gates on. The "no size gate" reference is the "Before"
+diagnostic on the same scored scenarios with the same pose sigma.
+
+| systematic from | pose | scored on | matched | missed | duplicates (split) | false (coasting) | RMS m | NEES 3D | NEES horiz / vert | fused / both detect | no size gate reference | box size NEES (expect 3) | ID changes / objects |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 40_0 | nominal | 43_3, 43_4 | 1846 | 0 | 244 (192) | 327 (304) | 1.01 / 1.83 | 0.39 / 1.26 | 0.24 / 0.15 | 268 / 424 | 327 / 424 | 2.85 | 76 / 34 = 2.24 |
+| 40_0 | (b) 0.73 / 0.93 | 43_3, 43_4 | 1846 | 0 | 267 (205) | 342 (319) | 0.99 / 1.79 | 1.31 / 4.22 | 0.68 / 0.63 | 240 / 424 | 303 / 424 | 2.82 | 67 / 34 = 1.97 |
+| 43_3 | nominal | 40_0, 43_4 | 1833 | 3 | 66 (34) | 107 (107) | 0.72 / 0.98 | 0.23 / 0.42 | 0.18 / 0.06 | 684 / 697 | 684 / 697 | 0.50 | 20 / 28 = 0.71 |
+| 43_3 | (b) 1.31 / 2.33 | 40_0, 43_4 | 1833 | 3 | 66 (34) | 107 (107) | 0.72 / 0.98 | 0.21 / 0.37 | 0.17 / 0.04 | 684 / 697 | 684 / 697 | 0.50 | 20 / 28 = 0.71 |
+| 43_4 | nominal | 40_0, 43_3 | 2310 | 16 | 173 (144) | 313 (305) | 1.05 / 1.52 | 0.44 / 0.92 | 0.29 / 0.15 | 779 / 873 | 779 / 873 | 0.53 | 57 / 38 = 1.50 |
+| 43_4 | (b) 0.29 / 0.57 | 40_0, 43_3 | 2323 | 3 | 359 (311) | 361 (358) | 1.00 / 1.45 | 4.78 / 10.09 | 3.37 / 1.42 | 629 / 873 | 629 / 873 | 0.54 | 100 / 38 = 2.63 |
+
+RMS and NEES as before: all matched / objects labeled by both cars. Same
+scored scenarios before the declaration (default configuration, nominal
+pose): fused 174 / 424, 607 / 697 and 703 / 873; ID changes per object
+3.03, 1.89 and 2.11; box size NEES 3.94, 2.94 and 3.19.
+
+What this shows:
+
+* **With 0.18 m declared, the size gate stops splitting objects.** On every
+  scored scenario the counts (matched, missed, duplicates, false, fused, ID
+  changes) are identical to the run with the size gate disabled, for both
+  cars. Every scenario is scored with 0.181 or 0.183 m in one of the runs,
+  so the nominal pose over all three scenarios gives exactly the diagnostic's
+  895 of 997 fused and ID changes per object fall from 2.36 to 1.24, with
+  the size gate still on.
+* **The value from 09-54-40_0 (0.049 m) is too small for the other two.**
+  Fusion rises from 174 to 268 of 424 but stays below 327 without the gate.
+  That scenario has only two linked cars whose labels agree closely; the
+  rule cannot see the 1.06 m disagreement in 10-29-43_3.
+* **0.18 m overcovers the size.** Box size NEES falls from about 3 to 0.50
+  to 0.54. The size truth is the mean of the two labels, so each car's size
+  error relative to it is half the disagreement, and half of the 8 linked
+  objects disagree by about 0.2 m or less on every axis; the declaration is
+  set by the few that disagree by 0.5 to 1.06 m. With 0.049 m, size NEES is 2.82 to 2.85.
+* **The heading declaration changes no association count.** The remaining
+  splits in 10-29-43_3 come from the heading gate on the turning car (up to
+  47.7 deg apart, far beyond 1.47 to 3.08 deg) and from the velocity gate.
+  An 8.01 deg declaration (turning car included) was not tested.
+* **The pose declaration still decides the rest.** The leave-one-out pose
+  from 10-29-43_4 (0.29 m) still gives 629 of 873 and NEES 10.09 on
+  both-labeled objects; the box declaration cannot fix an understated pose.
 
 ## Relative offset between the cars, per frame
 
@@ -167,15 +245,18 @@ largest offset 3.84 m), because the converter links a car 1 label ID to car
    tracks then fail the 99.99% size gate. Disabling only that gate raises
    nominal fusion from 742 to 895 of 997 and halves ID changes (118 to 62).
    This is the size counterpart of the systematic center error that
-   `box_center_sys_frac` handles. GodView has no way to declare a systematic
-   size error, and the input format has no field for it. Whether a real
-   detector shows the same effect is not tested; with version 1 the
-   disagreement comes from the annotators.
+   `box_center_sys_frac` handles. **After:** declaring `box_size_sys_m` of
+   0.18 m (leave-one-out from 10-29-43_3 or 10-29-43_4) gives exactly the
+   no-size-gate association results with the gate on, at the cost of an
+   overcovered size (NEES about 0.5). Whether a real detector shows the same
+   effect is not tested; with version 1 the disagreement comes from the
+   annotators.
 6. **ID changes are frequent.** Nominal: 2.36 changes per object (22 of 50
    objects change at least once), most of them the object switching between
-   one fused and two split world objects. With the size gate off: 1.24.
-   Lineage IDs were not tested here against stable fusion, because fusion is
-   not stable in this data.
+   one fused and two split world objects. With the size gate off, or with
+   0.18 m declared: 1.24. That is still more than one change per object;
+   the remaining switches come from the pose, heading and velocity gate
+   splits above, so lineage IDs are still not tested against stable fusion.
 7. **False estimates are coasting tracks.** 369 of 392 (nominal) carry the ID
    of an object matched earlier. They appear in runs of about 15 frames
    (1.5 s, `terminate_after_s`) after an object leaves the labeled set, for
@@ -203,6 +284,8 @@ largest offset 3.84 m), because the converter links a car 1 label ID to car
   result shows the pose offset varies between scenarios more than the sample
   can characterize.
 * The pose yaw lever arm is modeled about the scenario origin, not the car.
+* The systematic box values come from at most 5 linked objects per scenario
+  (1 in 10-29-43_4), so the leave-one-out rule rests on very few objects.
 * The two-process Zenoh demo (step 4, second part) is not done: `godview-node`
   stamps tracks with the input clock and expects it to be live, so the
   converter would need to rebase timestamps to the current time and a feeder

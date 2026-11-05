@@ -31,3 +31,4 @@ viewer/dist/
 
 # Keep the Haar Cascade model
 !agent/haarcascade_frontalface_alt.xml
+__pycache__/

@@ -215,6 +215,160 @@ are seen.
   seeded noise of 0.3 m, 0.2 m and 3 deg, seed 1), 10 Hz, 100 ms delivery
   delay, 5 m cutoff, the same expected-object rule and the same scoring.
 
+### Data and format check
+
+* test2 (`test_02.zip`, 1228581180 bytes) and test3 (`test_03.zip`,
+  1551328836 bytes) were downloaded through the same Box endpoint; sizes
+  match the listing, no path in either zip escapes its directory. Six
+  scenarios, 1588 frames: `2022-03-17-10-50-46_0` (198), `10-50-46_1` (180),
+  `11-02-23_1` (310) in test2; `2022-03-17-11-02-23_2` (304), `11-51-42_0`
+  (221), `2022-03-21-09-35-07_7` (375) in test3.
+* Matches the Findings: the same frame and label keys; labels in each car's
+  lidar frame (100% of 565 sampled boxes hold at least 5 points with
+  `extent` as half size, 36% and 53% as full size); yaw is `angle[1]` in
+  degrees added to the pose yaw; `location` is the box center; `center` is
+  always zero and `ego_speed` always 0; numeric label IDs are per car and
+  `ass_id` on car 1 holds the car 0 ID (every linked target is present in
+  the same frame); gps heading equals pose yaw plus 1.00 deg (car 0) and
+  2.50 deg (car 1) in every frame; the relative offset is again a slowly
+  varying common offset.
+* Differences from test1 (scripts in `scripts/v2v4real/verify/`):
+  1. **Front/back flips across cars.** 292 pair-frames in which the two
+     cars' headings for one object differ by more than 165 deg (8 objects
+     in 3 scenarios; 170 of them one object in `10-50-46_1`). test1 had
+     none. Within one car, 2 single-frame flips and some heading steps of
+     20 to 80 deg between consecutive frames.
+  2. **More object types**: Pedestrian (801 labels), Bus, Van, BicycleRider,
+     Scooter. The converter maps every type to one class id, as for test1.
+  3. **Denser scenes**: 17 (test2) and 14 (test3) labels per car and frame
+     against 3 in test1;
+     171 linked objects against 8.
+  4. **`ass_id` links some car 1 labels to two car 0 IDs over time** (7
+     labels in `10-50-46_1` and `11-02-23_1`). The converter's rule (a car 1
+     label linked once is linked to the lowest car 0 ID for the whole
+     scenario) then pairs it with the wrong object in some frames. test1 had
+     none. One such label hides the largest size disagreement found (car 0:
+     ConcreteTruck 22.7 m long; car 1: Truck 6.8 m).
+  5. **Possible missing links**: up to 93 car 1 label-frames per scenario without
+     `ass_id` lie within 3 m of an unlinked car 0 label (for example a
+     pedestrian pair 1.3 m apart for 60 frames in `11-02-23_1`).
+  6. **Stationary cars**: both cars stand still in `10-50-46_1` and
+     `09-35-07_7` and move about 0.1 m per frame in `11-51-42_0`. There the
+     gps fit has 0.99 m rms residual (others 0.07 to 0.28 m) and car 0's
+     gps heading offset is -1.29 deg (others -0.36 to -0.24 deg), so that
+     scenario's Earth anchor is poorer.
+  7. Labels per car reach 70 to 132 m (test1: 72 to 130 m).
+
+### Results with the frozen settings (run once)
+
+Same columns as before. RMS and NEES as "all matched / objects labeled by
+both cars". Counts are summed over both cars. `docs/results/v2v4real_heldout_summary.json`.
+
+| scenario | frames | matched | missed | duplicates (split) | false (coasting) | RMS m | NEES 3D (expect 3) | NEES horiz / vert | fused / both detect | box size NEES (expect 3) | heading err median / p95 / max deg | ID changes / objects | gained objects (object-frames) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 10-50-46_0 | 198 | 4763 | 10 | 380 (202) | 1184 (1103) | 0.83 / 1.17 | 0.36 / 0.72 | 0.33 / 0.04 | 1585 / 1753 | 0.85 | 1.8-1.9 / 6.3 / 179.9 | 57 / 114 = 0.50 | 53 (825) |
+| 10-50-46_1 | 180 | 10818 | 141 | 521 (480) | 372 (366) | 0.56 / 0.53 | 0.16 / 0.12 | 0.13 / 0.02 | 6254 / 6794 | 1.55 | 1.8-2.0 / 10.8 / 180.0 | 270 / 106 = 2.55 | 32 (1625) |
+| 11-02-23_1 | 310 | 14813 | 188 | 1497 (1011) | 2787 (2667) | 0.71 / 0.98 | 0.26 / 0.51 | 0.23 / 0.03 | 3748 / 4413 | 1.71 | 1.8-2.0 / 8.0 / 180.0 | 419 / 246 = 1.70 | 109 (3867) |
+| 11-02-23_2 | 304 | 6426 | 148 | 646 (554) | 788 (754) | 0.71 / 0.78 | 0.24 / 0.29 | 0.19 / 0.04 | 4089 / 4362 | 2.14 | 1.9 / 6.8 / 180.0 | 162 / 105 = 1.54 | 41 (454) |
+| 11-51-42_0 | 221 | 11000 | 0 | 107 (13) | 268 (268) | 0.38 / 1.14 | 0.08 / 0.74 | 0.07 / 0.01 | 379 / 398 | 0.31 | 1.6 / 5.3 / 180.0 | 16 / 71 = 0.23 | 33 (5086) |
+| 09-35-07_7 | 375 | 14279 | 15 | 81 (68) | 280 (273) | 0.41 / 0.45 | 0.07 / 0.09 | 0.06 / 0.02 | 8739 / 8770 | 1.55 | 1.6-1.8 / 5.3 / 11.5 | 63 / 55 = 1.15 | 12 (2270) |
+| **total** | 1588 | 62099 | 502 | 3232 (2328) | 5679 (5431) | 0.59 / 0.71 | 0.17 / 0.25 | 0.15 / 0.02 | 24794 / 26490 | 1.38 | 1.6-2.0 / 10.8 / 180.0 | 987 / 697 = 1.42 | 280 (14127) |
+| test1, same settings | 405 | 2988 | 16 | 202 (147) | 354 (346) | 0.95 / 1.45 | 0.37 / 0.82 | 0.24 / 0.12 | 895 / 997 | 0.57 | 1.5-2.1 / 8.0 / 46.5 | 62 / 50 = 1.24 | 18 (668) |
+
+(The test1 row reruns test1 with exactly the frozen values; the earlier
+test1 runs used 1.47 or 1.74 deg for the heading term. It is a reference,
+not held out.)
+
+Per-frame relative pose offset (the same object labeled by both cars, each
+placed with its own car's pose; ENU, car 0 minus car 1; per-frame means in
+the JSON, `scenarios.<name>.relative_offset.per_frame`):
+
+| scenario | pairs | mean E, N, U m | std E, N, U m | median \|horiz\| m | p95 \|horiz\| m | max \|horiz\| m | p95 \|vert\| m | per-frame mean \|horiz\| m |
+|---|---|---|---|---|---|---|---|---|
+| 10-50-46_0 | 888 | -0.14, 1.37, -0.57 | 0.29, 1.36, 0.86 | 1.22 | 3.33 | 5.33 | 2.13 | 0.25 to 3.49 |
+| 10-50-46_1 | 3534 | -0.03, -0.01, 0.03 | 0.29, 0.40, 0.64 | 0.33 | 0.88 | 3.30 | 1.17 | 0.03 to 0.69 |
+| 11-02-23_1 | 2286 | 0.16, -0.51, 0.00 | 0.46, 1.48, 0.77 | 1.05 | 2.97 | 6.36 | 1.57 | 0.02 to 1.63 |
+| 11-02-23_2 | 2212 | 0.07, -0.40, -0.07 | 0.37, 0.92, 0.88 | 0.64 | 2.08 | 8.49 | 1.74 | 0.02 to 1.60 |
+| 11-51-42_0 | 207 | 0.38, 0.68, 0.15 | 1.67, 0.91, 0.57 | 1.62 | 3.66 | 4.15 | 0.96 | 0.56 to 2.40 |
+| 09-35-07_7 | 4997 | 0.14, 0.05, 0.02 | 0.30, 0.25, 0.53 | 0.26 | 0.86 | 3.81 | 1.18 | 0.04 to 0.37 |
+
+106 of 14124 pair-frames exceed 4 m. The 8.49 m pair grows from 4.6 to
+8.5 m over 4 frames, which looks like one car's label lagging rather than a
+pose error (not verified).
+
+Size and heading disagreement of linked objects (both cars' labels of one
+object, all pair-frames; the rule value is what the leave-one-out rule
+would give, reported only):
+
+| scenario | objects (pair-frames) | \|size diff\| L, W, H median m | p95 m | max m | objects > 0.5 m / > 1 m | size rule value m | \|heading diff\| median / p95 deg | objects with a flip (pair-frames) | heading rule value without flips deg |
+|---|---|---|---|---|---|---|---|---|---|
+| 10-50-46_0 | 26 (888) | 0.18, 0.13, 0.05 | 0.91, 0.38, 0.18 | 0.91, 0.56, 0.23 | 5 / 0 | 0.172 | 1.8 / 8.4 | 0 (0) | 2.63 |
+| 10-50-46_1 | 31 (3534) | 0.20, 0.10, 0.06 | 1.17, 0.43, 0.41 | 1.33, 0.67, 0.49 | 7 / 4 | 0.203 | 1.5 / 170.9 | 3 (191) | 5.59 |
+| 11-02-23_1 | 57 (2286) | 0.36, 0.14, 0.14 | 1.27, 0.48, 0.39 | 1.65, 0.91, 0.88 | 35 / 18 | 0.266 | 2.4 / 12.1 | 2 (52) | 3.57 |
+| 11-02-23_2 | 33 (2212) | 0.20, 0.14, 0.14 | 0.90, 0.49, 0.38 | 1.25, 0.61, 0.50 | 17 / 3 | 0.191 | 1.9 / 9.4 | 3 (49) | 2.68 |
+| 11-51-42_0 | 5 (207) | 0.14, 0.05, 0.07 | 0.48, 0.20, 0.18 | 0.48, 0.22, 0.27 | 0 / 0 | 0.100 | 2.0 / 6.3 | 0 (0) | 1.97 |
+| 09-35-07_7 | 19 (4997) | 0.24, 0.16, 0.08 | 0.81, 0.45, 0.55 | 1.56, 0.83, 0.55 | 7 / 1 | 0.194 | 1.3 / 3.7 | 0 (0) | 1.40 |
+
+The frozen values (0.18 m, 1.7 deg) fall inside the range the rule gives
+on the held-out scenarios (0.10 to 0.27 m; 1.4 to 5.6 deg without flips).
+
+### What the held-out run shows
+
+1. **The test1 result holds up.** 24794 of 26490 objects both cars detect
+   become one world object (93.6%; test1 with the same settings: 89.8%).
+   Missed expected objects: 502 of 62601 (0.8%). 23% of matched
+   object-frames are objects the car's own sensor had never detected (14127
+   of 62099; test1: 22%).
+2. **The pose sigma overcovers here.** NEES on objects both cars labeled is
+   0.25 in total (0.09 to 0.74 per scenario), against 3 expected. The
+   held-out relative offsets are smaller than test1's (median 0.26 to 1.62 m
+   against 0.54 to 2.11 m). This is the expected cost of a conservative
+   fixed declaration, and the same variation that made the leave-one-out
+   pose sigma fail on test1.
+3. **Box size NEES is 1.38** (0.31 to 2.14 per scenario): the 0.18 m
+   declaration overcovers less here than on test1 (0.57), because the
+   held-out annotators disagree more.
+4. **ID changes: 1.42 per object** (0.23 to 2.55 per scenario).
+
+### Explanations (diagnostics only; no setting was changed)
+
+These come from extra replays with gates switched off and from a dump of
+which objects were missed or shown twice (`--diag`,
+`scripts/v2v4real/diagnose_heldout.py`). They explain the frozen result; the
+frozen result above is the one reported.
+
+* **Heading error up to 180 deg** in five scenarios: the cross-car
+  front/back flips (difference 1). The fused heading follows one car and
+  the truth follows the car with more lidar points.
+* **What splits objects.** With the box gate off, cross-car duplicates fall
+  from 2328 to 1156 (heading part alone: 2328 to 1488; size part alone: 2328
+  to 1812); the velocity gate adds little (2328 to 2241). Of all 3232
+  duplicate object-frames, 896 involve a size disagreement over 0.5 m and
+  432 a cross-car heading flip; 0.18 m and 1.7 deg cannot cover either. The
+  gates do work: switching off the box gate raises misses from 502 to 928,
+  and switching off every world gate raises them to 3050, because distinct
+  objects merge.
+* **Misses.** 305 of the 502 missed object-frames have another labeled
+  object within 3 m in the same frame, and 90 involve a car 1 label that
+  `ass_id` links to two car 0 IDs (differences 4 and 5). Most misses are
+  therefore two labels for what GodView treats as one object, a limit of
+  the truth construction rather than of GodView; this is a reading of the
+  counts, not checked object by object.
+* **False estimates** are again coasting tracks: 5431 of 5679 carry the ID
+  of a previously matched object.
+* **ID changes** are highest in `10-50-46_1` (2.55 per object), the scenario
+  with the most flip pair-frames (191) and with pedestrians.
+
+### Not proven by the held-out run
+
+* Still version 1 detections (labels plus noise), not a real detector.
+* The truth is still the mean of the two cars' labels; NEES is relative to
+  it. The converter's link rule mislinks some objects in two scenarios
+  (difference 4), which affects both truth and the label statistics there.
+* Front/back flips in the labels would not occur in the same way with a
+  real detector, which is more likely to be ambiguous (`yaw_ambiguous`)
+  than confidently wrong; this replay declares headings as unambiguous.
+
 ## Relative offset between the cars, per frame
 
 The same object, labeled by both cars and placed with each car's own pose

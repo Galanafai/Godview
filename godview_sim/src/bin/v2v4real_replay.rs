@@ -44,6 +44,7 @@ struct Args {
     ablate: Vec<String>,
     box_size_sys_m: f64,
     box_yaw_sys_deg: f64,
+    diag: String,
 }
 
 fn parse_args() -> Args {
@@ -56,6 +57,7 @@ fn parse_args() -> Args {
         ablate: Vec::new(),
         box_size_sys_m: 0.0,
         box_yaw_sys_deg: 0.0,
+        diag: String::new(),
     };
     let v: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -69,6 +71,9 @@ fn parse_args() -> Args {
             "--seed" => a.seed = val.parse().expect("--seed"),
             // Declared systematic box errors of the detector (tracker config).
             "--box-size-sys-m" => a.box_size_sys_m = val.parse().expect("--box-size-sys-m"),
+            // Diagnostics only: per frame and car, the gids of missed objects and of
+            // objects with a duplicate, written as JSON lines. Does not change scoring.
+            "--diag" => a.diag = val,
             "--box-yaw-sys-deg" => a.box_yaw_sys_deg = val.parse().expect("--box-yaw-sys-deg"),
             // Diagnostics only (world model): no-box-gate, no-size-gate, no-yaw-gate,
             // no-vel-gate, no-pos-gate.
@@ -189,6 +194,7 @@ fn main() {
     let mut detected_hist: VecDeque<BTreeSet<String>> = VecDeque::new();
     let mut ever_detected: [BTreeSet<String>; 2] = [BTreeSet::new(), BTreeSet::new()];
     let mut rejected = [0usize; 2];
+    let mut diag_lines: Vec<String> = Vec::new();
 
     for (i, fr) in frames.iter().enumerate() {
         let t = Timestamp(fr["t_ns"].as_i64().unwrap());
@@ -244,6 +250,8 @@ fn main() {
             let mut f_dup = 0;
             let mut f_false = 0;
             let mut f_sq = 0.0;
+            let mut d_missed: Vec<String> = Vec::new();
+            let mut d_dup: Vec<String> = Vec::new();
             let matched_truths: BTreeMap<usize, usize> = sc.pairs.iter().map(|(e, t)| (*t, *e)).collect();
             for (ti, o) in objs.iter().enumerate() {
                 let gid = o["gid"].as_str().unwrap().to_string();
@@ -308,7 +316,10 @@ fn main() {
                         }
                     }
                     Some(_) => st.unexpected_matched += 1,
-                    None if expected => f_missed += 1,
+                    None if expected => {
+                        f_missed += 1;
+                        d_missed.push(gid.clone());
+                    }
                     None => {}
                 }
             }
@@ -322,6 +333,7 @@ fn main() {
                 match near {
                     Some((ti, _)) => {
                         f_dup += 1;
+                        d_dup.push(objs[ti]["gid"].as_str().unwrap().to_string());
                         // Split across cars: the matched estimate of that object has other sources.
                         if let Some(&em) = matched_truths.get(&ti) {
                             if world.objects[em].sources() != world.objects[ei].sources() {
@@ -343,6 +355,9 @@ fn main() {
             st.false_estimates += f_false;
             st.sq_err += f_sq;
             st.per_frame.push(json!([i, f_matched, f_missed, f_dup, f_false]));
+            if !args.diag.is_empty() && (!d_missed.is_empty() || !d_dup.is_empty()) {
+                diag_lines.push(json!({"frame": i, "car": c, "missed": d_missed, "dup": d_dup}).to_string());
+            }
         }
     }
 
@@ -401,6 +416,9 @@ fn main() {
         "cars": cars,
     });
     std::fs::write(&args.out, serde_json::to_string_pretty(&out).unwrap()).unwrap();
+    if !args.diag.is_empty() {
+        std::fs::write(&args.diag, diag_lines.join("\n")).unwrap();
+    }
     for c in out["cars"].as_array().unwrap() {
         println!(
             "{} car{}: matched {} missed {} dup {} (split {}) false {} rms {:.2} nees3 {:.2} (h {:.2} v {:.2}) fused {}/{} gained {} idchg {}/{} heading p95 {:.1}",

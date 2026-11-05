@@ -256,3 +256,11 @@ The replay confirms this: with a 1 cm RTK sigma, 994 extra estimates
   Van for car 0, Truck for car 1). GodView only fuses equal class ids, so the
   converter maps every vehicle type to one class.
 * Script: `scripts/v2v4real/verify/check_size_agreement.py`.
+
+### test2 and test3
+
+Checked on 2026-11-05 with the same scripts. The format matches the
+findings above; the differences (front/back flips across cars, more object
+types, denser scenes, car 1 labels linked to two car 0 IDs over time,
+possible missing links, stationary cars) are listed in
+`docs/results/v2v4real.md`, "Held-out confirmation (test2, test3)".

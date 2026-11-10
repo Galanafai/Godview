@@ -1,0 +1,1077 @@
+[
+ {
+  "scenario": "2023-04-03-18-19-32_13_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "43",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 133,
+  "end_frame": 197,
+  "length_frames": 65,
+  "length_s": 6.5,
+  "start_file": "000133",
+  "end_file": "000197",
+  "seen_by_agents_frames": {
+   "-2": 65,
+   "-1": 65,
+   "2": 65
+  },
+  "range_m_start_end": [
+   22.387904483170225,
+   20.873159016950552
+  ],
+  "uv_start": [
+   125.68332154541747,
+   569.464331151466
+  ],
+  "uv_end": [
+   394.4044182887054,
+   568.4094180018603
+  ],
+  "rank": 1
+ },
+ {
+  "scenario": "2023-04-03-18-19-32_13_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "58",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 125,
+  "end_frame": 153,
+  "length_frames": 29,
+  "length_s": 2.9,
+  "start_file": "000125",
+  "end_file": "000153",
+  "seen_by_agents_frames": {
+   "2": 29
+  },
+  "range_m_start_end": [
+   16.150596842881658,
+   15.311799660070776
+  ],
+  "uv_start": [
+   59.757336027082715,
+   582.7846877457449
+  ],
+  "uv_end": [
+   494.46320152050015,
+   563.7698390916947
+  ],
+  "rank": 2
+ },
+ {
+  "scenario": "2023-04-04-14-27-53_44_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "168",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 71,
+  "end_frame": 98,
+  "length_frames": 28,
+  "length_s": 2.8,
+  "start_file": "000071",
+  "end_file": "000098",
+  "seen_by_agents_frames": {
+   "2": 28
+  },
+  "range_m_start_end": [
+   45.84374397250572,
+   37.20863740584619
+  ],
+  "uv_start": [
+   770.8698891623912,
+   520.3922002195998
+  ],
+  "uv_end": [
+   737.7867029048599,
+   520.6527897384482
+  ],
+  "rank": 3
+ },
+ {
+  "scenario": "2023-04-03-18-19-32_13_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "30",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 129,
+  "end_frame": 153,
+  "length_frames": 25,
+  "length_s": 2.5,
+  "start_file": "000129",
+  "end_file": "000153",
+  "seen_by_agents_frames": {
+   "-2": 25,
+   "-1": 25
+  },
+  "range_m_start_end": [
+   15.880460402338306,
+   15.304014334270626
+  ],
+  "uv_start": [
+   131.6043120799294,
+   575.681919807072
+  ],
+  "uv_end": [
+   497.88686478319954,
+   567.6473470120872
+  ],
+  "rank": 4
+ },
+ {
+  "scenario": "2023-04-03-18-19-32_13_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "46",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 154,
+  "end_frame": 177,
+  "length_frames": 24,
+  "length_s": 2.4,
+  "start_file": "000154",
+  "end_file": "000177",
+  "seen_by_agents_frames": {
+   "-2": 24,
+   "-1": 24,
+   "2": 24
+  },
+  "range_m_start_end": [
+   17.26864505036967,
+   16.748271274122935
+  ],
+  "uv_start": [
+   198.12803924711216,
+   572.0700328730625
+  ],
+  "uv_end": [
+   476.3556428276391,
+   556.8098339557669
+  ],
+  "rank": 5
+ },
+ {
+  "scenario": "2023-04-04-14-30-53_47_0",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "102",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 4,
+  "end_frame": 22,
+  "length_frames": 19,
+  "length_s": 1.9,
+  "start_file": "000004",
+  "end_file": "000022",
+  "seen_by_agents_frames": {
+   "-2": 19,
+   "1": 19
+  },
+  "range_m_start_end": [
+   48.25260455252911,
+   49.12245403267516
+  ],
+  "uv_start": [
+   786.6985951928635,
+   479.6659413445314
+  ],
+  "uv_end": [
+   749.7271478401683,
+   480.5499483019431
+  ],
+  "rank": 6
+ },
+ {
+  "scenario": "2023-04-04-14-30-53_47_0",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "103",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 5,
+  "end_frame": 21,
+  "length_frames": 17,
+  "length_s": 1.7,
+  "start_file": "000005",
+  "end_file": "000021",
+  "seen_by_agents_frames": {
+   "-2": 17,
+   "-1": 2,
+   "1": 17
+  },
+  "range_m_start_end": [
+   47.0245562265926,
+   47.750801872819586
+  ],
+  "uv_start": [
+   784.4694921035733,
+   481.7436663140215
+  ],
+  "uv_end": [
+   748.553310241479,
+   483.05239982416276
+  ],
+  "rank": 7
+ },
+ {
+  "scenario": "2023-04-04-14-30-53_47_0",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "71",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 56,
+  "end_frame": 72,
+  "length_frames": 17,
+  "length_s": 1.7,
+  "start_file": "000056",
+  "end_file": "000072",
+  "seen_by_agents_frames": {
+   "-2": 17
+  },
+  "range_m_start_end": [
+   48.839386217518076,
+   49.66185565281634
+  ],
+  "uv_start": [
+   1490.6308595520577,
+   460.68509707987795
+  ],
+  "uv_end": [
+   1552.98258061963,
+   461.91042410533134
+  ],
+  "rank": 8
+ },
+ {
+  "scenario": "2023-04-03-18-19-32_13_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "40",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 170,
+  "end_frame": 184,
+  "length_frames": 15,
+  "length_s": 1.5,
+  "start_file": "000170",
+  "end_file": "000184",
+  "seen_by_agents_frames": {
+   "-2": 15,
+   "-1": 15,
+   "2": 15
+  },
+  "range_m_start_end": [
+   16.012577663570323,
+   15.12251528458
+  ],
+  "uv_start": [
+   210.47460163164578,
+   570.2450616485004
+  ],
+  "uv_end": [
+   490.4406378776186,
+   564.8572030752986
+  ],
+  "rank": 9
+ },
+ {
+  "scenario": "2023-04-04-14-30-53_47_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "150",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 6,
+  "end_frame": 20,
+  "length_frames": 15,
+  "length_s": 1.5,
+  "start_file": "000006",
+  "end_file": "000020",
+  "seen_by_agents_frames": {
+   "-1": 15,
+   "-2": 11
+  },
+  "range_m_start_end": [
+   40.66511351984821,
+   40.59462681623249
+  ],
+  "uv_start": [
+   1022.4222319108077,
+   525.662025984898
+  ],
+  "uv_end": [
+   1074.2827389167383,
+   524.7418063202365
+  ],
+  "rank": 10
+ },
+ {
+  "scenario": "2023-04-04-14-30-53_47_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "156",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 4,
+  "end_frame": 18,
+  "length_frames": 15,
+  "length_s": 1.5,
+  "start_file": "000004",
+  "end_file": "000018",
+  "seen_by_agents_frames": {
+   "-1": 15,
+   "-2": 13
+  },
+  "range_m_start_end": [
+   42.75593989081839,
+   42.632980627185894
+  ],
+  "uv_start": [
+   942.1305060903992,
+   523.6096891580972
+  ],
+  "uv_end": [
+   986.7289155409891,
+   521.1201160343941
+  ],
+  "rank": 11
+ },
+ {
+  "scenario": "2023-04-04-14-27-53_44_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "167",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 97,
+  "end_frame": 110,
+  "length_frames": 14,
+  "length_s": 1.4,
+  "start_file": "000097",
+  "end_file": "000110",
+  "seen_by_agents_frames": {
+   "2": 14
+  },
+  "range_m_start_end": [
+   33.863089875702016,
+   28.641425037647025
+  ],
+  "uv_start": [
+   687.8906909503545,
+   522.1071257299099
+  ],
+  "uv_end": [
+   611.2493851123813,
+   523.3847260732916
+  ],
+  "rank": 12
+ },
+ {
+  "scenario": "2023-04-04-14-30-53_47_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "32",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 3,
+  "end_frame": 16,
+  "length_frames": 14,
+  "length_s": 1.4,
+  "start_file": "000003",
+  "end_file": "000016",
+  "seen_by_agents_frames": {
+   "-1": 14,
+   "-2": 5
+  },
+  "range_m_start_end": [
+   44.75380559746052,
+   45.0374688983384
+  ],
+  "uv_start": [
+   926.3981316313353,
+   520.8996478080466
+  ],
+  "uv_end": [
+   884.336989928383,
+   522.1469341023222
+  ],
+  "rank": 13
+ },
+ {
+  "scenario": "2023-04-04-14-30-53_47_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "48",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 3,
+  "end_frame": 16,
+  "length_frames": 14,
+  "length_s": 1.4,
+  "start_file": "000003",
+  "end_file": "000016",
+  "seen_by_agents_frames": {
+   "-1": 14,
+   "-2": 10
+  },
+  "range_m_start_end": [
+   42.63120367610509,
+   42.21762591365761
+  ],
+  "uv_start": [
+   865.7120443747939,
+   524.1669141224061
+  ],
+  "uv_end": [
+   905.9648684622452,
+   523.3426518708928
+  ],
+  "rank": 14
+ },
+ {
+  "scenario": "2023-04-07-15-05-15_4_1",
+  "vehicle": "1",
+  "vehicle_index": 0,
+  "gid": "98",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 54,
+  "end_frame": 67,
+  "length_frames": 14,
+  "length_s": 1.4,
+  "start_file": "000054",
+  "end_file": "000067",
+  "seen_by_agents_frames": {
+   "2": 14
+  },
+  "range_m_start_end": [
+   44.04299960249538,
+   41.99340154871824
+  ],
+  "uv_start": [
+   482.42115157668354,
+   516.5067046890503
+  ],
+  "uv_end": [
+   383.66948098630576,
+   525.2115658697462
+  ],
+  "rank": 15
+ },
+ {
+  "scenario": "2023-03-17-16-10-12_1_1",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "75",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 3,
+  "end_frame": 15,
+  "length_frames": 13,
+  "length_s": 1.3,
+  "start_file": "000003",
+  "end_file": "000015",
+  "seen_by_agents_frames": {
+   "-2": 13,
+   "-1": 3,
+   "1": 13
+  },
+  "range_m_start_end": [
+   49.43948611105086,
+   40.60130864001032
+  ],
+  "uv_start": [
+   1086.9893761144372,
+   527.238626207875
+  ],
+  "uv_end": [
+   1115.7225336640374,
+   540.9974101043643
+  ],
+  "rank": 16
+ },
+ {
+  "scenario": "2023-03-17-16-10-12_1_1",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "83",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 38,
+  "end_frame": 50,
+  "length_frames": 13,
+  "length_s": 1.3,
+  "start_file": "000038",
+  "end_file": "000050",
+  "seen_by_agents_frames": {
+   "-2": 13,
+   "-1": 5,
+   "1": 13
+  },
+  "range_m_start_end": [
+   44.805693542109,
+   41.038207864660635
+  ],
+  "uv_start": [
+   1195.1501317247469,
+   523.383521667295
+  ],
+  "uv_end": [
+   1218.5650599882829,
+   527.5302087159365
+  ],
+  "rank": 17
+ },
+ {
+  "scenario": "2023-04-07-15-05-15_4_1",
+  "vehicle": "1",
+  "vehicle_index": 0,
+  "gid": "102",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 58,
+  "end_frame": 70,
+  "length_frames": 13,
+  "length_s": 1.3,
+  "start_file": "000058",
+  "end_file": "000070",
+  "seen_by_agents_frames": {
+   "2": 13
+  },
+  "range_m_start_end": [
+   49.049051384212966,
+   47.56950595104199
+  ],
+  "uv_start": [
+   262.59136478663993,
+   511.89864666330146
+  ],
+  "uv_end": [
+   145.688178748464,
+   500.59305197086996
+  ],
+  "rank": 18
+ },
+ {
+  "scenario": "2023-04-07-15-05-15_4_1",
+  "vehicle": "1",
+  "vehicle_index": 0,
+  "gid": "118",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 55,
+  "end_frame": 67,
+  "length_frames": 13,
+  "length_s": 1.3,
+  "start_file": "000055",
+  "end_file": "000067",
+  "seen_by_agents_frames": {
+   "2": 13
+  },
+  "range_m_start_end": [
+   49.23095888703509,
+   45.20028033981598
+  ],
+  "uv_start": [
+   410.21460428892783,
+   505.0912193918724
+  ],
+  "uv_end": [
+   385.88291187159564,
+   518.8716809619266
+  ],
+  "rank": 19
+ },
+ {
+  "scenario": "2023-04-07-15-05-15_4_1",
+  "vehicle": "1",
+  "vehicle_index": 0,
+  "gid": "97",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 52,
+  "end_frame": 64,
+  "length_frames": 13,
+  "length_s": 1.3,
+  "start_file": "000052",
+  "end_file": "000064",
+  "seen_by_agents_frames": {
+   "2": 13
+  },
+  "range_m_start_end": [
+   41.26292399640798,
+   35.97543407119441
+  ],
+  "uv_start": [
+   569.0841390459943,
+   523.8760776136812
+  ],
+  "uv_end": [
+   475.56962745098315,
+   537.8374525061928
+  ],
+  "rank": 20
+ },
+ {
+  "scenario": "2023-04-03-18-19-32_13_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "47",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 153,
+  "end_frame": 163,
+  "length_frames": 11,
+  "length_s": 1.1,
+  "start_file": "000153",
+  "end_file": "000163",
+  "seen_by_agents_frames": {
+   "-2": 11,
+   "-1": 11,
+   "2": 11
+  },
+  "range_m_start_end": [
+   17.887952492534623,
+   17.58129954807181
+  ],
+  "uv_start": [
+   215.50312269226924,
+   567.276104591268
+  ],
+  "uv_end": [
+   340.3806965479787,
+   563.0749978716424
+  ],
+  "rank": 21
+ },
+ {
+  "scenario": "2023-04-04-14-30-53_47_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "43",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 4,
+  "end_frame": 14,
+  "length_frames": 11,
+  "length_s": 1.1,
+  "start_file": "000004",
+  "end_file": "000014",
+  "seen_by_agents_frames": {
+   "-1": 11
+  },
+  "range_m_start_end": [
+   43.86505680980432,
+   44.093715310979825
+  ],
+  "uv_start": [
+   915.3610034074234,
+   520.8188900735458
+  ],
+  "uv_end": [
+   960.3554683659635,
+   522.0760524686682
+  ],
+  "rank": 22
+ },
+ {
+  "scenario": "2023-04-04-14-30-53_47_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "51",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 10,
+  "end_frame": 20,
+  "length_frames": 11,
+  "length_s": 1.1,
+  "start_file": "000010",
+  "end_file": "000020",
+  "seen_by_agents_frames": {
+   "-2": 10,
+   "-1": 11
+  },
+  "range_m_start_end": [
+   40.918846658597985,
+   40.92672865814577
+  ],
+  "uv_start": [
+   1006.3489822183058,
+   522.1835998938388
+  ],
+  "uv_end": [
+   1043.0615826187689,
+   522.9000528382097
+  ],
+  "rank": 23
+ },
+ {
+  "scenario": "2023-04-05-16-09-26_6_1",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "33",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 80,
+  "end_frame": 90,
+  "length_frames": 11,
+  "length_s": 1.1,
+  "start_file": "000080",
+  "end_file": "000090",
+  "seen_by_agents_frames": {
+   "-2": 9,
+   "-1": 11
+  },
+  "range_m_start_end": [
+   49.992782059983725,
+   46.796068593619445
+  ],
+  "uv_start": [
+   424.72509299720633,
+   507.9693278250792
+  ],
+  "uv_end": [
+   452.47105677692895,
+   511.7571522564337
+  ],
+  "rank": 24
+ },
+ {
+  "scenario": "2023-04-07-15-05-15_4_1",
+  "vehicle": "1",
+  "vehicle_index": 0,
+  "gid": "99",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 54,
+  "end_frame": 64,
+  "length_frames": 11,
+  "length_s": 1.1,
+  "start_file": "000054",
+  "end_file": "000064",
+  "seen_by_agents_frames": {
+   "2": 11
+  },
+  "range_m_start_end": [
+   37.44768130923402,
+   32.883682087190735
+  ],
+  "uv_start": [
+   509.373361591094,
+   523.318640711887
+  ],
+  "uv_end": [
+   420.08430483344773,
+   537.4243190815633
+  ],
+  "rank": 25
+ },
+ {
+  "scenario": "2023-04-04-14-30-53_47_0",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "76",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 7,
+  "end_frame": 16,
+  "length_frames": 10,
+  "length_s": 1.0,
+  "start_file": "000007",
+  "end_file": "000016",
+  "seen_by_agents_frames": {
+   "-2": 10
+  },
+  "range_m_start_end": [
+   45.978609251275024,
+   46.21111286263245
+  ],
+  "uv_start": [
+   1280.9703019537665,
+   466.30009565797445
+  ],
+  "uv_end": [
+   1308.581202887246,
+   466.5423677418546
+  ],
+  "rank": 26
+ },
+ {
+  "scenario": "2023-04-04-14-34-53_51_1",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "108",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 68,
+  "end_frame": 77,
+  "length_frames": 10,
+  "length_s": 1.0,
+  "start_file": "000068",
+  "end_file": "000077",
+  "seen_by_agents_frames": {
+   "-2": 2,
+   "-1": 10
+  },
+  "range_m_start_end": [
+   48.17086441390618,
+   47.985534140611
+  ],
+  "uv_start": [
+   1151.0463874604345,
+   499.72582925517304
+  ],
+  "uv_end": [
+   1152.753722369525,
+   498.60921742044377
+  ],
+  "rank": 27
+ },
+ {
+  "scenario": "2023-04-04-15-47-17_19_0",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "115",
+  "class_name": "Pedestrian",
+  "preferred": true,
+  "start_frame": 43,
+  "end_frame": 52,
+  "length_frames": 10,
+  "length_s": 1.0,
+  "start_file": "000043",
+  "end_file": "000052",
+  "seen_by_agents_frames": {
+   "1": 10
+  },
+  "range_m_start_end": [
+   44.44853845781015,
+   43.26910731280535
+  ],
+  "uv_start": [
+   405.30068881181785,
+   497.22381983806815
+  ],
+  "uv_end": [
+   381.1560597731135,
+   507.93298125266324
+  ],
+  "rank": 28
+ },
+ {
+  "scenario": "2023-04-04-14-27-53_44_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "12",
+  "class_name": "Car",
+  "preferred": false,
+  "start_frame": 22,
+  "end_frame": 53,
+  "length_frames": 32,
+  "length_s": 3.2,
+  "start_file": "000022",
+  "end_file": "000053",
+  "seen_by_agents_frames": {
+   "2": 32
+  },
+  "range_m_start_end": [
+   32.15418789186255,
+   20.69651375655779
+  ],
+  "uv_start": [
+   195.73896501868603,
+   521.5014836988995
+  ],
+  "uv_end": [
+   506.8550639018068,
+   565.1279162665878
+  ],
+  "rank": 29
+ },
+ {
+  "scenario": "2023-04-04-14-27-53_44_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "9",
+  "class_name": "Car",
+  "preferred": false,
+  "start_frame": 30,
+  "end_frame": 60,
+  "length_frames": 31,
+  "length_s": 3.1,
+  "start_file": "000030",
+  "end_file": "000060",
+  "seen_by_agents_frames": {
+   "2": 31
+  },
+  "range_m_start_end": [
+   21.210667514972286,
+   10.5868763269045
+  ],
+  "uv_start": [
+   300.25903960004973,
+   544.5593507019232
+  ],
+  "uv_end": [
+   93.7985607202445,
+   622.4120632380068
+  ],
+  "rank": 30
+ },
+ {
+  "scenario": "2023-04-04-14-27-53_44_0",
+  "vehicle": "1",
+  "vehicle_index": 2,
+  "gid": "32",
+  "class_name": "Car",
+  "preferred": false,
+  "start_frame": 20,
+  "end_frame": 45,
+  "length_frames": 26,
+  "length_s": 2.6,
+  "start_file": "000020",
+  "end_file": "000045",
+  "seen_by_agents_frames": {
+   "2": 26
+  },
+  "range_m_start_end": [
+   40.67955171712481,
+   31.22571016666291
+  ],
+  "uv_start": [
+   165.6239992069826,
+   512.6211373955318
+  ],
+  "uv_end": [
+   551.5382619724674,
+   535.0208122570783
+  ],
+  "rank": 31
+ },
+ {
+  "scenario": "2023-04-04-14-34-53_51_1",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "15",
+  "class_name": "Car",
+  "preferred": false,
+  "start_frame": 26,
+  "end_frame": 45,
+  "length_frames": 20,
+  "length_s": 2.0,
+  "start_file": "000026",
+  "end_file": "000045",
+  "seen_by_agents_frames": {
+   "-2": 18,
+   "-1": 20,
+   "1": 20
+  },
+  "range_m_start_end": [
+   43.47168147558755,
+   37.81984854453391
+  ],
+  "uv_start": [
+   1898.9554687965447,
+   502.44191233399107
+  ],
+  "uv_end": [
+   1533.0028641326087,
+   504.222599162265
+  ],
+  "rank": 32
+ },
+ {
+  "scenario": "2023-04-04-15-43-17_15_0",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "36",
+  "class_name": "Car",
+  "preferred": false,
+  "start_frame": 10,
+  "end_frame": 25,
+  "length_frames": 16,
+  "length_s": 1.6,
+  "start_file": "000010",
+  "end_file": "000025",
+  "seen_by_agents_frames": {
+   "1": 16
+  },
+  "range_m_start_end": [
+   41.27117927144097,
+   34.941074720983536
+  ],
+  "uv_start": [
+   17.16139145223076,
+   522.0310724233304
+  ],
+  "uv_end": [
+   48.575161778939105,
+   527.0122618209084
+  ],
+  "rank": 33
+ },
+ {
+  "scenario": "2023-04-05-16-09-26_6_1",
+  "vehicle": "2",
+  "vehicle_index": 3,
+  "gid": "27",
+  "class_name": "Car",
+  "preferred": false,
+  "start_frame": 66,
+  "end_frame": 77,
+  "length_frames": 12,
+  "length_s": 1.2,
+  "start_file": "000066",
+  "end_file": "000077",
+  "seen_by_agents_frames": {
+   "-1": 12
+  },
+  "range_m_start_end": [
+   48.677058860419265,
+   44.15909140185981
+  ],
+  "uv_start": [
+   606.9981402180681,
+   507.96870107337145
+  ],
+  "uv_end": [
+   677.5680348046164,
+   505.4663095827546
+  ],
+  "rank": 34
+ },
+ {
+  "scenario": "2023-04-07-15-04-15_3_1",
+  "vehicle": "1",
+  "vehicle_index": 0,
+  "gid": "24",
+  "class_name": "Car",
+  "preferred": false,
+  "start_frame": 28,
+  "end_frame": 39,
+  "length_frames": 12,
+  "length_s": 1.2,
+  "start_file": "000028",
+  "end_file": "000039",
+  "seen_by_agents_frames": {
+   "2": 12
+  },
+  "range_m_start_end": [
+   40.59230133615912,
+   31.18813955412942
+  ],
+  "uv_start": [
+   1602.0267410235379,
+   476.6328396181694
+  ],
+  "uv_end": [
+   1906.0073901621827,
+   484.4629407663654
+  ],
+  "rank": 35
+ }
+]

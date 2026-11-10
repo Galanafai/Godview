@@ -1,0 +1,31 @@
+{
+ "files": [
+  "/workspace/data/v2v4real/d1_val_splits/testoutput_CAV_data_2022-03-15-15-20-01_0_alignoff.splits.jsonl",
+  "/workspace/data/v2v4real/d1_val_splits/testoutput_CAV_data_2022-03-21-09-35-07_0_alignoff.splits.jsonl",
+  "/workspace/data/v2v4real/d1_val_splits/testoutput_CAV_data_2022-03-21-09-35-07_10_alignoff.splits.jsonl"
+ ],
+ "split_label_frames": 1837,
+ "classes": {
+  "a": 1707,
+  "b": 130
+ },
+ "sub_causes": {
+  "a: both real": 456,
+  "a: false beside real": 126,
+  "a: other": 10,
+  "a: restart": 1115,
+  "b: partner taken": 104,
+  "b: vel gate": 18,
+  "b: yaw gate": 8
+ },
+ "a_tracks_from": {
+  "own car": 852,
+  "other car": 855
+ },
+ "a_with_other_car_also_unfused": 1,
+ "a_restart_gap_frames": {
+  "1": 934,
+  "2 to 5": 181
+ },
+ "b_pos_gate_dist_h_m_median_p90": null
+}

@@ -61,6 +61,8 @@ struct Args {
     box_center_sys_frac: f64,
     box_center_sys_z_m: f64,
     diag: String,
+    split_diag: String,
+    spawn_diag: String,
     dump: String,
     no_sharing: bool,
     align: bool,
@@ -79,6 +81,8 @@ fn parse_args() -> Args {
         box_center_sys_frac: 0.0,
         box_center_sys_z_m: 0.0,
         diag: String::new(),
+        split_diag: String::new(),
+        spawn_diag: String::new(),
         dump: String::new(),
         no_sharing: false,
         align: false,
@@ -110,6 +114,14 @@ fn parse_args() -> Args {
             // Diagnostics only: per frame and car, the gids of missed objects and of
             // objects with a duplicate, written as JSON lines. Does not change scoring.
             "--diag" => a.diag = val,
+            // Diagnostics only (with attribution.json): one JSON line per split
+            // label-frame, with the tracks behind each of the label's world objects.
+            "--split-diag" => a.split_diag = val,
+            // Diagnostics only (with attribution.json): one JSON line per track
+            // started by a detection of a label that another live track of the
+            // same car already follows, with the gate statistics of that
+            // detection against the existing track.
+            "--spawn-diag" => a.spawn_diag = val,
             // Per frame: each car's world objects and the labels, in the odometry
             // frame, as JSON lines (for visualization). Does not change scoring.
             "--dump" => a.dump = val,
@@ -264,6 +276,10 @@ fn main() {
     // Per car: report key -> (source car, latest obs id fused), from its own
     // publishes and from the snapshots that came with delivered peer batches.
     let mut known: [Attr; 2] = [Attr::new(), Attr::new()];
+    // Per car: track id -> obs id of the detection that started the track.
+    let mut first_obs: [BTreeMap<u64, u64>; 2] = [BTreeMap::new(), BTreeMap::new()];
+    let mut split_lines: Vec<String> = Vec::new();
+    let mut spawn_lines: Vec<String> = Vec::new();
     let mut stats: Vec<CarStats> = (0..2).map(|_| CarStats::default()).collect();
     let mut detected_hist: VecDeque<BTreeSet<String>> = VecDeque::new();
     let mut ever_detected: [BTreeSet<String>; 2] = [BTreeSet::new(), BTreeSet::new()];
@@ -282,12 +298,72 @@ fn main() {
         for c in 0..2 {
             deliver(&mut queue, &mut nodes, t, &mut rejected, &mut known);
             nodes[c].ingest(&parsed[c].detections);
+            if let (Some(attr), false) = (&attribution, args.spawn_diag.is_empty()) {
+                for new in nodes[c].tracker().tracks().filter(|tr| !first_obs[c].contains_key(&tr.id.0)) {
+                    let Some(g) = attr[c][new.last_obs_id as usize].as_deref() else { continue };
+                    let Some(d) = parsed[c].detections.iter().find(|d| d.obs_id == new.last_obs_id) else {
+                        continue;
+                    };
+                    let old = nodes[c]
+                        .tracker()
+                        .tracks()
+                        .filter(|tr| tr.id != new.id && attr[c][tr.last_obs_id as usize].as_deref() == Some(g))
+                        .max_by_key(|tr| tr.hits);
+                    let Some(old) = old else { continue };
+                    let pred = old.predicted(d.t);
+                    let innov = d.z - pred.x.fixed_rows::<3>(0).into_owned();
+                    let v = pred.x.fixed_rows::<3>(3).into_owned();
+                    let (pb, db) = (old.predicted_box(d.t), d.object_box);
+                    let boxes = match (pb, db) {
+                        (Some(x), Some(y)) => {
+                            let dy = yaw_residual(x.yaw, y.yaw, x.yaw_ambiguous || y.yaw_ambiguous);
+                            // Innovation along / across the track's box.
+                            let (cs, sn) = (x.yaw.cos(), x.yaw.sin());
+                            json!({
+                                "dsize": [y.size[0] - x.size[0], y.size[1] - x.size[1], y.size[2] - x.size[2]],
+                                "size_chi2_terms": (0..3).map(|k| (x.size[k] - y.size[k]).powi(2) / (x.size_var[k] + y.size_var[k])).collect::<Vec<f64>>(),
+                                "track_size_sigma": x.size_var.map(f64::sqrt),
+                                "dyaw_deg": dy.to_degrees(),
+                                "yaw_chi2": dy * dy / (x.yaw_var + y.yaw_var),
+                                "track_yaw_sigma_deg": x.yaw_var.sqrt().to_degrees(),
+                                "innov_along": cs * innov.x + sn * innov.y,
+                                "innov_across": -sn * innov.x + cs * innov.y,
+                            })
+                        }
+                        _ => Value::Null,
+                    };
+                    spawn_lines.push(
+                        json!({
+                            "frame": i, "car": c, "gid": g, "old_hits": old.hits,
+                            "old_lifecycle": format!("{:?}", old.lifecycle),
+                            "frames_since_old_update": ((d.t.as_nanos() - old.last_update.as_nanos()) as f64 / 1e8).round(),
+                            "nis": pred.nis(&d.z, &d.r), "innov_m": innov.norm(), "innov_z": innov.z,
+                            "track_speed": v.norm(), "det_sigma_diag": [d.r[(0, 0)].sqrt(), d.r[(1, 1)].sqrt(), d.r[(2, 2)].sqrt()],
+                            "box": boxes,
+                        })
+                        .to_string(),
+                    );
+                }
+            }
+            for tr in nodes[c].tracker().tracks() {
+                first_obs[c].entry(tr.id.0).or_insert(tr.last_obs_id);
+            }
             nodes[c].maintain(t);
             if let Some(bytes) = nodes[c].publish(t, parsed[c].pose.as_ref()) {
                 let snap: Attr = nodes[c]
                     .tracker()
                     .tracks()
-                    .map(|tr| ((node_ids[c], tr.id), (c, tr.last_obs_id)))
+                    .map(|tr| {
+                        let info = TrackInfo {
+                            src: c,
+                            obs: tr.last_obs_id,
+                            first_obs: first_obs[c][&tr.id.0],
+                            created_ns: tr.created.as_nanos(),
+                            last_update_ns: tr.last_update.as_nanos(),
+                            hits: tr.hits,
+                        };
+                        ((node_ids[c], tr.id), info)
+                    })
                     .collect();
                 known[c].extend(snap.iter().map(|(k, v)| (*k, *v)));
                 if args.no_sharing {
@@ -349,9 +425,10 @@ fn main() {
                         );
                         json!({
                             "id": id,
-                            "x": p.x, "y": p.y,
+                            "x": p.x, "y": p.y, "z": p.z,
+                            "class_prob": w.class_prob, "p_exist": w.p_exist,
                             "box": w.object_box.map(|b| json!({
-                                "l": b.size[0], "w": b.size[1],
+                                "l": b.size[0], "w": b.size[1], "h": b.size[2],
                                 "yaw_deg": b.yaw.to_degrees() - odom_yaw,
                             })),
                             "members": w.members.len(),
@@ -370,11 +447,12 @@ fn main() {
             let st = &mut stats[c];
             if let Some(attr) = &attribution {
                 let mut per_label: BTreeMap<&str, usize> = BTreeMap::new();
-                for w in &world.objects {
+                let mut objs_of: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+                for (wi, w) in world.objects.iter().enumerate() {
                     let mut labels: BTreeSet<&str> = BTreeSet::new();
                     for (key, _) in &w.members {
                         st.members += 1;
-                        match known[c].get(key).and_then(|(src, obs)| attr[*src][*obs as usize].as_deref()) {
+                        match known[c].get(key).and_then(|k| attr[k.src][k.obs as usize].as_deref()) {
                             Some(g) => {
                                 labels.insert(g);
                             }
@@ -390,6 +468,62 @@ fn main() {
                     }
                     for g in labels {
                         *per_label.entry(g).or_default() += 1;
+                        objs_of.entry(g).or_default().push(wi);
+                    }
+                }
+                if !args.split_diag.is_empty() {
+                    let odom_from_ecef = pose_exact.inverse();
+                    for (g, ws) in objs_of.iter().filter(|(_, ws)| ws.len() >= 2) {
+                        let objs_json: Vec<Value> = ws
+                            .iter()
+                            .map(|wi| {
+                                let w = &world.objects[*wi];
+                                let p = odom_from_ecef.transform_point(&w.position().0);
+                                let members: Vec<Value> = w
+                                    .members
+                                    .iter()
+                                    .filter_map(|(key, _)| known[c].get(key).map(|k| (key, k)))
+                                    .map(|(key, k)| {
+                                        json!({
+                                            "src": k.src, "track": (key.1).0, "hits": k.hits,
+                                            "created_ns": k.created_ns, "last_update_ns": k.last_update_ns,
+                                            "last_gid": attr[k.src][k.obs as usize],
+                                            "first_gid": attr[k.src][k.first_obs as usize],
+                                        })
+                                    })
+                                    .collect();
+                                json!({"x": p.x, "y": p.y, "z": p.z, "members": members})
+                            })
+                            .collect();
+                        // Gates between the label's first two world objects, from their
+                        // fused states (exact for single-member objects).
+                        let (a, b) = (&world.objects[ws[0]], &world.objects[ws[1]]);
+                        let d = a.state - b.state;
+                        let sm = a.cov + b.cov;
+                        let chi = |off: usize| {
+                            let dv = d.fixed_rows::<3>(off).into_owned();
+                            let sv: Matrix3<f64> = sm.fixed_view::<3, 3>(off, off).into_owned();
+                            sv.cholesky().map(|ch| dv.dot(&ch.solve(&dv)))
+                        };
+                        let (size_chi2, yaw_chi2) = match (a.object_box, b.object_box) {
+                            (Some(x), Some(y)) => {
+                                let sz: f64 = (0..3)
+                                    .map(|k| (x.size[k] - y.size[k]).powi(2) / (x.size_var[k] + y.size_var[k]))
+                                    .sum();
+                                let dy = yaw_residual(x.yaw, y.yaw, x.yaw_ambiguous || y.yaw_ambiguous);
+                                (Some(sz), Some(dy * dy / (x.yaw_var + y.yaw_var)))
+                            }
+                            _ => (None, None),
+                        };
+                        let e_enu = r_ecef_enu.transpose() * d.fixed_rows::<3>(0).into_owned();
+                        split_lines.push(
+                            json!({
+                                "frame": i, "t_ns": t.as_nanos(), "car": c, "gid": g, "objects": objs_json,
+                                "pos_chi2": chi(0), "vel_chi2": chi(3), "size_chi2": size_chi2, "yaw_chi2": yaw_chi2,
+                                "dist_h_m": (e_enu.x * e_enu.x + e_enu.y * e_enu.y).sqrt(), "dz_m": e_enu.z,
+                            })
+                            .to_string(),
+                        );
                     }
                 }
                 for n in per_label.values().filter(|n| **n >= 2) {
@@ -612,6 +746,12 @@ fn main() {
     if !args.dump.is_empty() {
         std::fs::write(&args.dump, dump_lines.join("\n")).unwrap();
     }
+    if !args.split_diag.is_empty() {
+        std::fs::write(&args.split_diag, split_lines.join("\n")).unwrap();
+    }
+    if !args.spawn_diag.is_empty() {
+        std::fs::write(&args.spawn_diag, spawn_lines.join("\n")).unwrap();
+    }
     for c in out["cars"].as_array().unwrap() {
         println!(
             "{} car{}: matched {} missed {} dup {} (split {}) false {} rms {:.2} nees3 {:.2} (h {:.2} v {:.2}) fused {}/{} gained {} idchg {}/{} heading p95 {:.1}",
@@ -633,7 +773,20 @@ fn main() {
 }
 
 /// Report key -> (source car, obs id of the latest detection its track fused).
-type Attr = BTreeMap<ReportKey, (usize, u64)>;
+type Attr = BTreeMap<ReportKey, TrackInfo>;
+
+/// What the scorer knows about a track as of a publish (never fed to GodView).
+#[derive(Clone, Copy)]
+struct TrackInfo {
+    /// Source car.
+    src: usize,
+    /// Obs id of the latest detection fused, and of the one that started the track.
+    obs: u64,
+    first_obs: u64,
+    created_ns: i64,
+    last_update_ns: i64,
+    hits: u32,
+}
 
 fn deliver(
     queue: &mut VecDeque<(i64, usize, Vec<u8>, Attr)>,

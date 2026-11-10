@@ -205,3 +205,107 @@ Test has the gps field, so its map frame is anchored by the Phase C fit
   ambiguous by 180 degrees; the IoU is symmetric under that flip, so the
   ambiguity itself costs nothing in AP.
 * GPU time: none for steps 2 and 3 (CPU only).
+
+## Val diagnostics before step 4 (2026-11-10, val only, no setting changed)
+
+### Where the 1,837 splits come from (alignment off; alignment on 1,801)
+
+`scripts/phase_d/split_breakdown.py` on `v2v4real-replay --split-diag`
+(`docs/results/phase_d/d1/val_splits_breakdown_*.json`). Each split label-frame
+is classed from the tracks attributed to the label.
+
+| class | cause | label-frames |
+|---|---|---|
+| (a) two tracks from the same car | track restart: the younger track was created after the older one's last update | 1,115 |
+| | both tracks started by detections of the label, overlapping in time | 456 |
+| | track started by a false detection beside the real one | 126 |
+| | other | 10 |
+| (b) the two cars' tracks of one label not fused | the other car's partner track already sits in the object (same-source rule) | 104 |
+| | velocity gate | 18 |
+| | heading gate | 8 |
+| (c) other | | 0 |
+
+* (a) is 93 percent of splits (1,707). It is not about the cars: 852 label-frames
+  are two tracks of the scored car, 855 two tracks of the other car.
+* Of the restarts, 934 start the frame after the old track's last update and
+  181 two to five frames after. The old track stays in the world while it
+  coasts, so one dropped track is counted over many frames. False detections
+  beside real ones are 126 of 1,707 (7 percent).
+* What starts the second track: of 169 tracks started next to a live track of
+  the same label, 120 fail the tracker's position gate (the rest: heading 33,
+  size 17). Those innovations are large along the box: the median is 1.5 m
+  along against 0.5 m across, and the tracks' median speed is 25 m/s (the
+  odometry frame is fixed to the map, so oncoming cars move fast and a 100 ms
+  step is 2.5 m).
+* A second cause is outside the settings: 1,208 of the 1,707 (a) label-frames
+  are in one scenario (`2022-03-15-15-20-01_0`) and car 1's step between
+  consecutive poses jumps there (85 frames deviate more than 0.5 m from the
+  local median step, against 9 for car 0). 73 of 120 position-gate failures
+  are at such frames, and 796 of 1,115 restarts begin at one. This is
+  attributed by timing only; whether the cause is the pose or the detector is
+  not separated.
+* Other split sources are small: one dominant cause with a single-setting fix
+  does not exist (the largest, restarts, mixes pose jumps with fast
+  oncoming objects). **No committed setting is changed.**
+
+### Alignment moves the world away from the dataset's frame
+
+On val, car 0's world scored by the dataset's AP (below) loses AP with alignment
+on, mostly at IoU 0.7. Alignment shifts fused objects by a median of 0.62 m
+(car 1's reports 0.61 m; car 0's own objects 0.0 m, 90th percentile 0.93 m)
+compared with alignment off. The dataset's ground truth is built from the same
+`lidar_pose` of both cars, without this correction. Whether the alignment
+corrects a real pose error that the dataset's evaluation ignores, or errs, is
+not decided by this. GodView's own metrics, which use the labels of both cars
+averaged, do not lose accuracy (RMS 0.84 to 1.27 m with alignment off, 0.84 to
+1.27 m on).
+
+### AP on val (car 0's world; the AP script is validated)
+
+`scripts/phase_d/ap_eval.py` reproduces the library's AP implementation
+exactly on every method (asserted to 1e-9) and the step 1 val numbers: No
+Fusion 45.95 / 25.73 (step 1: 45.95 / 25.73), Late Fusion 52.01 / 28.80
+(step 1: 52.01 / 28.80), AP@0.5 / AP@0.7. 9,447 ground-truth boxes, all
+identified with a label.
+
+| method (val, 748 frames) | all frames | excluding each label's first 3 frames |
+|---|---|---|
+| No Fusion | 45.95 / 25.73 | 46.14 / 25.83 |
+| Late Fusion | 52.01 / 28.80 | 52.30 / 28.99 |
+| GodView, alignment off, score class_prob | 50.23 / 29.80 | 51.34 / 30.47 |
+| GodView, alignment off, score p_exist | 50.24 / 29.79 | 51.35 / 30.46 |
+| GodView, alignment on, score class_prob | 39.58 / 9.13 | 40.37 / 9.27 |
+| GodView, alignment on, score p_exist | 39.58 / 9.13 | 40.38 / 9.27 |
+
+Full output: `docs/results/phase_d/d1/ap_val.json`. Read with care: these are
+val numbers from a detector that did better on train, for settings chosen on
+val; the AP scoring compares only within frames (see below).
+
+## Additions to the test evaluation plan (committed before any test run)
+
+1. **AP on all frames and, as a labeled second number, excluding each
+   label's first 3 frames.** GodView publishes confirmed tracks only (three
+   hits) and delivers peers' reports 100 ms late, while late fusion scores
+   every frame's raw detections, so GodView loses recall at the start of
+   each object's track. The second number ignores a label's first 3 frames
+   in the ground truth of its scenario (not counted as ground truth, and a
+   detection matched to one is neither a true nor a false positive). It
+   removes a start-up effect; it does not correct the first number. Both
+   are reported for No Fusion, Late Fusion and GodView, overall and in the
+   ranges 0 to 30, 30 to 50 and 50 to 100 m. The script is
+   `scripts/phase_d/ap_eval.py`.
+2. **Reading the size setting.** The cross-car association gate is
+   dominated by the frozen pose sigma (1.27 m horizontal and 2.0 m vertical
+   per car), which sits in the position gate's covariance, and the box size
+   gate has the same detector bias in both cars' boxes. That is why changing
+   `box_size_sys_m` from 0.50 to 0.97 m made no measurable difference on val.
+   Results on test are not evidence about `box_size_sys_m` either.
+3. **AP scoring detail.** The library concatenates true and false positives
+   in frame order and does not sort them globally by score, so a score
+   ranks detections only within a frame. Both the library and
+   `ap_eval.py` do so, and the numbers above and on test are comparable to
+   D0 for that reason.
+4. **Alignment on is expected to lose AP on test** if the val behaviour
+   holds (it shifts car 1's reports by a median of 0.6 m relative to the
+   frame the dataset's truth uses). Pre-stated here so that the test result
+   is not read as a surprise: the test number is reported as measured.

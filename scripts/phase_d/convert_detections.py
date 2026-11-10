@@ -207,6 +207,9 @@ def main():
                 'labeled_by': sorted(labs), 'detected_by': sorted(detected.get(g, ())),
                 'points': [labs[c]['points'] if c in labs else 0 for c in (0, 1)],
                 'type': best['type'], 'cav': cav,
+                # Each car's own label centre (odometry frame), to identify
+                # the dataset's ground-truth boxes in the AP evaluation.
+                'per_car_pos': {str(c): (l['pos_map'] - origin).tolist() for c, l in labs.items()},
             })
         truth_frames.append({'frame': f, 't_ns': t_ns, 'ego_odom': [e.tolist() for e in ego_odom],
                              'objects': out_objs})

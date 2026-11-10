@@ -93,17 +93,35 @@ def ap(stat):
     return float(sum((rec[i] - rec[i - 1]) * pre[i] for i in range(1, len(rec)) if rec[i] != rec[i - 1]))
 
 
-def world_boxes(objs, origin, inv_pose, score_key):
+# variant -> (box source, score key, position suffix). "raw" is the latest raw
+# detection of the world object's only member (objects with several members
+# have none and are left out of raw variants).
+VARIANTS = {
+    'default': ('filtered', None, ''),
+    'pass': ('raw', 'raw_score', ''),         # raw box, centre and score
+    'rawscore': ('filtered', 'raw_score', ''),
+    'rawbox': ('raw', None, ''),
+    'shift': ('filtered', None, 's'),         # shifted back by the car's own alignment translation
+}
+
+
+def world_boxes(objs, origin, inv_pose, score_key, variant='default'):
+    box_src, vscore, suffix = VARIANTS[variant]
+    score_key = vscore or score_key
     corners, scores = [], []
     for o in objs:
-        b = o.get('box')
+        r = o.get('raw')
+        if (box_src == 'raw' or score_key == 'raw_score') and r is None:
+            continue
+        b = r if box_src == 'raw' else o.get('box')
         if b is None:
             continue
+        pos = [r['x'], r['y'], r['z']] if box_src == 'raw' else [o['x' + suffix], o['y' + suffix], o['z' + suffix]]
         a = np.radians(b['yaw_deg'])
         R = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
-        c = (TEMPLATE * [b['l'], b['w'], b['h']]) @ R.T + [o['x'], o['y'], o['z']] + origin
+        c = (TEMPLATE * [b['l'], b['w'], b['h']]) @ R.T + pos + origin
         corners.append(c @ inv_pose[:3, :3].T + inv_pose[:3, 3])
-        scores.append(o[score_key])
+        scores.append(r['score'] if score_key == 'raw_score' else o[score_key])
     corners = np.array(corners).reshape(-1, 8, 3)
     m = in_range_mask(corners)
     return corners[m], np.array(scores)[m]
@@ -117,6 +135,9 @@ def main():
     p.add_argument('--out', required=True)
     p.add_argument('--dumps', action='append', default=[], help='NAME=DIR')
     p.add_argument('--skip-scenario', action='append', default=[])
+    p.add_argument('--variants', default='', help='comma list of extra variants: pass,rawscore,rawbox,shift')
+    p.add_argument('--score-keys', default='class_prob,p_exist')
+    p.add_argument('--no-baselines', action='store_true', help='skip No Fusion and Late Fusion')
     a = p.parse_args()
     sys.path.insert(0, a.opencood)
     import torch
@@ -161,7 +182,15 @@ def main():
                 seen[(s, g)] = n + 1
         ignore[(s, i)] = ig
 
-    methods = ['nofusion', 'late'] + ['%s:%s' % (n, k) for n in dumps for k in ('class_prob', 'p_exist')]
+    variants = ['default'] + [v for v in a.variants.split(',') if v]
+    skeys = a.score_keys.split(',')
+    wm = []   # (method name, dump name, variant, score key)
+    for n in dumps:
+        for v in variants:
+            keys = skeys if v == 'default' else ['class_prob']
+            for k in keys:
+                wm.append(('%s:%s' % (n, k) if v == 'default' else '%s:%s' % (n, v), n, v, k))
+    methods = ([] if a.no_baselines else ['nofusion', 'late']) + [m[0] for m in wm]
     new = lambda: {'tp': [], 'fp': [], 'gt': 0}  # noqa: E731
     stats = {m: {v: {rg: {th: new() for th in (0.5, 0.7)} for rg in RANGES} for v in ('all_frames', 'excl_first_3')}
              for m in methods}
@@ -172,16 +201,22 @@ def main():
         assert r['cars'][0]['cav_id'] == '0' and r['cars'][0]['is_ego']
         gt = np.array(r['gt_corners_ego'], float).reshape(-1, 8, 3)
         dets = {}
-        c0 = np.array(r['cars'][0]['corners'], float).reshape(-1, 8, 3)
-        dets['nofusion'] = (c0, np.array(r['cars'][0]['score'], float))
+        if a.no_baselines:
+            c0 = None
+        else:
+            c0 = np.array(r['cars'][0]['corners'], float).reshape(-1, 8, 3)
+        if not a.no_baselines:
+            dets['nofusion'] = (c0, np.array(r['cars'][0]['score'], float))
         pc, ps = [], []
-        for car in r['cars']:
+        for car in ([] if a.no_baselines else r['cars']):
             c = np.array(car['corners'], float).reshape(-1, 8, 3)
             T = np.array(car['T_to_ego'])
             if len(c):
                 pc.append(c @ T[:3, :3].T + T[:3, 3])
                 ps.append(np.array(car['score'], float))
-        if pc:
+        if a.no_baselines:
+            pass
+        elif pc:
             tc, ts = torch.tensor(np.vstack(pc)).float(), torch.tensor(np.concatenate(ps)).float()
             keep = box_utils.nms_rotated(tc, ts, 0.15)
             tc, ts = tc[keep], ts[keep]
@@ -191,11 +226,10 @@ def main():
             dets['late'] = (np.zeros((0, 8, 3)), np.zeros(0))
         inv0 = np.linalg.inv(np.array(r['cars'][0]['lidar_pose']))
         origin = np.array(truth[s]['origin_map'])
-        for n in dumps:
+        for name, n, v, k in wm:
             fr = dumps[n][s][i]
             assert fr['frame'] == i
-            for k in ('class_prob', 'p_exist'):
-                dets['%s:%s' % (n, k)] = world_boxes(fr['worlds'][0], origin, inv0, k)
+            dets[name] = world_boxes(fr['worlds'][0], origin, inv0, k, v)
         none = [False] * len(gt)
         for mth, (dc, dsc) in dets.items():
             n_boxes[mth] += len(dc)

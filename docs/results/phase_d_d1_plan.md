@@ -310,3 +310,66 @@ val; the AP scoring compares only within frames (see below).
    holds (it shifts car 1's reports by a median of 0.6 m relative to the
    frame the dataset's truth uses). Pre-stated here so that the test result
    is not read as a surprise: the test number is reported as measured.
+
+## Tracker ablation on val: protocol and selection rule
+
+Written and committed before the ablation runs. Val only; test is not touched.
+Everything not named below is the committed setting (Part B above: 0.50 m
+size, 0.14 centre fraction, 0.22 m vertical, 5.7 degrees heading, anisotropic
+covariance, pose 1.27 / 2.0 m / 0.1 degrees, 100 ms delay, alignment off
+unless stated). AP is car 0's, all frames, from `scripts/phase_d/ap_eval.py`.
+New tracker and publishing options (all default to the committed behaviour,
+tested in `godview_core`): `--fresh-only`, `--score-mode`, `--raw-box`,
+`--overlap-iou`, `--overlap-keep`, `--confirm-hits`, `--pub-min-score`.
+
+**1. Passthrough (no sharing).** The unchanged tracker, scored four ways:
+the world object's own box and score (the committed way); its member's latest
+raw detection box, centre and score (`pass`); filtered box with the latest raw
+score (`rawscore`); latest raw box and centre with the filtered score
+(`rawbox`). Next to No Fusion. If `pass` recovers No Fusion's AP, the loss
+is in boxes and scores; if it does not, it is in which tracks exist.
+
+**2. Ablations (no sharing), one at a time against the baseline:**
+(a) `--fresh-only`: publish only tracks updated by a detection at the publish
+time (a track that stops qualifying gets one tombstone-form report, so it
+leaves the world at once);
+(b) `--overlap-iou 0.3`: of two tracks of one class whose predicted boxes
+overlap by more than 0.3 bird's-eye-view IoU, drop one, keeping the older
+(`--overlap-keep older`, as asked). The value 0.3 is fixed in advance, not
+swept. Added by me: (b2) the same keeping the more recently updated track,
+because the dominant split cause on val is an old coasting track next to its
+restart, which "keep the older" keeps;
+(c) score = latest detection (`latest`) or maximum (`max`) instead of the
+running mean;
+(d) `--raw-box`: published size and heading are the latest detection's
+(association still uses the filtered box);
+(e) `--confirm-hits 1` instead of 3.
+Reported for each: AP@0.5 / AP@0.7, duplicates (estimates within 5 m of a
+label, unmatched), split label-frames, coasting object-frames, world objects
+per frame.
+
+**3. Selection rule.**
+
+* An alternative is *adopted* if it raises no-sharing AP@0.5 by at least 0.5
+  points over the baseline. Within (b) and (c) only the better of the two
+  alternatives can be adopted.
+* Stage S1, with sharing (alignment off): the baseline, each adopted
+  alternative alone, and all adopted alternatives together. The best is the
+  highest AP@0.5; differences under 0.1 points are ties, resolved by fewer
+  false objects introduced by sharing per car-frame (the plan's definition).
+* Stage S2: the S1 winner with a publish threshold on the track score of 0.2,
+  0.3 and 0.4 (tracks below it are not published). Same criterion over the
+  S1 winner and the three thresholds. The detector's own threshold is 0.2, so
+  0.2 changes nothing under the running-mean score and serves as a check.
+* The result of S2 is the proposed tracker setting. AP@0.7, the counts and
+  alignment-on results are reported and do not enter the rule.
+
+**4. Alignment gauge (not in the rule).** With alignment on and the shared world
+unchanged, each car's view is scored shifted back by that car's own estimated
+translation (`shift`), against the unshifted view, for the committed tracker
+and for the S2 winner. It tests whether the AP@0.7 loss from alignment is the
+frame offset only.
+
+Limits stated now: val has three scenarios and one dominates the splits;
+a setting chosen here is not shown to hold on test. A second test run, if
+run, is labeled separately and does not replace the first.

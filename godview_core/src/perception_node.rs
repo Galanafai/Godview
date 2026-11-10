@@ -45,6 +45,13 @@ pub struct PublishConfig {
     pub clock_sigma_s: f64,
     /// Id of this agent's odometry frame, used when publishing without a global pose.
     pub local_frame_id: u64,
+    /// Publish only tracks updated by a detection at the publish time; a track
+    /// that was published and no longer qualifies gets one tombstone-form report,
+    /// so it leaves the world at once instead of coasting there.
+    pub fresh_only: bool,
+    /// Publish only tracks whose score is at least this (0 publishes all);
+    /// handled like `fresh_only` for a track that was published and falls below.
+    pub min_score: f32,
 }
 
 impl Default for PublishConfig {
@@ -52,6 +59,8 @@ impl Default for PublishConfig {
         Self {
             clock_sigma_s: 0.002,
             local_frame_id: 1,
+            fresh_only: false,
+            min_score: 0.0,
         }
     }
 }
@@ -170,6 +179,8 @@ pub struct PerceptionNode {
     revoked: BTreeSet<AgentId>,
     /// Terminated tracks and the time until which their tombstone is re-published.
     tombstones: Vec<(LocalTrack, Timestamp)>,
+    /// Tracks whose latest report was live (for `publish` suppression).
+    live_sent: BTreeSet<LocalTrackId>,
     /// For each own track, the world-object ID it belonged to in this node's
     /// latest world when that ID is another track's key; published as the
     /// report's `name` so the ID can outlive the track that started it.
@@ -193,6 +204,7 @@ impl PerceptionNode {
             config,
             revoked: BTreeSet::new(),
             tombstones: Vec::new(),
+            live_sent: BTreeSet::new(),
             names: BTreeMap::new(),
             stats: NodeStats::default(),
         }
@@ -315,12 +327,21 @@ impl PerceptionNode {
     ) -> Vec<TrackReport> {
         let global = pose.filter(|p| p.status == LocalizationStatus::Global);
         let valid_for_ms = (self.config.tracker.terminate_after_s * 1000.0) as u32;
-        let mut entries: Vec<(LocalTrack, CvState)> = self
-            .tracker
-            .tracks()
-            .filter(|t| t.is_published())
-            .map(|t| (t.clone(), t.predicted(t_valid)))
-            .collect();
+        let pc = self.config.publish;
+        let mut entries: Vec<(LocalTrack, CvState)> = Vec::new();
+        let mut live_now = BTreeSet::new();
+        for t in self.tracker.tracks().filter(|t| t.is_published()) {
+            let qualifies = (!pc.fresh_only || t.last_update >= t_valid) && t.class_prob >= pc.min_score;
+            if qualifies {
+                live_now.insert(t.id);
+                entries.push((t.clone(), t.predicted(t_valid)));
+            } else if self.live_sent.contains(&t.id) {
+                let mut dead = t.clone();
+                dead.lifecycle = TrackLifecycle::Terminated;
+                entries.push((dead, t.predicted(t_valid)));
+            }
+        }
+        self.live_sent = live_now;
         for t in self.tracker.drain_terminated() {
             // A receiver's last live report of this track expires by
             // termination time + valid_for; keep the tombstone flowing until then.
@@ -343,7 +364,7 @@ impl PerceptionNode {
         for (track, state) in entries {
             let tc = &self.config.tracker;
             let odom_box = track
-                .predicted_box(t_valid)
+                .published_box(t_valid, tc.publish_raw_box)
                 .map(|b| with_systematic(&b, tc.box_size_sys_m, tc.box_yaw_sys_rad));
             let mut state = state;
             if let Some(b) = odom_box {
@@ -760,6 +781,44 @@ mod tests {
             (added - 0.09).abs() < 1e-6,
             "vertical systematic variance added {added}"
         );
+    }
+
+    #[test]
+    fn publish_suppression_sends_one_tombstone_and_nothing_below_the_score() {
+        let reports = |b: Option<Vec<u8>>| -> Vec<TrackReport> {
+            b.map(|b| ReportBatch::verify_and_decode(&b).unwrap().reports.to_vec()).unwrap_or_default()
+        };
+        // fresh_only: a track without a detection this frame leaves the world once.
+        let mut cfg = NodeConfig::default();
+        cfg.publish.fresh_only = true;
+        let mut rig = Rig::new(21, Vector3::zeros(), 0.0);
+        rig.node = PerceptionNode::new(SigningKey::from_bytes(&[21; 32]), 1, cfg);
+        let p = Vector3::new(5.0, 5.0, 0.0);
+        let mut live = 0;
+        for k in 0..5 {
+            let t = Timestamp::from_millis(k * 100);
+            rig.see(t, &[p]);
+            live = reports(rig.node.publish(t, Some(&rig.pose(t)))).iter().filter(|r| r.lifecycle == TrackLifecycle::Confirmed).count();
+        }
+        assert_eq!(live, 1);
+        let t = Timestamp::from_millis(500);
+        rig.node.maintain(t);
+        let r = reports(rig.node.publish(t, Some(&rig.pose(t))));
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].lifecycle, TrackLifecycle::Terminated);
+        let t = Timestamp::from_millis(600);
+        rig.node.maintain(t);
+        assert!(reports(rig.node.publish(t, Some(&rig.pose(t)))).is_empty());
+        // min_score above the detections' 0.9: nothing is ever published.
+        let mut cfg = NodeConfig::default();
+        cfg.publish.min_score = 0.95;
+        let mut rig = Rig::new(22, Vector3::zeros(), 0.0);
+        rig.node = PerceptionNode::new(SigningKey::from_bytes(&[22; 32]), 1, cfg);
+        for k in 0..5 {
+            let t = Timestamp::from_millis(k * 100);
+            rig.see(t, &[p]);
+            assert!(rig.node.publish(t, Some(&rig.pose(t))).is_none());
+        }
     }
 
     #[test]

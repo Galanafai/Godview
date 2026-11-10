@@ -40,6 +40,56 @@ pub struct ObjectBox {
     pub yaw_ambiguous: bool,
 }
 
+/// Bird's-eye-view intersection over union of two oriented rectangles, each
+/// `(center x, center y, length, width, heading)`.
+pub fn bev_iou(a: (f64, f64, f64, f64, f64), b: (f64, f64, f64, f64, f64)) -> f64 {
+    fn rect(r: (f64, f64, f64, f64, f64)) -> Vec<(f64, f64)> {
+        let (cx, cy, l, w, yaw) = r;
+        let (c, s) = (yaw.cos(), yaw.sin());
+        [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)]
+            .iter()
+            .map(|(u, v)| (cx + c * u * l / 2.0 - s * v * w / 2.0, cy + s * u * l / 2.0 + c * v * w / 2.0))
+            .collect()
+    }
+    fn area(p: &[(f64, f64)]) -> f64 {
+        let n = p.len();
+        (0..n).map(|i| p[i].0 * p[(i + 1) % n].1 - p[(i + 1) % n].0 * p[i].1).sum::<f64>().abs() / 2.0
+    }
+    // Sutherland-Hodgman: clip `a` by each edge of convex `b` (counterclockwise).
+    let (pa, pb) = (rect(a), rect(b));
+    let mut out = pa.clone();
+    let n = pb.len();
+    for i in 0..n {
+        let (p, q) = (pb[i], pb[(i + 1) % n]);
+        let side = |x: (f64, f64)| (q.0 - p.0) * (x.1 - p.1) - (q.1 - p.1) * (x.0 - p.0);
+        let input = std::mem::take(&mut out);
+        for j in 0..input.len() {
+            let (cur, prev) = (input[j], input[(j + input.len() - 1) % input.len()]);
+            let (sc, sp) = (side(cur), side(prev));
+            if sc >= 0.0 {
+                if sp < 0.0 {
+                    let t = sp / (sp - sc);
+                    out.push((prev.0 + t * (cur.0 - prev.0), prev.1 + t * (cur.1 - prev.1)));
+                }
+                out.push(cur);
+            } else if sp >= 0.0 {
+                let t = sp / (sp - sc);
+                out.push((prev.0 + t * (cur.0 - prev.0), prev.1 + t * (cur.1 - prev.1)));
+            }
+        }
+        if out.is_empty() {
+            return 0.0;
+        }
+    }
+    let inter = if out.len() >= 3 { area(&out) } else { 0.0 };
+    let union = area(&pa) + area(&pb) - inter;
+    if union > 0.0 {
+        inter / union
+    } else {
+        0.0
+    }
+}
+
 /// Smallest accepted size or heading variance; tighter claims are implausible.
 pub const MIN_BOX_VARIANCE: f64 = 1e-6;
 /// Largest accepted size (m).
@@ -383,6 +433,19 @@ pub fn fuse_boxes(a: &ObjectBox, b: &ObjectBox) -> ObjectBox {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bev_iou_of_oriented_rectangles() {
+        let a = (0.0, 0.0, 4.0, 2.0, 0.0);
+        assert!((bev_iou(a, a) - 1.0).abs() < 1e-9);
+        assert_eq!(bev_iou(a, (10.0, 0.0, 4.0, 2.0, 0.0)), 0.0);
+        // Shifted by half the length: intersection 4, union 12.
+        assert!((bev_iou(a, (2.0, 0.0, 4.0, 2.0, 0.0)) - 1.0 / 3.0).abs() < 1e-9);
+        // Same box turned a quarter turn about its center: a 2 x 2 overlap.
+        assert!((bev_iou(a, (0.0, 0.0, 4.0, 2.0, FRAC_PI_2)) - 4.0 / 12.0).abs() < 1e-9);
+        // Heading flipped by pi: the same rectangle.
+        assert!((bev_iou(a, (0.0, 0.0, 4.0, 2.0, PI)) - 1.0).abs() < 1e-9);
+    }
+
     use super::*;
 
     fn bx(l: f64, yaw: f64, amb: bool) -> ObjectBox {

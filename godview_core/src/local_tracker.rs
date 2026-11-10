@@ -38,6 +38,17 @@ pub struct Detection {
     pub object_box: Option<ObjectBox>,
 }
 
+/// What a track reports as its detector score.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScoreMode {
+    /// Running mean of the fused detections' scores (the default).
+    Mean,
+    /// The latest fused detection's score.
+    Latest,
+    /// The largest fused detection score.
+    Max,
+}
+
 /// Local tracker parameters.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LocalTrackerConfig {
@@ -97,6 +108,17 @@ pub struct LocalTrackerConfig {
     /// Systematic heading error of the detector (rad, standard deviation),
     /// added to published heading variances.
     pub box_yaw_sys_rad: f64,
+    /// How a track's reported score follows its detections' scores.
+    pub score_mode: ScoreMode,
+    /// Publish the latest detection's box (size and heading) instead of the
+    /// filtered one. Association still uses the filtered box.
+    pub publish_raw_box: bool,
+    /// Two tracks of one class whose predicted boxes overlap by more than this
+    /// bird's-eye-view IoU are duplicates: one is dropped (0 turns this off).
+    pub overlap_prune_iou: f64,
+    /// Which duplicate by overlap survives: the more recently updated track
+    /// (true) or the older one (false).
+    pub overlap_keep_recent: bool,
 }
 
 impl Default for LocalTrackerConfig {
@@ -119,6 +141,10 @@ impl Default for LocalTrackerConfig {
             box_center_sys_z_m: 0.0,
             box_size_sys_m: 0.0,
             box_yaw_sys_rad: 0.0,
+            score_mode: ScoreMode::Mean,
+            publish_raw_box: false,
+            overlap_prune_iou: 0.0,
+            overlap_keep_recent: false,
         }
     }
 }
@@ -148,10 +174,24 @@ pub struct LocalTrack {
     object_box: Option<ObjectBox>,
     /// Time `object_box` refers to.
     box_t: Timestamp,
+    /// The latest detection's box and its time (for `publish_raw_box`).
+    latest_box: Option<ObjectBox>,
+    latest_box_t: Timestamp,
     box_model: BoxModel,
 }
 
 impl LocalTrack {
+    /// The box to publish at `t`: the filtered one, or with `raw` the latest
+    /// detection's, predicted like the filtered one.
+    pub fn published_box(&self, t: Timestamp, raw: bool) -> Option<ObjectBox> {
+        if raw {
+            self.latest_box
+                .map(|b| self.box_model.predict(&b, t.secs_since(self.latest_box_t)))
+        } else {
+            self.predicted_box(t)
+        }
+    }
+
     /// Current estimate (after all fused observations).
     pub fn state(&self) -> &CvState {
         self.filter.state()
@@ -174,6 +214,10 @@ impl LocalTrack {
         let Some(m) = d.object_box else {
             return;
         };
+        if d.t >= self.latest_box_t || self.latest_box.is_none() {
+            self.latest_box = Some(m);
+            self.latest_box_t = d.t;
+        }
         let updated = match self.predicted_box(d.t) {
             Some(est) => self.box_model.update(&est, &m),
             None => m,
@@ -425,7 +469,17 @@ impl LocalTracker {
                         tr.last_obs_id = d.obs_id;
                     }
                     tr.last_update = tr.last_update.max(d.t);
-                    tr.class_prob += (d.class_prob - tr.class_prob) / tr.hits as f32;
+                    match self.config.score_mode {
+                        ScoreMode::Mean => {
+                            tr.class_prob += (d.class_prob - tr.class_prob) / tr.hits as f32
+                        }
+                        ScoreMode::Latest => {
+                            if d.t >= tr.last_update {
+                                tr.class_prob = d.class_prob;
+                            }
+                        }
+                        ScoreMode::Max => tr.class_prob = tr.class_prob.max(d.class_prob),
+                    }
                     if tr.lifecycle == TrackLifecycle::Coasting
                         || (tr.lifecycle == TrackLifecycle::Tentative
                             && tr.hits >= self.config.confirm_hits)
@@ -494,6 +548,8 @@ impl LocalTracker {
                     last_obs_id: d.obs_id,
                     object_box: d.object_box,
                     box_t: d.t,
+                    latest_box: d.object_box,
+                    latest_box_t: d.t,
                     box_model: self.config.box_model,
                 },
             );
@@ -506,6 +562,7 @@ impl LocalTracker {
         self.seen.retain(|_, t| *t >= horizon);
         out.discarded = self.discard_tentative_duplicates(latest);
         out.pruned = self.prune_duplicates(latest);
+        out.pruned += self.prune_overlapping(latest);
         out
     }
 
@@ -610,6 +667,55 @@ impl LocalTracker {
             if let Some(mut tr) = self.tracks.remove(id) {
                 tr.lifecycle = TrackLifecycle::Terminated;
                 self.terminated.push(tr);
+            }
+        }
+        doomed.len()
+    }
+
+    /// Drops one of two tracks of one class whose predicted boxes overlap by
+    /// more than `overlap_prune_iou` (bird's-eye-view IoU). The survivor is the
+    /// older track, or with `overlap_keep_recent` the more recently updated
+    /// one (then the older). A dropped published track is terminated, so a
+    /// tombstone follows; a tentative one is removed silently.
+    fn prune_overlapping(&mut self, t: Timestamp) -> usize {
+        let thr = self.config.overlap_prune_iou;
+        if thr <= 0.0 {
+            return 0;
+        }
+        let items: Vec<(LocalTrackId, u8, Timestamp, Timestamp, (f64, f64, f64, f64, f64))> = self
+            .tracks
+            .values()
+            .filter_map(|tr| {
+                let b = tr.predicted_box(t)?;
+                let s = tr.predicted(t);
+                Some((tr.id, tr.class_id, tr.created, tr.last_update, (s.x[0], s.x[1], b.size[0], b.size[1], b.yaw)))
+            })
+            .collect();
+        let keep_recent = self.config.overlap_keep_recent;
+        let mut doomed = std::collections::BTreeSet::new();
+        for (i, a) in items.iter().enumerate() {
+            for b in &items[i + 1..] {
+                if a.1 != b.1 || doomed.contains(&a.0) || doomed.contains(&b.0) {
+                    continue;
+                }
+                if crate::extent::bev_iou(a.4, b.4) > thr {
+                    let a_wins = if keep_recent {
+                        (a.3, std::cmp::Reverse(a.2), std::cmp::Reverse(a.0))
+                            >= (b.3, std::cmp::Reverse(b.2), std::cmp::Reverse(b.0))
+                    } else {
+                        (std::cmp::Reverse(a.2), std::cmp::Reverse(a.0))
+                            >= (std::cmp::Reverse(b.2), std::cmp::Reverse(b.0))
+                    };
+                    doomed.insert(if a_wins { b.0 } else { a.0 });
+                }
+            }
+        }
+        for id in &doomed {
+            if let Some(mut tr) = self.tracks.remove(id) {
+                if tr.is_published() {
+                    tr.lifecycle = TrackLifecycle::Terminated;
+                    self.terminated.push(tr);
+                }
             }
         }
         doomed.len()
@@ -1121,4 +1227,70 @@ mod tests {
         let mean = total / n as f64;
         assert!((2.0..4.0).contains(&mean), "mean NIS {mean}");
     }
+
+    fn boxed(id: u64, t_ms: i64, x: f64, y: f64, prob: f32, len: f64) -> Detection {
+        let mut d = det(id, t_ms, x, y);
+        d.class_prob = prob;
+        d.object_box = Some(ObjectBox {
+            size: [len, 2.0, 1.6],
+            size_var: [0.04; 3],
+            yaw: 0.0,
+            yaw_var: 0.01,
+            yaw_ambiguous: true,
+        });
+        d
+    }
+
+    #[test]
+    fn score_modes_and_raw_box() {
+        for (mode, expect) in [(ScoreMode::Mean, 0.6), (ScoreMode::Latest, 0.3), (ScoreMode::Max, 0.9)] {
+            let mut cfg = LocalTrackerConfig::default();
+            cfg.score_mode = mode;
+            let mut lt = LocalTracker::new(cfg);
+            for (k, (p, len)) in [(0.9, 4.0), (0.6, 4.4), (0.3, 4.8)].into_iter().enumerate() {
+                lt.process_scan(&[boxed(k as u64 + 1, k as i64 * 100, 5.0, 5.0, p, len)]);
+            }
+            let tr = lt.tracks().next().unwrap();
+            assert!((tr.class_prob - expect).abs() < 1e-5, "{mode:?} {}", tr.class_prob);
+            let t = Timestamp::from_millis(200);
+            let raw = tr.published_box(t, true).unwrap();
+            let filtered = tr.published_box(t, false).unwrap();
+            assert!((raw.size[0] - 4.8).abs() < 1e-9);
+            assert!(filtered.size[0] < 4.79, "the filtered size lags: {}", filtered.size[0]);
+        }
+    }
+
+    #[test]
+    fn overlapping_tracks_keep_the_older_or_the_recent() {
+        for (keep_recent, survivor_x) in [(false, 0.0), (true, 4.0)] {
+            let mut cfg = LocalTrackerConfig::default();
+            cfg.overlap_prune_iou = 0.3;
+            cfg.overlap_keep_recent = keep_recent;
+            let mut lt = LocalTracker::new(cfg);
+            // Track A (x = 0) is confirmed in frames 0 to 2; B (x = 4, 8 x 4 m
+            // boxes overlapping by 1/3) is seen from frame 3 on.
+            for k in 0..5i64 {
+                let scan = if k < 3 {
+                    boxed(k as u64 + 1, k * 100, 0.0, 0.0, 0.9, 8.0)
+                } else {
+                    boxed(k as u64 + 1, k * 100, 4.0, 0.0, 0.9, 8.0)
+                };
+                lt.process_scan(&[scan]);
+                lt.maintain(Timestamp::from_millis(k * 100));
+            }
+            let left: Vec<f64> = lt.tracks().map(|t| t.state().x[0]).collect();
+            assert_eq!(left.len(), 1, "{left:?}");
+            assert!((left[0] - survivor_x).abs() < 0.5, "keep_recent {keep_recent}: {left:?}");
+        }
+        // Off by default: both stay.
+        let mut lt = LocalTracker::new(LocalTrackerConfig::default());
+        for k in 0..4i64 {
+            lt.process_scan(&[
+                boxed(2 * k as u64 + 1, k * 100, 0.0, 0.0, 0.9, 8.0),
+                boxed(2 * k as u64 + 2, k * 100, 4.0, 0.0, 0.9, 8.0),
+            ]);
+        }
+        assert_eq!(lt.tracks().count(), 2);
+    }
+
 }

@@ -60,6 +60,13 @@ struct Args {
     box_yaw_sys_deg: f64,
     box_center_sys_frac: f64,
     box_center_sys_z_m: f64,
+    confirm_hits: Option<u32>,
+    score_mode: String,
+    raw_box: bool,
+    fresh_only: bool,
+    pub_min_score: f32,
+    overlap_iou: f64,
+    overlap_keep: String,
     diag: String,
     split_diag: String,
     spawn_diag: String,
@@ -80,6 +87,13 @@ fn parse_args() -> Args {
         box_yaw_sys_deg: 0.0,
         box_center_sys_frac: 0.0,
         box_center_sys_z_m: 0.0,
+        confirm_hits: None,
+        score_mode: "mean".into(),
+        raw_box: false,
+        fresh_only: false,
+        pub_min_score: 0.0,
+        overlap_iou: 0.0,
+        overlap_keep: "older".into(),
         diag: String::new(),
         split_diag: String::new(),
         spawn_diag: String::new(),
@@ -97,6 +111,16 @@ fn parse_args() -> Args {
             continue;
         }
         // Relative alignment of the two cars from shared objects (world model).
+        if v[i] == "--raw-box" {
+            a.raw_box = true;
+            i += 1;
+            continue;
+        }
+        if v[i] == "--fresh-only" {
+            a.fresh_only = true;
+            i += 1;
+            continue;
+        }
         if v[i] == "--align" {
             a.align = true;
             i += 1;
@@ -127,6 +151,13 @@ fn parse_args() -> Args {
             "--dump" => a.dump = val,
             "--box-yaw-sys-deg" => a.box_yaw_sys_deg = val.parse().expect("--box-yaw-sys-deg"),
             "--box-center-sys-frac" => a.box_center_sys_frac = val.parse().expect("--box-center-sys-frac"),
+            // Tracker and publishing options (Phase D1 ablation); defaults are the
+            // committed settings.
+            "--confirm-hits" => a.confirm_hits = Some(val.parse().expect("--confirm-hits")),
+            "--score-mode" => a.score_mode = val,
+            "--pub-min-score" => a.pub_min_score = val.parse().expect("--pub-min-score"),
+            "--overlap-iou" => a.overlap_iou = val.parse().expect("--overlap-iou"),
+            "--overlap-keep" => a.overlap_keep = val,
             "--box-center-sys-z-m" => a.box_center_sys_z_m = val.parse().expect("--box-center-sys-z-m"),
             // Diagnostics only (world model): no-box-gate, no-size-gate, no-yaw-gate,
             // no-vel-gate, no-pos-gate.
@@ -178,6 +209,8 @@ struct CarStats {
     false_from_sharing: usize,
     unattributed_members: usize,
     members: usize,
+    coasting_objects: usize,
+    world_objects: usize,
 }
 
 fn quantile(v: &[f64], q: f64) -> f64 {
@@ -257,6 +290,24 @@ fn main() {
     config.tracker.box_yaw_sys_rad = args.box_yaw_sys_deg.to_radians();
     config.tracker.box_center_sys_frac = args.box_center_sys_frac;
     config.tracker.box_center_sys_z_m = args.box_center_sys_z_m;
+    if let Some(h) = args.confirm_hits {
+        config.tracker.confirm_hits = h;
+    }
+    config.tracker.score_mode = match args.score_mode.as_str() {
+        "mean" => godview_core::local_tracker::ScoreMode::Mean,
+        "latest" => godview_core::local_tracker::ScoreMode::Latest,
+        "max" => godview_core::local_tracker::ScoreMode::Max,
+        other => panic!("unknown --score-mode {other}"),
+    };
+    config.tracker.publish_raw_box = args.raw_box;
+    config.tracker.overlap_prune_iou = args.overlap_iou;
+    config.tracker.overlap_keep_recent = match args.overlap_keep.as_str() {
+        "older" => false,
+        "recent" => true,
+        other => panic!("unknown --overlap-keep {other}"),
+    };
+    config.publish.fresh_only = args.fresh_only;
+    config.publish.min_score = args.pub_min_score;
     config.world.align.enabled = args.align;
     for a in &args.ablate {
         match a.as_str() {
@@ -279,6 +330,8 @@ fn main() {
     // Per car: track id -> obs id of the detection that started the track.
     let mut first_obs: [BTreeMap<u64, u64>; 2] = [BTreeMap::new(), BTreeMap::new()];
     let mut split_lines: Vec<String> = Vec::new();
+    // Per car, by obs id (parse_line numbers them from 1): the raw detection.
+    let mut raw_dets: [Vec<Value>; 2] = [vec![Value::Null], vec![Value::Null]];
     let mut spawn_lines: Vec<String> = Vec::new();
     let mut stats: Vec<CarStats> = (0..2).map(|_| CarStats::default()).collect();
     let mut detected_hist: VecDeque<BTreeSet<String>> = VecDeque::new();
@@ -295,6 +348,17 @@ fn main() {
             .map(|c| parse_line(&lines[c][i], &mut next_obs[c]).expect("valid input line"))
             .collect();
         assert!(parsed.iter().all(|p| p.t == t), "car files and truth disagree on time");
+        for c in 0..2 {
+            for d in &parsed[c].detections {
+                assert_eq!(d.obs_id as usize, raw_dets[c].len());
+                let b = d.object_box.expect("box");
+                raw_dets[c].push(json!({
+                    "x": d.z.x, "y": d.z.y, "z": d.z.z,
+                    "l": b.size[0], "w": b.size[1], "h": b.size[2],
+                    "yaw_deg": b.yaw.to_degrees(), "score": d.class_prob,
+                }));
+            }
+        }
         for c in 0..2 {
             deliver(&mut queue, &mut nodes, t, &mut rejected, &mut known);
             nodes[c].ingest(&parsed[c].detections);
@@ -361,6 +425,7 @@ fn main() {
                             created_ns: tr.created.as_nanos(),
                             last_update_ns: tr.last_update.as_nanos(),
                             hits: tr.hits,
+                            coasting: tr.lifecycle == godview_core::report::TrackLifecycle::Coasting,
                         };
                         ((node_ids[c], tr.id), info)
                     })
@@ -407,6 +472,13 @@ fn main() {
             }
             if !args.dump.is_empty() {
                 let odom_from_ecef = pose_exact.inverse();
+                // This car's own estimated alignment translation, in the odometry frame.
+                let shift = world
+                    .alignment
+                    .iter()
+                    .find(|o| o.source == node_ids[c])
+                    .map(|o| odom_from_ecef.rotation * o.translation)
+                    .unwrap_or_else(Vector3::zeros);
                 let objs_dump: Vec<Value> = world
                     .objects
                     .iter()
@@ -426,6 +498,11 @@ fn main() {
                         json!({
                             "id": id,
                             "x": p.x, "y": p.y, "z": p.z,
+                            "xs": p.x - shift.x, "ys": p.y - shift.y, "zs": p.z - shift.z,
+                            "coasting": !w.members.is_empty() && w.members.iter().all(|(k, _)| known[c].get(k).is_some_and(|i| i.coasting)),
+                            "raw": if w.members.len() == 1 {
+                                known[c].get(&w.members[0].0).map(|i| raw_dets[i.src][i.obs as usize].clone())
+                            } else { None },
                             "class_prob": w.class_prob, "p_exist": w.p_exist,
                             "box": w.object_box.map(|b| json!({
                                 "l": b.size[0], "w": b.size[1], "h": b.size[2],
@@ -465,6 +542,9 @@ fn main() {
                     }
                     if labels.len() >= 2 {
                         st.wrong_merges += 1;
+                    }
+                    if !w.members.is_empty() && w.members.iter().all(|(k, _)| known[c].get(k).is_some_and(|i| i.coasting)) {
+                        st.coasting_objects += 1;
                     }
                     for g in labels {
                         *per_label.entry(g).or_default() += 1;
@@ -532,6 +612,7 @@ fn main() {
                 }
             }
             st.frames += 1;
+            st.world_objects += world.objects.len();
             let mut f_matched = 0;
             let mut f_missed = 0;
             let mut f_dup = 0;
@@ -719,6 +800,8 @@ fn main() {
             "false_from_sharing_per_frame": st.false_from_sharing as f64 / st.frames.max(1) as f64,
             "gained_object_frames_per_frame": st.gained as f64 / st.frames.max(1) as f64,
             "members_seen": st.members,
+            "coasting_object_frames": st.coasting_objects,
+            "world_objects_per_frame": st.world_objects as f64 / st.frames.max(1) as f64,
             "members_without_attribution_snapshot": st.unattributed_members,
             "per_frame_matched_missed_dup_false": st.per_frame,
         }));
@@ -734,6 +817,11 @@ fn main() {
         "box_yaw_sys_deg": args.box_yaw_sys_deg,
         "box_center_sys_frac": args.box_center_sys_frac,
         "box_center_sys_z_m": args.box_center_sys_z_m,
+        "tracker_options": {
+            "confirm_hits": config.tracker.confirm_hits, "score_mode": args.score_mode,
+            "raw_box": args.raw_box, "fresh_only": args.fresh_only, "pub_min_score": args.pub_min_score,
+            "overlap_iou": args.overlap_iou, "overlap_keep": args.overlap_keep,
+        },
         "cutoff_m": args.cutoff_m,
         "expected_rule": format!("detected by at least one car in this and the previous {} frames", EXPECT_HISTORY - 1),
         "batches_rejected": rejected,
@@ -786,6 +874,7 @@ struct TrackInfo {
     created_ns: i64,
     last_update_ns: i64,
     hits: u32,
+    coasting: bool,
 }
 
 fn deliver(

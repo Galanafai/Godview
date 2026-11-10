@@ -6,7 +6,13 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
 [![DST](https://img.shields.io/badge/DST-20%20perception%20scenarios-blue.svg)](docs/PERCEPTION_SHARING.md#10-deterministic-simulation-dst)
 
-> **Status: research prototype.** The pipeline runs end to end, across separate processes over Zenoh, and is tested under injected network faults and adversaries in deterministic simulation. It has not yet been run on real sensor data, over a real radio network, or at fleet scale. See [What is and is not proven](#what-is-and-is-not-proven).
+> **Status: research prototype.** The pipeline runs end to end, across separate processes over Zenoh, is tested under injected network faults and adversaries in deterministic simulation, and has been run on real recorded data (V2V4Real and V2X-Real), including with a real lidar detector. It has not been run in a vehicle, over a real radio network, or at fleet scale. See [What is and is not proven](#what-is-and-is-not-proven).
+
+## Demo
+
+[![A car stopped at a red light, side by side without and with GodView: people hidden behind a truck appear as glowing boxes](docs/media/godview_demo_poster.jpg)](https://github.com/Galanafai/Godview/releases/tag/demo-voice-v1)
+
+**[Watch the 25-second demo](https://github.com/Galanafai/Godview/releases/tag/demo-voice-v1)** (16:9 and 4:5). A car stopped at a red light cannot see the people behind the truck next to it; two roadside sensors and another car can. GodView, run on a real recording from the [V2X-Real](https://mobility-lab.seas.ucla.edu/v2x-real) dataset (UCLA Mobility Lab), puts those people on the car's map before they step out. The footage, lidar and positions are real recordings replayed through GodView; the detections are the dataset's annotations with added noise; the 3D view pauses time for a moment. The rendering scripts are in [`scripts/phase_d/render/`](scripts/phase_d/render), and the scene was chosen by a rule committed before searching ([D4 write-up](docs/results/phase_d_d4_candidates.md)).
 
 ## In plain terms
 
@@ -93,9 +99,11 @@ my_detector | target/release/godview-node --connect tcp/<peer>:7447
 
 **Measured:** in release on a two-core machine, four nodes with four objects each spent about 2.5 ms per 10 Hz tick (at most about 8 ms).
 
+- **Real data with a real detector (V2V4Real, two cars).** With the dataset's published PointPillars detector and the dataset's own evaluation, GodView roughly matches the published late-fusion baseline and does not beat it: standard AP@0.5 72.5 against 74.7 and AP@0.7 42.1 against 42.1, with the baseline at the same score threshold. Settings were chosen on the validation split and test was run with them; the first test run, before the tracker fix, scored lower and is kept in the record. Details: [docs/WRITEUP.md](docs/WRITEUP.md#with-a-real-detector-v2v4real).
+
 **Not yet:**
 
-- a real detector (the real-data replay uses the dataset's labels with added noise);
+- a real detector on four agents (the V2X-Real demo uses the dataset's annotations with added noise);
 - a real radio network;
 - many agents or many objects (scale is not benchmarked);
 - re-identification: an object that drops out of every sensor's view and reappears gets a new ID;

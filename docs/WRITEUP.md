@@ -112,10 +112,55 @@ surveyed position, would give it something to anchor to; that is not tested.
 test1 cannot be used to choose alignment settings at all: no frame has the 3
 objects both cars see that alignment needs.
 
+### With a real detector (V2V4Real)
+
+The labels-plus-noise detections above were replaced by the output of the
+dataset's published PointPillars detector, run per car. The environment
+reproduced the published scores first (No Fusion AP@0.5 39.81, Late Fusion
+55.07, against 39.8 and 55.0). The detector's error model was measured on the
+validation split, settings were committed before any test run, and every
+method was scored by the dataset's own evaluation and by a standard
+score-ranked AP, because the dataset's AP rewards publishing fewer boxes.
+
+- **First test run (committed settings): GodView lost.** Its own tracker scored
+  below the raw detector it was fed (32.5 against 39.9 AP@0.5), because tracks
+  that had lost their detection kept being published and one vehicle was
+  sometimes tracked twice.
+- **Second, separately labeled test run** with tracker settings chosen on
+  validation (publish only tracks updated this frame, prune overlapping tracks,
+  a score threshold of 0.3), against baselines at the same threshold:
+
+| AP@0.5 / AP@0.7 | dataset AP | standard AP |
+|:--|:--|:--|
+| One car alone (No Fusion) | 45.6 / 27.9 | 53.6 / 36.9 |
+| Late Fusion (published method) | 65.5 / 33.9 | 74.7 / 42.1 |
+| **GodView, sharing** | **63.0 / 34.8** | **72.5 / 42.1** |
+
+In plain terms: sharing adds about 16 to 18 AP@0.5 points over one car, and
+GodView roughly matches the published late-fusion baseline without beating it,
+while also keeping track IDs, uncertainty and signed shared state that late
+fusion does not. It is ahead at close range and behind beyond 30 m, where its
+boxes are often about 0.8 m off on slow or parked vehicles (cause not found).
+An apparent 8-point lead over the published baseline came from the
+threshold, and disappears when both are scored the same way. Details:
+[docs/results/phase_d_d1_test2.md](results/phase_d_d1_test2.md).
+
+### The demo (V2X-Real)
+
+[V2X-Real](https://mobility-lab.seas.ucla.edu/v2x-real) has two cars and two
+roadside units with lidar and cameras. The demo scene was chosen by a rule
+committed before searching (the longest stretch where an object is hidden from
+a car's camera, seen by another agent, then becomes visible). Its detections
+are the dataset's annotations with added noise, not a detector; on this
+input, the GPS offset filter and roadside-unit anchoring did not help (the
+input has no pose error to correct), and self reports, after a fix, still
+caused 21 agent-related wrong merges on validation against 10 without them. Details: [docs/results/phase_d_d2_val.md](results/phase_d_d2_val.md)
+and [docs/results/phase_d_d4_scene.md](results/phase_d_d4_scene.md).
+
 ## Where it fails, and what is not proven
 
-- **Not a real detector.** Detections are labels with added noise. A real 3D
-  detector would bring its own errors.
+- **A real detector on two cars only.** The real-detector results are on
+  V2V4Real; the four-agent V2X-Real demo uses annotations with added noise.
 - **Two cars only.** V2V4Real has two vehicles; scale (many agents, many
   objects) is not benchmarked.
 - **The truth is the labels.** There is no ground truth for the poses; truth

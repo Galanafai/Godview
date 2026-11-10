@@ -384,3 +384,73 @@ Design proposals (**not implemented**):
    by the structure of their neighbourhoods (relative layout of several objects)
    rather than one object at a time, so that a wrong pair is rejected by its
    neighbours and a pose adjustment is estimated from the whole structure.
+
+### D2 steps 2 and 3: converter, variants, scoring rules and expectations (committed before any run on V2X-Real)
+
+Written 2026-11-10, after the V2V4Real ego view validation and its own-frame check
+(`docs/results/phase_d_ego_view_val.md`). Nothing below has been run on V2X-Real.
+
+**Converter (step 2), with the defaults proposed above.** `scripts/phase_d/convert_v2xreal.py`
+writes, per scenario, one JSON-lines file per agent in the `godview_node` input format
+(plus `agent_yaw_deg` and `agent_kind`), `truth.json` and `attribution.json`. The odometry
+frame is the shared map frame shifted by the scenario's mean agent position; its placement
+on the Earth is the fixed made-up anchor (34.0689 N, 118.4452 W, height 0, map x axis East).
+Pose sigmas per frame: vehicles 1.51 m horizontal, 0.28 m vertical, 1.8 degrees; roadside
+units 0.1 m, 0.1 m, 0.1 degrees (assumed). Classes by the repository's mapping
+(vehicle 1, pedestrian 2, truck 3). All six scenarios kept, including `2023-03-17-16-03-02_11_1`;
+results per scenario and in aggregate with and without it.
+
+**Detections: labels plus noise (step 3), as in Phase C.** An agent detects a label of its
+own list when at least 5 of its own lidar points are inside the box and the box is within
+100 m of the agent; the detection is the label plus seeded Gaussian noise (position 0.3 m,
+size 0.2 m, heading 3 degrees), declared as such (`sigma_m` 0.3, `sigma_size_m` 0.2, `sigma_yaw_deg` 3),
+`class_prob` 0.9, `yaw_ambiguous` false. Labels are in the exact shared map frame, so no
+pose error is injected: alignment variants test that correcting a pose error that is not
+there does no harm, and the anchored variant is tested the same way.
+
+**Replay and tracker.** All agents broadcast to all others, 100 ms delay, seed 1. Tracker:
+the setting selected on V2V4Real val (fresh-only publishing, overlap pruning 0.3 keeping the
+more recently updated track, publish threshold 0.3, confirmation after 3 hits), with no
+declared systematic box errors (labels plus noise has none). The offset filter uses the
+V2V4Real val rule's parameters unchanged (no V2X-Real tuning).
+
+**Variants (all run once on V2X-Real val; nothing is chosen from the results):** self
+reports off or on (both refinements, fused self position; vehicles publish their footprint
+4.57 x 2.10 x 2.29 m centred 0.60 m ahead of and 0.12 m left of the lidar, roadside units
+publish none) x alignment off, filtered (ego-fixed gauge), or filtered with the roadside units
+as fixed anchors (their translations held at zero; a vehicle's view corrects its own frame
+into the units' frame, a unit's view is unchanged). Six runs, each scored on **every agent's
+ego view and on the shared world**.
+
+**Scoring rules.**
+
+* *Truth is the shared map-frame labels:* the union over agents by label id (position and
+  size the mean, heading and class of the first agent's label), classes by the repository's
+  mapping.
+* *Each agent's own box is excluded from its own view's scoring (GodView places the ego
+  exactly):* for a vehicle, the label within 2.5 m of its lidar position (offset applied) is
+  removed from its truth, and from its boxes its self object and any object attributed to
+  that label. Roadside units have no box. The same removal is applied to the shared
+  world when it is scored for that agent.
+* *Region:* truth and boxes within 70 m (horizontal) of the agent's lidar position.
+* *The shared world is scored once per agent* with the same truth, region and exclusion,
+  so it is comparable with that agent's ego view.
+* *Metrics:* AP at IoU 0.3 and 0.5 (bird's-eye, boxes match only labels of their class),
+  dataset-style and standard, class-pooled and per class, for the vehicle views pooled, the
+  roadside-unit views pooled, and each agent separately; wrong merges (object-frames whose
+  members are attributed to two or more labels) and wrong merges involving an agent body;
+  the share of vehicle-view frames with an offset estimate; per scenario and aggregate.
+
+**Expectations for V2X-Real (set before the runs).**
+
+* **(E1)** filtered alignment does not lose AP against alignment off: class-pooled
+  dataset-style AP@0.5 of filtered is at least that of alignment off minus 0.5 point,
+  for vehicle views and for roadside-unit views, with self reports off and on (4 comparisons).
+* **(E2)** self reports reduce wrong merges involving agents: the count of wrong merges
+  involving an agent body, summed over all ego views and scenarios, is strictly lower with
+  self reports on than off, for each of the three alignment settings (3 comparisons).
+* **(E3)** roadside-unit anchoring is at least as good as plain filtering: class-pooled
+  dataset-style AP@0.5 of the anchored variant is at least that of the filtered variant
+  minus 0.5 point, for vehicle views, with self reports off and on (2 comparisons).
+
+**If any expectation fails, I stop and report. I stop at the end of D2 either way.**

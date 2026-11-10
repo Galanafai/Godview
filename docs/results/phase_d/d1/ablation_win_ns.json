@@ -1,0 +1,42 @@
+{
+ "win": {
+  "flags": "--fresh-only --overlap-iou 0.3 --overlap-keep recent --pub-min-score 0.3",
+  "replay": {
+   "frames": 1496,
+   "matched": 11918,
+   "missed": 4047,
+   "duplicates": 9,
+   "false_estimates": 703,
+   "split_label_frames": 0,
+   "wrong_merges_object_frames": 0,
+   "coasting_object_frames": 0,
+   "false_from_sharing_object_frames": 0,
+   "matched_never_detected_by_own_sensor": 69,
+   "world_objects_per_car_frame": 8.695855614973262,
+   "false_from_sharing_per_car_frame": 0.0,
+   "gained_per_car_frame": 0.046122994652406414
+  },
+  "ap": {
+   "win:class_prob": {
+    "all_frames": [
+     52.03,
+     33.38
+    ],
+    "excl_first_3": [
+     53.22,
+     34.11
+    ]
+   },
+   "win:pass": {
+    "all_frames": [
+     51.01,
+     29.52
+    ],
+    "excl_first_3": [
+     52.17,
+     30.16
+    ]
+   }
+  }
+ }
+}

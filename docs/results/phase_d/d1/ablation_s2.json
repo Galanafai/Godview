@@ -1,0 +1,92 @@
+{
+ "a_b2_t0.2": {
+  "flags": "--fresh-only --overlap-iou 0.3 --overlap-keep recent --pub-min-score 0.2",
+  "replay": {
+   "frames": 1496,
+   "matched": 15492,
+   "missed": 473,
+   "duplicates": 73,
+   "false_estimates": 2646,
+   "split_label_frames": 69,
+   "wrong_merges_object_frames": 206,
+   "coasting_object_frames": 0,
+   "false_from_sharing_object_frames": 1238,
+   "matched_never_detected_by_own_sensor": 2071,
+   "world_objects_per_car_frame": 13.711229946524064,
+   "false_from_sharing_per_car_frame": 0.8275401069518716,
+   "gained_per_car_frame": 1.3843582887700534
+  },
+  "ap": {
+   "a_b2_t0.2:class_prob": {
+    "all_frames": [
+     64.98,
+     40.36
+    ],
+    "excl_first_3": [
+     66.51,
+     41.33
+    ]
+   }
+  }
+ },
+ "a_b2_t0.3": {
+  "flags": "--fresh-only --overlap-iou 0.3 --overlap-keep recent --pub-min-score 0.3",
+  "replay": {
+   "frames": 1496,
+   "matched": 15296,
+   "missed": 669,
+   "duplicates": 51,
+   "false_estimates": 1353,
+   "split_label_frames": 52,
+   "wrong_merges_object_frames": 202,
+   "coasting_object_frames": 0,
+   "false_from_sharing_object_frames": 651,
+   "matched_never_detected_by_own_sensor": 2032,
+   "world_objects_per_car_frame": 12.536096256684491,
+   "false_from_sharing_per_car_frame": 0.43516042780748665,
+   "gained_per_car_frame": 1.358288770053476
+  },
+  "ap": {
+   "a_b2_t0.3:class_prob": {
+    "all_frames": [
+     67.17,
+     42.06
+    ],
+    "excl_first_3": [
+     68.78,
+     43.06
+    ]
+   }
+  }
+ },
+ "a_b2_t0.4": {
+  "flags": "--fresh-only --overlap-iou 0.3 --overlap-keep recent --pub-min-score 0.4",
+  "replay": {
+   "frames": 1496,
+   "matched": 13203,
+   "missed": 2762,
+   "duplicates": 20,
+   "false_estimates": 227,
+   "split_label_frames": 43,
+   "wrong_merges_object_frames": 427,
+   "coasting_object_frames": 0,
+   "false_from_sharing_object_frames": 114,
+   "matched_never_detected_by_own_sensor": 1497,
+   "world_objects_per_car_frame": 10.10360962566845,
+   "false_from_sharing_per_car_frame": 0.07620320855614973,
+   "gained_per_car_frame": 1.000668449197861
+  },
+  "ap": {
+   "a_b2_t0.4:class_prob": {
+    "all_frames": [
+     60.97,
+     42.13
+    ],
+    "excl_first_3": [
+     62.52,
+     43.18
+    ]
+   }
+  }
+ }
+}

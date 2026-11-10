@@ -1,0 +1,490 @@
+{
+ "scenarios": {
+  "2023-03-17-16-03-02_11_1": {
+   "agents": {
+    "-2": {
+     "frames": 104,
+     "files": {
+      "bin": 104,
+      "yaml": 104,
+      "cam1": 104,
+      "cam2": 104
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "-1": {
+     "frames": 104,
+     "files": {
+      "bin": 104,
+      "yaml": 104,
+      "cam1": 104,
+      "cam2": 104
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "1": {
+     "frames": 104,
+     "files": {
+      "bin": 104,
+      "yaml": 104,
+      "cam1": 104,
+      "cam2": 104,
+      "cam3": 104,
+      "cam4": 104
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      1.246,
+      15.086,
+      0.633
+     ],
+     "pose_xy_path_length_m": 48.9
+    },
+    "2": {
+     "frames": 104,
+     "files": {
+      "bin": 104,
+      "yaml": 104,
+      "cam1": 104,
+      "cam2": 104,
+      "cam3": 104,
+      "cam4": 104
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      1.511,
+      5.085,
+      0.114
+     ],
+     "pose_xy_path_length_m": 20.9
+    }
+   },
+   "same_frame_ids_across_agents": true
+  },
+  "2023-03-17-16-10-12_1_1": {
+   "agents": {
+    "-2": {
+     "frames": 131,
+     "files": {
+      "bin": 131,
+      "yaml": 131,
+      "cam1": 131,
+      "cam2": 131
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "-1": {
+     "frames": 131,
+     "files": {
+      "bin": 131,
+      "yaml": 131,
+      "cam1": 131,
+      "cam2": 131
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "1": {
+     "frames": 131,
+     "files": {
+      "bin": 131,
+      "yaml": 131,
+      "cam1": 131,
+      "cam2": 131,
+      "cam3": 131,
+      "cam4": 131
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      0.669,
+      4.76,
+      0.184
+     ],
+     "pose_xy_path_length_m": 18.6
+    },
+    "2": {
+     "frames": 131,
+     "files": {
+      "bin": 131,
+      "yaml": 131,
+      "cam1": 131,
+      "cam2": 131,
+      "cam3": 131,
+      "cam4": 131
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      1.324,
+      9.113,
+      0.371
+     ],
+     "pose_xy_path_length_m": 32.5
+    }
+   },
+   "same_frame_ids_across_agents": true
+  },
+  "2023-04-04-14-28-53_45_0": {
+   "agents": {
+    "-2": {
+     "frames": 98,
+     "files": {
+      "bin": 98,
+      "yaml": 98,
+      "cam1": 98,
+      "cam2": 98
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "-1": {
+     "frames": 98,
+     "files": {
+      "bin": 98,
+      "yaml": 98,
+      "cam1": 98,
+      "cam2": 98
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "2": {
+     "frames": 98,
+     "files": {
+      "bin": 98,
+      "yaml": 98,
+      "cam1": 98,
+      "cam2": 98,
+      "cam3": 98,
+      "cam4": 98
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      0.003,
+      0.004,
+      0.001
+     ],
+     "pose_xy_path_length_m": 0.7
+    }
+   },
+   "same_frame_ids_across_agents": true
+  },
+  "2023-04-04-15-43-17_15_0": {
+   "agents": {
+    "-2": {
+     "frames": 140,
+     "files": {
+      "bin": 140,
+      "yaml": 140,
+      "cam1": 140,
+      "cam2": 140
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "-1": {
+     "frames": 140,
+     "files": {
+      "bin": 140,
+      "yaml": 140,
+      "cam1": 140,
+      "cam2": 140
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "1": {
+     "frames": 140,
+     "files": {
+      "bin": 140,
+      "yaml": 140,
+      "cam1": 140,
+      "cam2": 140,
+      "cam3": 140,
+      "cam4": 140
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      0.492,
+      0.006,
+      0.058
+     ],
+     "pose_xy_path_length_m": 2.7
+    },
+    "2": {
+     "frames": 140,
+     "files": {
+      "bin": 140,
+      "yaml": 140,
+      "cam1": 140,
+      "cam2": 140,
+      "cam3": 140,
+      "cam4": 140
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      3.101,
+      0.093,
+      0.381
+     ],
+     "pose_xy_path_length_m": 11.0
+    }
+   },
+   "same_frame_ids_across_agents": true
+  },
+  "2023-04-04-16-01-17_33_0": {
+   "agents": {
+    "-2": {
+     "frames": 128,
+     "files": {
+      "bin": 128,
+      "yaml": 128,
+      "cam1": 128,
+      "cam2": 128
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "-1": {
+     "frames": 128,
+     "files": {
+      "bin": 128,
+      "yaml": 128,
+      "cam1": 128,
+      "cam2": 128
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "1": {
+     "frames": 128,
+     "files": {
+      "bin": 128,
+      "yaml": 128,
+      "cam1": 128,
+      "cam2": 128,
+      "cam3": 128,
+      "cam4": 128
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      4.734,
+      33.314,
+      1.402
+     ],
+     "pose_xy_path_length_m": 114.1
+    },
+    "2": {
+     "frames": 128,
+     "files": {
+      "bin": 128,
+      "yaml": 128,
+      "cam1": 128,
+      "cam2": 128,
+      "cam3": 128,
+      "cam4": 128
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      4.537,
+      28.421,
+      1.17
+     ],
+     "pose_xy_path_length_m": 94.1
+    }
+   },
+   "same_frame_ids_across_agents": true
+  },
+  "2023-04-05-16-09-26_6_1": {
+   "agents": {
+    "-2": {
+     "frames": 116,
+     "files": {
+      "bin": 116,
+      "yaml": 116,
+      "cam1": 116,
+      "cam2": 116
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "-1": {
+     "frames": 116,
+     "files": {
+      "bin": 116,
+      "yaml": 116,
+      "cam1": 116,
+      "cam2": 116
+     },
+     "infra": true,
+     "pose_xyz_std_m": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_xy_path_length_m": 0.0
+    },
+    "1": {
+     "frames": 116,
+     "files": {
+      "bin": 116,
+      "yaml": 116,
+      "cam1": 116,
+      "cam2": 116,
+      "cam3": 116,
+      "cam4": 116
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      19.014,
+      2.356,
+      1.004
+     ],
+     "pose_xy_path_length_m": 65.5
+    },
+    "2": {
+     "frames": 116,
+     "files": {
+      "bin": 116,
+      "yaml": 116,
+      "cam1": 116,
+      "cam2": 116,
+      "cam3": 116,
+      "cam4": 116
+     },
+     "infra": false,
+     "pose_xyz_std_m": [
+      13.03,
+      1.673,
+      1.643
+     ],
+     "pose_xy_path_length_m": 45.3
+    }
+   },
+   "same_frame_ids_across_agents": true
+  }
+ },
+ "frame_rate": {},
+ "classes": {
+  "Car": 6527,
+  "Bus": 656,
+  "TrashCan": 342,
+  "Pedestrian": 12880,
+  "ConcreteTruck": 329,
+  "BicycleRider": 69,
+  "Van": 337,
+  "Truck": 330,
+  "Scooter": 4,
+  "ScooterRider": 200
+ },
+ "labels_seen_by_all_agents_share": 0.06753207773692504,
+ "derived_counts": {
+  "same id, max pairwise location difference (m): < 0.01": 1709,
+  "same id, max pairwise location difference (m): >= 0.01": 4194,
+  "true_ego_pose equals lidar_pose in first 20 frames: yes": 23
+ },
+ "points_in_label_box_hypothesis_world": {
+  "labels": 10316,
+  "median_points": 64.0,
+  "share_with_5_or_more": 0.9926328034121753
+ },
+ "points_in_label_box_hypothesis_lidar": {
+  "labels": 10316,
+  "median_points": 0.0,
+  "share_with_5_or_more": 0.0019387359441644049
+ },
+ "camera_projection_test": {
+  "cam_to_lidar": {
+   "objects_in_front": 1638,
+   "inside_image": 1531
+  },
+  "lidar_to_cam": {
+   "objects_in_front": 5675,
+   "inside_image": 2381
+  }
+ },
+ "image_sizes": {
+  "-2 cam1 (1920, 1080)": 74,
+  "-2 cam2 (1920, 1080)": 74,
+  "-1 cam1 (1920, 1080)": 74,
+  "-1 cam2 (1920, 1080)": 74,
+  "vehicle cam1 (1920, 1080)": 138,
+  "vehicle cam2 (1920, 1080)": 138,
+  "vehicle cam3 (1920, 1080)": 138,
+  "vehicle cam4 (1920, 1080)": 138
+ },
+ "points_per_frame": {
+  "infra -2": {
+   "min": 131072,
+   "median": 131072,
+   "max": 131072
+  },
+  "infra -1": {
+   "min": 65536,
+   "median": 65536,
+   "max": 65536
+  },
+  "vehicle v": {
+   "min": 189728,
+   "median": 220728,
+   "max": 226455
+  }
+ }
+}

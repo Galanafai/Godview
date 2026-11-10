@@ -47,6 +47,7 @@ struct Args {
     diag: String,
     dump: String,
     no_sharing: bool,
+    align: bool,
 }
 
 fn parse_args() -> Args {
@@ -62,6 +63,7 @@ fn parse_args() -> Args {
         diag: String::new(),
         dump: String::new(),
         no_sharing: false,
+        align: false,
     };
     let v: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -69,6 +71,12 @@ fn parse_args() -> Args {
         // Each car fuses only its own reports (nothing is delivered between cars).
         if v[i] == "--no-sharing" {
             a.no_sharing = true;
+            i += 1;
+            continue;
+        }
+        // Relative alignment of the two cars from shared objects (world model).
+        if v[i] == "--align" {
+            a.align = true;
             i += 1;
             continue;
         }
@@ -127,6 +135,10 @@ struct CarStats {
     ids: BTreeMap<String, ReportKey>,
     id_changes: BTreeMap<String, usize>,
     per_frame: Vec<Value>,
+    /// Frames in which alignment estimated an offset between the two cars,
+    /// and the norm of that relative translation (m).
+    aligned_frames: usize,
+    align_relative_m: Vec<f64>,
 }
 
 fn quantile(v: &[f64], q: f64) -> f64 {
@@ -188,6 +200,7 @@ fn main() {
     let mut config = NodeConfig::default();
     config.tracker.box_size_sys_m = args.box_size_sys_m;
     config.tracker.box_yaw_sys_rad = args.box_yaw_sys_deg.to_radians();
+    config.world.align.enabled = args.align;
     for a in &args.ablate {
         match a.as_str() {
             "no-box-gate" => config.world.box_gate = godview_core::extent::BoxGate::disabled(),
@@ -257,6 +270,11 @@ fn main() {
         let mut dump_worlds: Vec<Value> = Vec::new();
         for c in 0..2 {
             let world = nodes[c].world(t);
+            if world.alignment.len() == 2 {
+                stats[c].aligned_frames += 1;
+                let rel = world.alignment[0].translation - world.alignment[1].translation;
+                stats[c].align_relative_m.push(rel.norm());
+            }
             if !args.dump.is_empty() {
                 let odom_from_ecef = pose_exact.inverse();
                 let objs_dump: Vec<Value> = world
@@ -464,6 +482,8 @@ fn main() {
             "detected_by_both_fused_into_one": st.both_detected_fused,
             "matched_never_detected_by_own_sensor": st.gained,
             "objects_gained_only_through_sharing": st.gained_objects.len(),
+            "aligned_frames": st.aligned_frames,
+            "align_relative_offset_m_median": quantile(&st.align_relative_m, 0.5),
             "matched_not_detected_by_own_sensor_this_frame": st.not_detected_now,
             "objects_with_id": objects,
             "id_changes_total": total_changes,
@@ -478,6 +498,7 @@ fn main() {
         "delay_ms": args.delay_ms,
         "ablations": args.ablate,
         "no_sharing": args.no_sharing,
+        "align": args.align,
         "box_size_sys_m": args.box_size_sys_m,
         "box_yaw_sys_deg": args.box_yaw_sys_deg,
         "cutoff_m": args.cutoff_m,

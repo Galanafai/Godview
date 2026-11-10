@@ -153,9 +153,11 @@ def standard_ap(stat):
     return voc_area(tp, 1 - tp, stat['gt'])
 
 
-def world_boxes(objs, origin, inv_pose, score_key='class_prob'):
+def world_boxes(objs, origin, inv_pose, score_key='class_prob', exclude_self=False):
     corners, scores = [], []
     for o in objs:
+        if exclude_self and o.get('self'):
+            continue
         b = o.get('box')
         if b is None:
             continue
@@ -179,6 +181,7 @@ def main():
     p.add_argument('--baselines', default='', help='comma list of score thresholds for No Fusion and Late Fusion')
     p.add_argument('--skip-scenario', action='append', default=[])
     p.add_argument('--check-library', action='store_true')
+    p.add_argument('--exclude-self', action='append', default=[], help='dump NAMEs scored without the self objects (explanation only)')
     a = p.parse_args()
     sys.path.insert(0, a.opencood)
     import torch
@@ -263,7 +266,7 @@ def main():
         for n in dumps:
             fr = dumps[n][s][i]
             assert fr['frame'] == i
-            dets[n] = world_boxes(fr['worlds'][0], origin, inv0)
+            dets[n] = world_boxes(fr['worlds'][0], origin, inv0, exclude_self=n in a.exclude_self)
         none = [False] * len(gt)
         for mth, (dc, dsc) in dets.items():
             n_boxes[mth] += len(dc)

@@ -1,0 +1,124 @@
+{
+ "rule": "sigma = sqrt(E[d^2] / 2) per axis; vehicle-vehicle pairs, all same-id pairs",
+ "by_kind": {
+  "vehicle-vehicle": {
+   "pairs": 13575,
+   "sigma_x": 1.77871223084125,
+   "sigma_y": 1.1708867802589475,
+   "sigma_z": 0.2824452519450274,
+   "sigma_h_isotropic": 1.5057876763224989,
+   "sigma_yaw_deg": 25.843626931839616,
+   "sigma_yaw_deg_mod_180": 1.7793473571762541,
+   "share_of_pairs_with_heading_differing_over_90_deg": 0.04167977351368355,
+   "yaw_pairs": 6358
+  },
+  "unit-unit": {
+   "pairs": 15645,
+   "sigma_x": 0.009732075300924454,
+   "sigma_y": 0.009917395313140849,
+   "sigma_z": 0.0012512307612688794,
+   "sigma_h_isotropic": 0.009825172249379954,
+   "sigma_yaw_deg": 1.3939914146605996e-08,
+   "sigma_yaw_deg_mod_180": 1.3939914146605996e-08,
+   "share_of_pairs_with_heading_differing_over_90_deg": 0.0,
+   "yaw_pairs": 5796
+  },
+  "vehicle-unit": {
+   "pairs": 26653,
+   "sigma_x": 0.6640954667599336,
+   "sigma_y": 0.21935150762372294,
+   "sigma_z": 0.17223794364922515,
+   "sigma_h_isotropic": 0.49453911517082966,
+   "sigma_yaw_deg": 17.653553819346797,
+   "sigma_yaw_deg_mod_180": 1.9002409226506076,
+   "share_of_pairs_with_heading_differing_over_90_deg": 0.01935434516523868,
+   "yaw_pairs": 13072
+  }
+ },
+ "by_kind_without_identical_pairs": {
+  "vehicle-vehicle": {
+   "pairs": 13573,
+   "sigma_x": 1.7788432732824826,
+   "sigma_y": 1.1709730417300905,
+   "sigma_z": 0.2824660592941793,
+   "sigma_h_isotropic": 1.5058986113548543,
+   "sigma_yaw_deg": 25.843626931839616,
+   "sigma_yaw_deg_mod_180": 1.7793473571762541,
+   "share_of_pairs_with_heading_differing_over_90_deg": 0.04167977351368355,
+   "yaw_pairs": 6358
+  },
+  "unit-unit": {
+   "pairs": 10,
+   "sigma_x": 0.3849401793491889,
+   "sigma_y": 0.3922702827982748,
+   "sigma_z": 0.04949088233829048,
+   "sigma_h_isotropic": 0.3886225137868522,
+   "sigma_yaw_deg": null,
+   "sigma_yaw_deg_mod_180": null,
+   "share_of_pairs_with_heading_differing_over_90_deg": null,
+   "yaw_pairs": 0
+  },
+  "vehicle-unit": {
+   "pairs": 26653,
+   "sigma_x": 0.6640954667599336,
+   "sigma_y": 0.21935150762372294,
+   "sigma_z": 0.17223794364922515,
+   "sigma_h_isotropic": 0.49453911517082966,
+   "sigma_yaw_deg": 17.653553819346797,
+   "sigma_yaw_deg_mod_180": 1.9002409226506076,
+   "share_of_pairs_with_heading_differing_over_90_deg": 0.01935434516523868,
+   "yaw_pairs": 13072
+  }
+ },
+ "by_scenario_vehicle_vehicle": {
+  "2023-03-17-16-10-12_1_1": {
+   "pairs": 5806,
+   "sigma_x": 0.11377866114404273,
+   "sigma_y": 0.28066086028683207,
+   "sigma_z": 0.07671701989135034,
+   "sigma_h_isotropic": 0.21414493016258354,
+   "sigma_yaw_deg": 1.7975762597641114,
+   "sigma_yaw_deg_mod_180": 1.7975762597641114,
+   "share_of_pairs_with_heading_differing_over_90_deg": 0.0,
+   "yaw_pairs": 1824
+  },
+  "2023-04-04-15-43-17_15_0": {
+   "pairs": 3421,
+   "sigma_x": 3.5182002722018484,
+   "sigma_y": 2.202098706727719,
+   "sigma_z": 0.4482141536510751,
+   "sigma_h_isotropic": 2.9348740918047107,
+   "sigma_yaw_deg": 36.02313337802543,
+   "sigma_yaw_deg_mod_180": 1.4874334593396414,
+   "share_of_pairs_with_heading_differing_over_90_deg": 0.08115468409586056,
+   "yaw_pairs": 1836
+  },
+  "2023-04-04-16-01-17_33_0": {
+   "pairs": 3979,
+   "sigma_x": 0.3183568275119829,
+   "sigma_y": 0.5741571865539289,
+   "sigma_z": 0.21556913059855257,
+   "sigma_h_isotropic": 0.464223838517055,
+   "sigma_yaw_deg": 1.8322704285668925,
+   "sigma_yaw_deg_mod_180": 1.8322704285668925,
+   "share_of_pairs_with_heading_differing_over_90_deg": 0.0,
+   "yaw_pairs": 2329
+  },
+  "2023-04-05-16-09-26_6_1": {
+   "pairs": 369,
+   "sigma_x": 0.5847089527455355,
+   "sigma_y": 0.82755199170954,
+   "sigma_z": 0.6918210852576765,
+   "sigma_h_isotropic": 0.7164938444966598,
+   "sigma_yaw_deg": 70.81094704788163,
+   "sigma_yaw_deg_mod_180": 2.5263034801185085,
+   "share_of_pairs_with_heading_differing_over_90_deg": 0.3143631436314363,
+   "yaw_pairs": 369
+  }
+ },
+ "identical_share": {
+  "vehicle-vehicle": 0.00014732965009208102,
+  "unit-unit": 0.9993608181527645,
+  "vehicle-unit": 0.0
+ }
+}

@@ -1,0 +1,76 @@
+{
+ "coverage": {
+  "committed | other": {
+   "gt_boxes": 7907,
+   "covered": 5904,
+   "share": 0.7466801568230682
+  },
+  "committed | recording car": {
+   "gt_boxes": 1540,
+   "covered": 1499,
+   "share": 0.9733766233766233
+  },
+  "committed_self | other": {
+   "gt_boxes": 7907,
+   "covered": 5738,
+   "share": 0.7256861009232326
+  },
+  "committed_self | recording car": {
+   "gt_boxes": 1540,
+   "covered": 673,
+   "share": 0.437012987012987
+  },
+  "selected | other": {
+   "gt_boxes": 7907,
+   "covered": 5610,
+   "share": 0.7094979132414316
+  },
+  "selected | recording car": {
+   "gt_boxes": 1540,
+   "covered": 1482,
+   "share": 0.9623376623376624
+  },
+  "selected_self | other": {
+   "gt_boxes": 7907,
+   "covered": 5444,
+   "share": 0.688503857341596
+  },
+  "selected_self | recording car": {
+   "gt_boxes": 1540,
+   "covered": 673,
+   "share": 0.437012987012987
+  },
+  "selected_self_refined | other": {
+   "gt_boxes": 7907,
+   "covered": 5604,
+   "share": 0.7087390919438472
+  },
+  "selected_self_refined | recording car": {
+   "gt_boxes": 1540,
+   "covered": 722,
+   "share": 0.4688311688311688
+  }
+ },
+ "recording_car_boxes_nearest_world_box_offset_m_median_p90": {
+  "committed_self": [
+   1.105634572430928,
+   2.1635019133603843
+  ],
+  "selected_self": [
+   1.105634572430928,
+   2.1635019133603843
+  ],
+  "selected_self_refined": [
+   1.0574418269174628,
+   1.9419306382087431
+  ],
+  "committed": [
+   0.19010942322648527,
+   0.47100902116318605
+  ],
+  "selected": [
+   0.19186590576442564,
+   0.48635031311234217
+  ]
+ }
+}

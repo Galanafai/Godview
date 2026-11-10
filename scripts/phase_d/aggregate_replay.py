@@ -21,8 +21,11 @@ def agg(d, skip=None):
                       'detected_by_both_matched', 'detected_by_both_fused_into_one',
                       'matched_never_detected_by_own_sensor', 'id_changes_total', 'objects_with_id',
                       'wrong_merges_object_frames', 'split_label_frames', 'false_from_sharing_object_frames',
-                      'objects_gained_only_through_sharing', 'n_both_labeled', 'n_box', 'coasting_object_frames'):
-                T[k] = T.get(k, 0) + c[k]
+                      'objects_gained_only_through_sharing', 'n_both_labeled', 'n_box', 'coasting_object_frames',
+                      'self_objects', 'self_assigned_reports', 'self_assigned_to_the_recording_car_label',
+                      'self_assigned_to_another_label', 'self_assigned_to_no_label', 'self_in_own_world',
+                      'self_assigned_from_the_agent_itself', 'self_assigned_from_the_agent_itself_to_another_label'):
+                T[k] = T.get(k, 0) + c.get(k, 0)
             T['world_objects'] = T.get('world_objects', 0) + c['world_objects_per_frame'] * c['frames']
             sq += c['rms_m'] ** 2 * c['matched']
             if c['n_both_labeled']:

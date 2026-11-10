@@ -188,7 +188,10 @@ def main():
             attr_f.append(gids)
             pose = dict(anchor, sigma_h_m=args.sigma_h, sigma_v_m=args.sigma_v, sigma_yaw_deg=args.sigma_yaw_deg)
             car_lines[c].append(json.dumps({'t_unix_ns': t_ns, 'pose': pose, 'detections': out,
-                                            'agent_xyz': ego_odom[c].tolist()}))
+                                            'agent_xyz': ego_odom[c].tolist(),
+                                            # The car's heading in the odometry frame (the map frame's
+                                            # orientation): the self report's footprint heading.
+                                            'agent_yaw_deg': float(wrap(yaw_deg(T[i][c])))}))
         attribution.append(attr_f)
 
         out_objs = []

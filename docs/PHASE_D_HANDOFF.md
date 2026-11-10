@@ -282,3 +282,58 @@ depending on the pair and the scenario.
 * Anything about train and test (not downloaded): their scenarios, whether any
   scenario appears in more than one split (V2V4Real had one), and the pretrained
   checkpoints for D3.
+
+### D2 step 2 converter defaults, proposed by rule (2026-11-10, before any GodView run on V2X-Real)
+
+Fixed by the rules below; nothing here was tuned on GodView output. Scripts:
+`scripts/phase_d/v2xreal_pose_sigma.py`, `v2xreal_footprint.py`; outputs
+`docs/results/phase_d/d2/val_pose_sigma.json`, `val_vehicle_footprint.json`.
+
+1. **Earth anchor and pose sigmas.**
+   * *Anchor:* one fixed made-up point, 34.0689 N, 118.4452 W, ellipsoid height 0,
+     with the map frame's x axis taken as East. It is shared by all agents and the
+     truth, so only relative geometry matters (as for V2V4Real val); it is not
+     the true place of the map frame, which is not documented.
+   * *Vehicle pose:* from the val label disagreement between the two vehicles'
+     labels of the same id (13,575 pairs, 4 scenarios), sigma = sqrt(E[d^2] / 2)
+     per axis (two independent vehicles of equal error; all the disagreement is
+     attributed to the poses, so this is an upper bound): x 1.78 m, y 1.17 m, z
+     0.28 m. GodView's pose input takes one horizontal sigma and a vertical one:
+     **1.51 m horizontal per axis** (the root mean square of x and y), **0.28 m
+     vertical**. Heading: the labels' heading differences mod 180 degrees give
+     **1.8 degrees** (a mod 360 version gives 25.8 degrees because 4.2 percent of
+     the pairs differ by more than 90 degrees, label flips, not pose error). The
+     spread by scenario is wide: horizontal 0.21, 0.46, 0.72 and 2.93 m (pairs 5,806,
+     3,979, 369 and 3,421), so the pooled 1.51 m is carried by one scenario
+     (`2023-04-04-15-43-17_15_0`); the pooled value is the rule's output and is
+     used as is.
+   * *Roadside units:* an assumption, since their survey accuracy is not
+     documented: **0.1 m horizontal and vertical, 0.1 degrees**. The two units'
+     labels are identical in 99.9 percent of pairs, so they carry no information
+     on unit pose error; vehicle-unit disagreement (0.49 m horizontal) is an
+     upper bound on the units' and the vehicles' errors together.
+   * *Self-report footprint (vehicles):* centre 0.60 m ahead of and 0.12 m left of
+     the lidar position, size 4.57 x 2.10 x 2.29 m (median of the other vehicle's
+     label of this vehicle, 400 frames), heading = the lidar yaw (label heading
+     differs by 2.9 degrees at the median); standard deviations as in the V2V4Real
+     replay (position 0.1 m, velocity 0.5 m/s, heading 0.03 rad, size 0.3 m).
+2. **Classes: the V2X-Real repository's own mapping** (`opencood/data_utils/__init__.py`,
+   `SUPER_CLASS_MAP`): vehicle = LongVehicle, Car, PoliceCar; pedestrian = Child,
+   RoadWorker, Pedestrian, Scooter, ScooterRider, Motorcycle, MotorcyleRider (as
+   spelled there), BicycleRider; truck = Truck, Van, TrashCan, ConcreteTruck, Bus.
+   For the ten names in val: **Car -> vehicle; Pedestrian, BicycleRider,
+   ScooterRider, Scooter -> pedestrian; Bus, TrashCan, Van, Truck, ConcreteTruck
+   -> truck.** GodView class ids 1, 2, 3 in that order. GodView fuses only equal
+   classes, so a Van and a Car are never fused, as for the repository's detector.
+3. **The non-overlapping scenario is kept.** `2023-03-17-16-03-02_11_1` (the
+   two vehicles 256 m apart, no shared label) stays in every run. Results are
+   reported per scenario and in aggregate with and without it; the aggregate
+   without it is the one that speaks about vehicle-to-vehicle sharing. The scenario
+   still has the two units sharing about 20 labels per frame. `2023-04-05-16-09-26_6_1`
+   (1 to 3 shared labels between the vehicles) stays in both aggregates and is
+   flagged in the per-scenario table.
+
+The self-report feature is validated on V2V4Real val only
+(`docs/results/phase_d_selfreport_val.md`); V2X-Real is its real test, and
+the choice of which variant (literal, or with the two refinements) to run there is
+made in the step 2 plan before any V2X-Real run.

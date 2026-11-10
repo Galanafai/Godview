@@ -71,6 +71,11 @@ struct Args {
     split_diag: String,
     spawn_diag: String,
     merge_diag: String,
+    self_reports: bool,
+    self_gate_sigma: f64,
+    self_same_source_exact: bool,
+    self_compete: bool,
+    self_size: [f64; 3],
     dump: String,
     no_sharing: bool,
     align: bool,
@@ -99,6 +104,11 @@ fn parse_args() -> Args {
         split_diag: String::new(),
         spawn_diag: String::new(),
         merge_diag: String::new(),
+        self_reports: false,
+        self_gate_sigma: 2.0,
+        self_same_source_exact: false,
+        self_compete: false,
+        self_size: [4.5, 2.0, 1.7],
         dump: String::new(),
         no_sharing: false,
         align: false,
@@ -115,6 +125,23 @@ fn parse_args() -> Args {
         // Relative alignment of the two cars from shared objects (world model).
         if v[i] == "--raw-box" {
             a.raw_box = true;
+            i += 1;
+            continue;
+        }
+        // Each car publishes its own position and footprint as a self report, and
+        // the world model assigns reports that fall on a footprint to that car.
+        if v[i] == "--self-reports" {
+            a.self_reports = true;
+            i += 1;
+            continue;
+        }
+        if v[i] == "--self-same-source-exact" {
+            a.self_same_source_exact = true;
+            i += 1;
+            continue;
+        }
+        if v[i] == "--self-compete" {
+            a.self_compete = true;
             i += 1;
             continue;
         }
@@ -151,6 +178,11 @@ fn parse_args() -> Args {
             // Diagnostics only (with attribution.json): one JSON line per wrong merge
             // (world object whose members are attributed to two or more labels).
             "--merge-diag" => a.merge_diag = val,
+            "--self-gate-sigma" => a.self_gate_sigma = val.parse().expect("--self-gate-sigma"),
+            "--self-size" => {
+                let v: Vec<f64> = val.split(',').map(|x| x.parse().expect("--self-size L,W,H")).collect();
+                a.self_size = [v[0], v[1], v[2]];
+            }
             // Per frame: each car's world objects and the labels, in the odometry
             // frame, as JSON lines (for visualization). Does not change scoring.
             "--dump" => a.dump = val,
@@ -216,6 +248,16 @@ struct CarStats {
     members: usize,
     coasting_objects: usize,
     world_objects: usize,
+    /// Reports assigned to a self report, by what their latest detection was attributed to.
+    self_objects: usize,
+    self_assigned: usize,
+    self_assigned_to_recording_car: usize,
+    self_assigned_to_other_label: usize,
+    self_assigned_unlabeled: usize,
+    /// Of the assigned reports, those that came from the agent itself, and of those
+    /// the ones attributed to a label other than the recording car's.
+    self_assigned_own_source: usize,
+    self_assigned_own_source_other_label: usize,
 }
 
 fn quantile(v: &[f64], q: f64) -> f64 {
@@ -312,6 +354,10 @@ fn main() {
         other => panic!("unknown --overlap-keep {other}"),
     };
     config.publish.fresh_only = args.fresh_only;
+    config.self_reports = args.self_reports;
+    config.world.self_gate_sigma = args.self_gate_sigma;
+    config.world.self_same_source_exact = args.self_same_source_exact;
+    config.world.self_compete = args.self_compete;
     config.publish.min_score = args.pub_min_score;
     config.world.align.enabled = args.align;
     for a in &args.ablate {
@@ -335,6 +381,7 @@ fn main() {
     // Per car: track id -> obs id of the detection that started the track.
     let mut first_obs: [BTreeMap<u64, u64>; 2] = [BTreeMap::new(), BTreeMap::new()];
     let mut split_lines: Vec<String> = Vec::new();
+    let mut prev_agent: [Option<(i64, Vector3<f64>)>; 2] = [None, None];
     // Per car, by obs id (parse_line numbers them from 1): the raw detection.
     let mut raw_dets: [Vec<Value>; 2] = [vec![Value::Null], vec![Value::Null]];
     let mut spawn_lines: Vec<String> = Vec::new();
@@ -419,6 +466,26 @@ fn main() {
                 first_obs[c].entry(tr.id.0).or_insert(tr.last_obs_id);
             }
             nodes[c].maintain(t);
+            if args.self_reports {
+                let line: Value = serde_json::from_str(&lines[c][i]).unwrap();
+                let yaw_deg = line["agent_yaw_deg"].as_f64().expect("agent_yaw_deg in the input (convert_detections.py)");
+                let pos = parsed[c].agent_odom;
+                let vel = prev_agent[c]
+                    .map(|(pt, pp)| (pos - pp) / (t.as_nanos() - pt) as f64 * 1e9)
+                    .unwrap_or_else(Vector3::zeros);
+                prev_agent[c] = Some((t.as_nanos(), pos));
+                nodes[c].set_self_state(Some(godview_core::perception_node::SelfState {
+                    position: pos,
+                    velocity: vel,
+                    yaw: yaw_deg.to_radians(),
+                    size: args.self_size,
+                    class_id: 1,
+                    sigma_pos_m: 0.1,
+                    sigma_vel_mps: 0.5,
+                    sigma_yaw_rad: 0.03,
+                    sigma_size_m: 0.3,
+                }));
+            }
             if let Some(bytes) = nodes[c].publish(t, parsed[c].pose.as_ref()) {
                 let snap: Attr = nodes[c]
                     .tracker()
@@ -469,6 +536,7 @@ fn main() {
             .collect();
 
         let mut dump_worlds: Vec<Value> = Vec::new();
+        let mut dump_align: Vec<Value> = Vec::new();
         for c in 0..2 {
             let world = nodes[c].world(t);
             if world.alignment.len() == 2 {
@@ -506,6 +574,7 @@ fn main() {
                             "x": p.x, "y": p.y, "z": p.z,
                             "xs": p.x - shift.x, "ys": p.y - shift.y, "zs": p.z - shift.z,
                             "coasting": !w.members.is_empty() && w.members.iter().all(|(k, _)| known[c].get(k).is_some_and(|i| i.coasting)),
+                            "self": w.self_agent.is_some(),
                             "labels": attribution.as_ref().map(|attr| {
                                 let mut v: BTreeSet<&str> = BTreeSet::new();
                                 for (k, _) in &w.members {
@@ -531,6 +600,16 @@ fn main() {
                     })
                     .collect();
                 dump_worlds.push(Value::Array(objs_dump));
+                dump_align.push(Value::Array(
+                    world
+                        .alignment
+                        .iter()
+                        .map(|o| {
+                            let t = odom_from_ecef.rotation * o.translation;
+                            json!({"src": node_ids.iter().position(|n| *n == o.source), "t_odom": [t.x, t.y, t.z]})
+                        })
+                        .collect(),
+                ));
             }
             let est: Vec<_> = world
                 .objects
@@ -571,6 +650,24 @@ fn main() {
                     }
                     if !w.members.is_empty() && w.members.iter().all(|(k, _)| known[c].get(k).is_some_and(|i| i.coasting)) {
                         st.coasting_objects += 1;
+                    }
+                    if let Some(agent) = w.self_agent {
+                        st.self_objects += 1;
+                        let ag = node_ids.iter().position(|n| *n == agent);
+                        for (k, _) in w.members.iter().filter(|(k, _)| k.1 != godview_core::report::SELF_TRACK) {
+                            st.self_assigned += 1;
+                            let own = k.0 == agent;
+                            st.self_assigned_own_source += own as usize;
+                            let gid = known[c].get(k).and_then(|i| attr[i.src][i.obs as usize].as_deref());
+                            match gid.and_then(|g| objs.iter().find(|o| o["gid"].as_str() == Some(g))) {
+                                None => st.self_assigned_unlabeled += 1,
+                                Some(o) if o["cav"].as_u64().map(|x| x as usize) == ag => st.self_assigned_to_recording_car += 1,
+                                Some(_) => {
+                                    st.self_assigned_to_other_label += 1;
+                                    st.self_assigned_own_source_other_label += own as usize;
+                                }
+                            }
+                        }
                     }
                     for g in labels {
                         *per_label.entry(g).or_default() += 1;
@@ -767,7 +864,7 @@ fn main() {
                     })
                     .collect();
                 dump_lines.push(
-                    json!({"frame": i, "ego": fr["ego_odom"], "labels": labels, "worlds": dump_worlds}).to_string(),
+                    json!({"frame": i, "ego": fr["ego_odom"], "labels": labels, "worlds": dump_worlds, "alignments": dump_align}).to_string(),
                 );
             }
             if !args.diag.is_empty() && (!d_missed.is_empty() || !d_dup.is_empty()) {
@@ -827,6 +924,13 @@ fn main() {
             "gained_object_frames_per_frame": st.gained as f64 / st.frames.max(1) as f64,
             "members_seen": st.members,
             "coasting_object_frames": st.coasting_objects,
+            "self_objects": st.self_objects,
+            "self_assigned_reports": st.self_assigned,
+            "self_assigned_to_the_recording_car_label": st.self_assigned_to_recording_car,
+            "self_assigned_to_another_label": st.self_assigned_to_other_label,
+            "self_assigned_to_no_label": st.self_assigned_unlabeled,
+            "self_assigned_from_the_agent_itself": st.self_assigned_own_source,
+            "self_assigned_from_the_agent_itself_to_another_label": st.self_assigned_own_source_other_label,
             "world_objects_per_frame": st.world_objects as f64 / st.frames.max(1) as f64,
             "members_without_attribution_snapshot": st.unattributed_members,
             "per_frame_matched_missed_dup_false": st.per_frame,
@@ -845,7 +949,8 @@ fn main() {
         "box_center_sys_z_m": args.box_center_sys_z_m,
         "tracker_options": {
             "confirm_hits": config.tracker.confirm_hits, "score_mode": args.score_mode,
-            "raw_box": args.raw_box, "fresh_only": args.fresh_only, "pub_min_score": args.pub_min_score,
+            "raw_box": args.raw_box, "fresh_only": args.fresh_only, "self_reports": args.self_reports,
+            "self_gate_sigma": args.self_gate_sigma, "self_same_source_exact": args.self_same_source_exact, "self_compete": args.self_compete, "self_size": args.self_size, "pub_min_score": args.pub_min_score,
             "overlap_iou": args.overlap_iou, "overlap_keep": args.overlap_keep,
         },
         "cutoff_m": args.cutoff_m,

@@ -373,3 +373,72 @@ frame offset only.
 Limits stated now: val has three scenarios and one dominates the splits;
 a setting chosen here is not shown to hold on test. A second test run, if
 run, is labeled separately and does not replace the first.
+
+## Offset filter and ego view: rule and expectations (committed before the filter exists or any run)
+
+Written 2026-11-10. Val only; test is not touched. Context: the ego view (each
+agent's own objects with sensor covariance only, the others' reports with their
+covariance plus the agent's pose covariance, ego translation held at zero in
+alignment) is implemented; the per-pair offset filter below is not yet.
+
+### The filter (to be implemented)
+
+Per ordered pair (ego A, other B): state = the translation to add to B's reports so
+that they land in A's frame (3D, ECEF vector), random-walk process noise q.
+Measurements, any number per frame:
+
+* (a) shared objects: a report of A and a report of B of the same class with
+  compatible box sizes, offset `x_A - x_B`, accepted if its Mahalanobis distance
+  against the predicted translation (innovation covariance = filter covariance +
+  sigma_obj^2 I) is inside the gate; one-to-one, smallest distance first. The
+  minimum of 3 objects per frame of the per-frame estimate does not apply. The first
+  estimate of a pair (no state, or a state older than the max age) starts from the
+  largest consensus of candidate offsets (votes within 1 m), or from a link.
+* (b) agent-agent links: B's report assigned to A's self object gives
+  `x_selfA - x_B`; A's own report assigned to B's self object gives
+  `x_A - x_selfB`; both are direct measurements of the translation, with covariance
+  sigma_link^2 (horizontal; the vertical component uses 1 m because the self
+  position's height is only the lidar's).
+
+### Rule for the parameters (`scripts/phase_d/offset_filter_rule.py`, val inputs only)
+
+Computed from labels and detections of the val inputs, nothing from a GodView run
+(`docs/results/phase_d/d1/offset_filter_rule_val.json`):
+
+| parameter | rule | value |
+|---|---|---|
+| q, horizontal | (E[(d(t + 2 s) - d(t))^2] - 2 x label-noise variance of d) / 2 s, d = per-frame median label offset between the cars (frames with at least 3 objects labeled by both: 690 frames, 603 lagged pairs); mean of East and North | **0.023 m^2/s** (East 0.012, North 0.035) |
+| q, vertical | the same on z | **0.066 m^2/s** |
+| sigma_obj | 1.4826 x MAD of per-object detection offsets around the per-frame median (3,657 residuals) | **0.37 m** horizontal, **0.57 m** vertical |
+| sigma_link | the same scatter of agent-agent links around the frame's object median (1,305 links, both directions); median residual (0.11, 0.08) m | **0.33 m** |
+| gate | chi-square 99.9 percent, 3 degrees of freedom | **16.27** |
+| initial sigma | alignment search radius / 3 | **2.67 m** per axis |
+| max age | 1 / q_h, clamped to [1, 10] s (time for the random walk to reach 1 m) | **10 s** (1 / q_h = 43 s) |
+| V2V4Real self footprint | median centre offset in the lidar frame and size of the other car's label of a car (1,540 frames) | **0.10 m forward, 0.17 m left; 4.73 x 2.25 x 2.34 m** |
+
+The footprint line replaces the nominal 4.5 x 2.0 x 1.7 m centred on the lidar that the
+first self-report validation used; it applies to the new val runs.
+
+### Expectations, set before any run (as asked)
+
+On V2V4Real val, selected tracker, sharing, each car's ego view (AP is car 0's):
+
+* **(i)** the ego view with self reports on brings the recording cars' ground-truth
+  box coverage (IoU 0.5) to **at least 90 percent**.
+* **(ii)** filtered alignment in the ego view loses **no more than 1 AP@0.7 point**
+  (dataset AP, all frames) against alignment off, with self reports in the same
+  state.
+* **(iii)** the filter gives an estimate (state initialised and its last measurement
+  within the max age) in **at least 90 percent of the car-frames that share any
+  object** (an object, other than the recording cars, detected by both cars in that
+  frame according to the attributed detections).
+
+**If any of the three fails, I stop and report; otherwise I go on to D2 step 2.**
+
+### Variants for the validation (all selected tracker, sharing, ego views)
+
+Self reports off or on (both refinements, fused self position, footprint above) x
+alignment off, per-frame (the existing estimate, ego-fixed gauge) or filtered. Each run
+also dumps the shared world for reference. Reported: dataset and standard AP,
+wrong merges, splits, missed, recording-car coverage, and the fraction of car-frames
+with an offset estimate (of all car-frames and of those that share any object).

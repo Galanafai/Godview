@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from scene_data import Scene  # noqa: E402
 
 CYAN = (64, 220, 255)
+WHITE = (255, 255, 255)
 AGENT_NAMES = {0: "roadside unit A", 1: "roadside unit B", 2: "this car", 3: "car 2"}
 
 
@@ -74,7 +75,7 @@ def load_font(path, size):
     return ImageFont.load_default()
 
 
-def draw_frame(img, objs, font, scale):
+def draw_frame(img, objs, font, scale, hud=True):
     w, h = img.size
     glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
     fill = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -89,28 +90,31 @@ def draw_frame(img, objs, font, scale):
             continue
         o["drawn"] = True
         strong = o["focus"]
-        a_fill = 70 if strong else 35
-        a_line = 255 if strong else 150
-        lw = max(2, int(round(3 * scale))) if strong else max(1, int(round(2 * scale)))
+        col = o.get("color", CYAN)
+        a_fill = 70 if strong else 0
+        a_line = 255 if strong else 90
+        lw = max(2, int(round(3 * scale))) if strong else max(1, int(round(1.5 * scale)))
         # filled silhouette: convex hull of the projected corners
         hull = convex_hull(uv)
-        fd.polygon([tuple(p) for p in hull], fill=CYAN + (a_fill,))
+        fd.polygon([tuple(p) for p in hull], fill=col + (a_fill,))
         for i, j in EDGES:
             seg = [tuple(uv[i]), tuple(uv[j])]
-            ld.line(seg, fill=CYAN + (a_line,), width=lw)
-            gd.line(seg, fill=CYAN + (255 if strong else 120,), width=lw * 4)
+            ld.line(seg, fill=col + (a_line,), width=lw)
+            if strong:
+                gd.line(seg, fill=col + (255,), width=lw * 4)
     glow = glow.filter(ImageFilter.GaussianBlur(radius=10 * scale))
     out = img.convert("RGBA")
     out = Image.alpha_composite(out, glow)
     out = Image.alpha_composite(out, fill)
     out = Image.alpha_composite(out, lines)
-    draw_hud(out, objs, font, scale)
+    if hud:
+        draw_hud(out, objs, font, scale)
     return out.convert("RGB")
 
 
 def draw_hud(img, objs, font, scale):
     """Bottom-left panel: how many objects are hidden from this car, and who saw them."""
-    shown = [o for o in objs if o.get("drawn")]
+    shown = [o for o in objs if o.get("drawn") and o.get("color", CYAN) == CYAN]
     if not shown:
         return
     agents = sorted({a for o in shown for a in o["agents"]})
@@ -165,6 +169,7 @@ def main():
     p.add_argument("--max-range", type=float, default=35.0)
     p.add_argument("--focus", default="58,30,46")
     p.add_argument("--font", default="")
+    p.add_argument("--no-hud", action="store_true")
     args = p.parse_args()
 
     sc = Scene(args.package)
@@ -188,17 +193,21 @@ def main():
         objs = []
         for tid, t in sc.tracks.items():
             s = next((s for s in t["states"] if s["frame"] == fr), None)
-            if s is None or s["status"] != "ghost":
+            if s is None:
+                continue
+            was_ghost = any(x["status"] == "ghost" and x["frame"] < fr for x in t["states"])
+            revealed = s["status"] == "solid" and tid in focus and was_ghost
+            if s["status"] != "ghost" and not revealed:
                 continue
             if math.dist(s["pos"][:2], cam_pos[:2]) > args.max_range:
                 continue
             corners = box_corners(s["pos"], s["size"], s["yaw_deg"])
             objs.append({"uvz": project(corners, origin, cal), "focus": tid in focus,
-                         "agents": s["agents"]})
+                         "agents": s["agents"], "color": WHITE if revealed else CYAN})
         img = Image.open(img_path).convert("RGB")
         scale = img.size[0] / 1920.0
         font = load_font(args.font, int(22 * scale))
-        res = draw_frame(img, objs, font, scale)
+        res = draw_frame(img, objs, font, scale, hud=not args.no_hud)
         res.save(out / f"overlay_{fr:06d}.jpg", quality=92)
         print("wrote", out / f"overlay_{fr:06d}.jpg", len(objs), "ghosts")
 

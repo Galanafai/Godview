@@ -55,7 +55,10 @@ def parse_args():
     p.add_argument("--stills", default="")
     p.add_argument("--animation", action="store_true")
     p.add_argument("--save", default="")
-    p.add_argument("--shot", default="hero", choices=["hero", "top", "egotop"])
+    p.add_argument("--shot", default="hero", choices=["hero", "top", "egotop", "orbit"])
+    p.add_argument("--freeze", type=int, default=0,
+                   help="dataset frame to pause time at; the camera still moves")
+    p.add_argument("--orbit-frames", type=int, default=150)
     return p.parse_args(argv)
 
 
@@ -203,46 +206,71 @@ def finish_mesh(bm, name, bevel=0.06, segments=3):
     return me
 
 
+def extrude_profile(bm, pts, width):
+    """Side profile (x forward, z up) extruded across y, centred on y = 0."""
+    verts = [bm.verts.new((x, -width / 2.0, z)) for x, z in pts]
+    face = bm.faces.new(verts)
+    res = bmesh.ops.extrude_face_region(bm, geom=[face])
+    new = [g for g in res["geom"] if isinstance(g, bmesh.types.BMVert)]
+    bmesh.ops.translate(bm, vec=Vector((0, width, 0)), verts=new)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+
+
 def mesh_car():
     """Generic sedan, 4.5 x 2.0 x 1.5 m, origin at the ground centre, facing +x."""
     bm = bmesh.new()
-    add_box(bm, (0.0, 0.0, 0.62), (4.5, 1.96, 0.62))
-    add_box(bm, (-0.2, 0.0, 1.17), (2.6, 1.78, 0.62), taper_top=(0.72, 0.88, -0.1))
-    me_body = finish_mesh(bm, "car_body", bevel=0.12, segments=4)
+    extrude_profile(bm, [(2.25, 0.30), (2.27, 0.64), (2.02, 0.85), (0.80, 0.97),
+                         (-1.92, 1.00), (-2.25, 0.86), (-2.25, 0.30)], 1.96)
+    body = finish_mesh(bm, "car_body", bevel=0.14, segments=5)
     bm = bmesh.new()
-    for x in (1.45, -1.45):
+    extrude_profile(bm, [(0.86, 0.94), (0.12, 1.45), (-1.06, 1.48), (-1.84, 0.98)], 1.64)
+    glass = finish_mesh(bm, "car_glass", bevel=0.10, segments=4)
+    bm = bmesh.new()
+    for x in (1.42, -1.42):
         for y in (0.86, -0.86):
-            add_wheel(bm, x, y, 0.36, 0.26)
-    me_wheels = finish_mesh(bm, "car_wheels", bevel=0.03, segments=2)
-    return me_body, me_wheels
+            add_wheel(bm, x, y, 0.35, 0.24)
+    wheels = finish_mesh(bm, "car_wheels", bevel=0.04, segments=2)
+    return body, wheels, glass
 
 
 def mesh_truck():
     """Generic box truck, 7.0 x 2.6 x 3.0 m."""
     bm = bmesh.new()
-    add_box(bm, (2.6, 0.0, 1.45), (1.8, 2.4, 1.9), taper_top=(0.8, 0.95, -0.15))
-    add_box(bm, (-0.8, 0.0, 1.85), (5.2, 2.6, 2.3))
-    add_box(bm, (0.0, 0.0, 0.55), (6.8, 2.2, 0.35))
-    me_body = finish_mesh(bm, "truck_body", bevel=0.1, segments=3)
+    extrude_profile(bm, [(3.50, 0.55), (3.50, 1.45), (3.20, 2.45), (2.00, 2.60), (1.95, 0.55)], 2.40)
+    add_box(bm, (-0.85, 0.0, 1.90), (5.30, 2.60, 2.25))
+    add_box(bm, (0.0, 0.0, 0.62), (6.9, 2.2, 0.32))
+    body = finish_mesh(bm, "truck_body", bevel=0.10, segments=4)
     bm = bmesh.new()
-    for x in (2.4, -1.6, -2.7):
+    extrude_profile(bm, [(3.44, 1.55), (3.18, 2.38), (2.45, 2.48), (2.45, 1.55)], 2.30)
+    glass = finish_mesh(bm, "truck_glass", bevel=0.06, segments=3)
+    bm = bmesh.new()
+    for x in (2.6, -1.7, -2.8):
         for y in (1.05, -1.05):
-            add_wheel(bm, x, y, 0.48, 0.32)
-    me_wheels = finish_mesh(bm, "truck_wheels", bevel=0.03, segments=2)
-    return me_body, me_wheels
+            add_wheel(bm, x, y, 0.47, 0.32)
+    wheels = finish_mesh(bm, "truck_wheels", bevel=0.04, segments=2)
+    return body, wheels, glass
 
 
 def mesh_person():
-    """Generic standing figure, 1.75 m, facing +x."""
+    """Generic standing figure, 1.75 m, facing +x, built from ellipsoids."""
     bm = bmesh.new()
-    add_box(bm, (0.0, 0.10, 0.44), (0.16, 0.15, 0.88))
-    add_box(bm, (0.0, -0.10, 0.44), (0.16, 0.15, 0.88))
-    add_box(bm, (0.0, 0.0, 1.17), (0.24, 0.44, 0.62), taper_top=(1.0, 1.08))
-    add_box(bm, (0.0, 0.29, 1.12), (0.12, 0.11, 0.62))
-    add_box(bm, (0.0, -0.29, 1.12), (0.12, 0.11, 0.62))
-    bmesh.ops.create_uvsphere(bm, u_segments=20, v_segments=14, radius=0.12,
-                              matrix=Matrix.Translation((0.0, 0.0, 1.62)))
-    return finish_mesh(bm, "person", bevel=0.05, segments=3), None
+
+    def blob(centre, radii):
+        g = bmesh.ops.create_uvsphere(bm, u_segments=18, v_segments=12, radius=1.0)
+        bmesh.ops.scale(bm, vec=Vector(radii), verts=g["verts"])
+        bmesh.ops.translate(bm, vec=Vector(centre), verts=g["verts"])
+    blob((0.0, 0.10, 0.46), (0.085, 0.085, 0.46))
+    blob((0.0, -0.10, 0.46), (0.085, 0.085, 0.46))
+    blob((0.0, 0.0, 1.18), (0.14, 0.22, 0.34))
+    blob((0.0, 0.29, 1.12), (0.055, 0.055, 0.32))
+    blob((0.0, -0.29, 1.12), (0.055, 0.055, 0.32))
+    blob((0.02, 0.0, 1.63), (0.11, 0.10, 0.125))
+    me = bpy.data.meshes.new("person")
+    bm.to_mesh(me)
+    bm.free()
+    for poly in me.polygons:
+        poly.use_smooth = True
+    return me, None, None
 
 
 CANON = {1: (4.5, 2.0, 1.5), 2: (0.5, 0.5, 1.75), 3: (7.0, 2.6, 3.0)}
@@ -257,22 +285,19 @@ def set_mat(obj, mat):
     slot.material = mat
 
 
-def make_object(name, meshes, body_mat, wheel_mat, collection):
-    body, wheels = meshes
+def make_object(name, meshes, mats, collection):
+    """Root empty with body, wheels and glass parts; mats is (body, wheels, glass)."""
     root = bpy.data.objects.new(name, None)
     collection.objects.link(root)
     parts = []
-    b = bpy.data.objects.new(name + "_body", body)
-    collection.objects.link(b)
-    set_mat(b, body_mat)
-    b.parent = root
-    parts.append(b)
-    if wheels is not None:
-        w = bpy.data.objects.new(name + "_wheels", wheels)
-        collection.objects.link(w)
-        set_mat(w, wheel_mat)
-        w.parent = root
-        parts.append(w)
+    for suffix, me, mat in zip(("body", "wheels", "glass"), meshes, mats):
+        if me is None:
+            continue
+        o = bpy.data.objects.new(f"{name}_{suffix}", me)
+        collection.objects.link(o)
+        set_mat(o, mat)
+        o.parent = root
+        parts.append(o)
     return root, parts
 
 
@@ -295,13 +320,15 @@ def build(args):
     f0 = sc.frame_ids[0]
     step = args.fps // 10
 
+    freeze = args.freeze
+
     def bf(frame):
-        return 1 + (frame - f0) * step
+        return 1 if freeze else 1 + (frame - f0) * step
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     scene.frame_start = 1
-    scene.frame_end = bf(sc.frame_ids[-1])
+    scene.frame_end = args.orbit_frames if freeze else bf(sc.frame_ids[-1])
     scene.render.fps = args.fps
     prefs = bpy.context.preferences.edit
     prefs.keyframe_new_interpolation_type = "LINEAR"
@@ -309,23 +336,24 @@ def build(args):
     col = bpy.data.collections.new("godview")
     scene.collection.children.link(col)
     gz = sc.ground_z
-    ego0 = sc.ego_state(f0)
+    ego0 = sc.ego_state(freeze or f0)
     ex, ey = ego0["centre"][0], ego0["centre"][1]
 
     # materials
-    m_solid = mat_principled("solid", (0.36, 0.38, 0.42), rough=0.3, coat=0.8)
-    m_ego = mat_principled("ego", (0.85, 0.80, 0.72), rough=0.2, coat=1.0)
+    m_solid = mat_principled("solid", (0.55, 0.57, 0.60), rough=0.28, coat=0.9)
+    m_ego = mat_principled("ego", (0.90, 0.88, 0.84), rough=0.18, coat=1.0)
+    m_glass = mat_principled("glass", (0.015, 0.018, 0.025), rough=0.08, coat=1.0)
     m_agent = mat_principled("agent", (0.55, 0.52, 0.66), rough=0.25, coat=1.0)
     m_wheel = mat_principled("wheel", (0.02, 0.02, 0.025), rough=0.6, coat=0.0)
     m_ghost = mat_ghost("ghost", CYAN, 2.2)
     m_ghost_wheel = mat_ghost("ghost_wheel", CYAN, 1.0)
-    m_halo = mat_radial("halo", CYAN, 1.6)
+    m_halo = mat_radial("halo", CYAN, 1.1, fill=0.05)
     m_ring_ego = mat_radial("ring_ego", AMBER, 3.0, fill=0.25)
     m_ring_agent = mat_radial("ring_agent", VIOLET, 2.5, fill=0.2)
     m_arc = mat_emission("arc", CYAN, 3.0)
     m_pole = mat_principled("pole", (0.08, 0.08, 0.1), rough=0.4, coat=0.2)
     m_head = mat_emission("sensor", VIOLET, 8.0)
-    m_ground = mat_principled("ground", (0.012, 0.014, 0.02), rough=0.6, coat=0.05)
+    m_ground = mat_principled("ground", (0.007, 0.008, 0.012), rough=0.92, coat=0.0)
 
     # world: dusk
     world = bpy.data.worlds.new("dusk")
@@ -339,7 +367,7 @@ def build(args):
     sun = bpy.data.lights.new("sun", "SUN")
     sun.energy = 2.2
     sun.color = (1.0, 0.82, 0.62)
-    sun.angle = math.radians(8)
+    sun.angle = math.radians(14)
     sun_obj = bpy.data.objects.new("sun", sun)
     sun_obj.rotation_euler = (math.radians(62), 0, math.radians(35))
     scene.collection.objects.link(sun_obj)
@@ -391,8 +419,8 @@ def build(args):
     for idx, at in sc.agent_tracks.items():
         s0 = at["states"][0]
         if at["kind"] == "vehicle":
-            mats = (m_ego, m_wheel) if idx == sc.ego_index else (m_agent, m_wheel)
-            root, parts = make_object(f"agent{idx}", meshes[1], mats[0], mats[1], col)
+            mats = (m_ego if idx == sc.ego_index else m_agent, m_wheel, m_glass)
+            root, parts = make_object(f"agent{idx}", meshes[1], mats, col)
             root.scale = (VEHICLE_SIZE[0] / 4.5, VEHICLE_SIZE[1] / 2.0, 1.0)
             ring = bpy.data.objects.new(f"ring{idx}", disc)
             col.objects.link(ring)
@@ -422,7 +450,12 @@ def build(args):
             ring.location = (sx, sy, gz + 0.02)
 
     # GodView objects
-    frames_all = sc.frame_ids
+    frames_all = [freeze] if freeze else sc.frame_ids
+    # In paused time, tell the story of the instant: first only what the car
+    # sees itself, then the reports arrive (arcs grow), then the ghosts appear.
+    arc_start, arc_end = int(scene.frame_end * 0.28), int(scene.frame_end * 0.48)
+    ghost_on = int(scene.frame_end * 0.46)
+    late_parts = []
     for tid, t in sc.tracks.items():
         states = [s for s in t["states"]
                   if math.hypot(s["pos"][0] - ex, s["pos"][1] - ey) < args.radius]
@@ -431,8 +464,8 @@ def build(args):
         cls = t["class_id"]
         by_frame = {s["frame"]: s for s in states}
         L0, W0, H0 = CANON[cls]
-        solid, solid_parts = make_object(f"{tid}_solid", meshes[cls], m_solid, m_wheel, col)
-        ghost, ghost_parts = make_object(f"{tid}_ghost", meshes[cls], m_ghost, m_ghost_wheel, col)
+        solid, solid_parts = make_object(f"{tid}_solid", meshes[cls], (m_solid, m_wheel, m_glass), col)
+        ghost, ghost_parts = make_object(f"{tid}_ghost", meshes[cls], (m_ghost, m_ghost_wheel, m_ghost), col)
         halo = bpy.data.objects.new(f"{tid}_halo", disc)
         col.objects.link(halo)
         set_mat(halo, m_halo)
@@ -469,6 +502,8 @@ def build(args):
             halo.keyframe_insert("rotation_euler", frame=f)
             halo.keyframe_insert("scale", frame=f)
             key_visible([halo], f, is_ghost)
+            if freeze and is_ghost:
+                late_parts.extend(ghost_parts + [halo])
 
         # arcs from contributing agents, only for focus objects while ghost
         if tid not in focus_ids:
@@ -476,6 +511,9 @@ def build(args):
         agents_seen = sorted({a for s in states if s["status"] == "ghost" for a in s["agents"]})
         for a in agents_seen:
             if a not in sc.agent_tracks:
+                continue
+            a0 = sc.agent_tracks[a]["states"][0]["sensor"]
+            if math.hypot(a0[0] - states[0]["pos"][0], a0[1] - states[0]["pos"][1]) > 45:
                 continue
             cu = bpy.data.curves.new(f"arc_{tid}_{a}", "CURVE")
             cu.dimensions = "3D"
@@ -489,6 +527,11 @@ def build(args):
             arc.active_material = m_arc
             col.objects.link(arc)
             asts = {s["frame"]: s for s in sc.agent_tracks[a]["states"]}
+            if freeze:
+                cu.bevel_factor_end = 0.0
+                cu.keyframe_insert("bevel_factor_end", frame=arc_start)
+                cu.bevel_factor_end = 1.0
+                cu.keyframe_insert("bevel_factor_end", frame=arc_end)
             for fr in frames_all:
                 f = bf(fr)
                 s = by_frame.get(fr)
@@ -500,10 +543,14 @@ def build(args):
                 src = Vector(asts[fr]["sensor"]) + Vector((0, 0, 0.3))
                 dst = Vector((s["pos"][0], s["pos"][1], s["pos"][2] + s["size"][2] / 2 + 0.15))
                 d = (dst - src).length
-                mid = (src + dst) / 2 + Vector((0, 0, 1.5 + 0.18 * d))
+                mid = (src + dst) / 2 + Vector((0, 0, 1.2 + 0.10 * d))
                 for bp, co in zip(sp.bezier_points, (src, mid, dst)):
                     bp.co = co
                     bp.keyframe_insert("co", frame=f)
+
+    for p_ in late_parts:
+        key_visible([p_], 1, False)
+        key_visible([p_], ghost_on, True)
 
     # camera
     cam_data = bpy.data.cameras.new("cam")
@@ -527,7 +574,17 @@ def build(args):
     focus = sum(focus_pts, Vector()) / len(focus_pts) if focus_pts else ego + 15 * fwd
     up = Vector((0, 0, 1))
     end = scene.frame_end
-    if args.shot == "egotop":
+    if args.shot == "orbit":
+        pivot = ego + 0.55 * (focus - ego)
+        base = math.atan2(-fwd.y, -fwd.x)  # behind the ego car
+        shots = []
+        for k, (deg, radius, height) in enumerate([(-25, 19, 8.5), (15, 18, 8.0), (45, 16.5, 7.5),
+                                                    (72, 15, 7.0), (92, 14, 6.5)]):
+            ang = base + math.radians(deg) * (1 if left.dot(Vector((math.cos(base + 1), math.sin(base + 1), 0))) > 0 else -1)
+            pos = pivot + Vector((radius * math.cos(ang), radius * math.sin(ang), 0)) + height * up
+            f = 1 + int(round(k * (end - 1) / 4))
+            shots.append((f, pos, pivot + 1.0 * up))
+    elif args.shot == "egotop":
         shots = [(1, ego + 26 * up - 2 * fwd, ego + 4 * fwd)]
     elif args.shot == "top":
         shots = [(1, ego + 0.5 * (focus - ego) + 38 * up - 4 * fwd, ego + 0.5 * (focus - ego))]
@@ -587,7 +644,7 @@ def main():
     if args.save:
         bpy.ops.wm.save_as_mainfile(filepath=str(Path(args.save).resolve()))
     for fr in [int(x) for x in args.stills.split(",") if x]:
-        scene.frame_set(bf(fr))
+        scene.frame_set(fr if args.freeze else bf(fr))
         scene.render.filepath = str((out / f"{args.shot}_{fr:06d}.png").resolve())
         bpy.ops.render.render(write_still=True)
         print("wrote", scene.render.filepath)

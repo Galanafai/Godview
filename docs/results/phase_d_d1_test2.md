@@ -210,8 +210,8 @@ attributed to two or more labels, counted per car and frame.
   are allowed by the cross-car gate, which is dominated by the declared pose
   sigma (1.27 m per axis per car, so a gate radius of up to about 8 m for
   reports on different cars) and nothing in the node recognizes a report about
-  itself. The same count on val was 251, because val has no scenario where
-  the two cars see each other this closely; this was not tested further.
+  itself. The same count on val was 251; a likely reason is that the val scenarios
+  have the two cars farther apart, which was not checked.
   The "same object labeled twice" class is small (0.7%), so label noise does
   not explain the count. Label positions in this breakdown use the current
   frame's labels, while a member's latest detection can be older.
@@ -247,8 +247,8 @@ over both ranges; first reason that applies):
 
 **Neither wrong merges nor fresh-only drives the gap.** What does:
 
-* The localization cases (1,940 for R1 over both ranges, against all
-  Late-Fusion-covered or not): 97% would pass IoU 0.5 if the centre were
+* The localization cases (1,940 ground-truth boxes R1 does not cover that
+  have an R1 box within 3 m, whether or not Late Fusion covers them): 97% would pass IoU 0.5 if the centre were
   right, so the box shape is not the problem. The offset is mostly across the
   box (median 0.84 m) rather than along it (0.32 m).
 * They are mostly slow or parked objects: 1,477 of 1,940 under 3 m/s. By

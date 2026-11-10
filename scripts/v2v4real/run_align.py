@@ -89,6 +89,8 @@ def headline(results):
     p['aligned_fraction'] = fired / p['frames']
     p['align_relative_offset_m_median'] = float(np.median(offs)) if offs else None
     p['align_relative_offset_m_p95'] = float(np.percentile(offs, 95)) if offs else None
+    p['align_relative_offset_m_max'] = float(np.max(offs)) if offs else None
+    p['align_shifts_over_8p5m'] = int(sum(1 for x in offs if x > 8.5))
     return p
 
 
@@ -112,7 +114,8 @@ def fmt(name, h):
                h['nees_pos_3d_mean_both_labeled'] or float('nan'),
                '%.2f' % h['nees_pos_3d_mean_one_labeled'] if h['nees_pos_3d_mean_one_labeled'] is not None else 'n/a',
                h['nees_pos_3d_mean'], h['aligned_car_frames'], 100 * h['aligned_fraction'],
-               '%.2f' % h['align_relative_offset_m_median'] if h['align_relative_offset_m_median'] is not None else 'n/a'))
+               '%.2f' % h['align_relative_offset_m_median'] if h['align_relative_offset_m_median'] is not None else 'n/a')
+            + ' | >8.5 m %d' % h['align_shifts_over_8p5m'])
 
 
 def show(run):

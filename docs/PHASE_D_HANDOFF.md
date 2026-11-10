@@ -538,3 +538,12 @@ first, then by interval length (frames), longest first; ties by scenario name, t
 candidate per scenario, vehicle and label. **Report the top 5** with length, class, the agents that saw it, and
 a front-camera thumbnail at the start and end of each interval; **the pick and its rank are made by
 Galanafai with the team and recorded here.** Then the scene package (D4 list above) and a Rerun `.rrd`.
+
+### D5 prep: Blender (2026-11-10)
+
+Blender **5.2.4 LTS** (the latest LTS on the download page; tarball SHA-256 `2fd14c50...1d2d86` equals the
+published value) installed headless under `/workspace/tools/blender-5.2.4-linux-x64/`
+(`blender -b --factory-startup -P script.py`). No missing libraries. `scripts/phase_d/blender/check_cycles_gpu.py`
+renders the default scene with Cycles on the A40 (driver 595.91.07): **OptiX** is available and used (CUDA is listed
+too; the HIP backend is not present, as expected); 960 x 540, 64 samples, 4.3 s. The render
+script and scene assets will be supplied by Galanafai.

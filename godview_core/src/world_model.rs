@@ -643,6 +643,7 @@ impl WorldModel {
         t: Timestamp,
         trust: &TrustView,
         ego: &EgoContext,
+        bank: Option<&mut crate::alignment::OffsetBank>,
     ) -> WorldSnapshot {
         let (mut items, mut snap) = self.prepare_with(store, t, trust, Some(ego));
         let plan = if self.config.self_reports {
@@ -650,7 +651,42 @@ impl WorldModel {
         } else {
             SelfPlan::default_for(items.len())
         };
-        if self.config.align.enabled {
+        if let Some(bank) = bank {
+            // The per-pair filter replaces the per-frame estimate: shared objects of
+            // the unassigned reports, and the agent-agent links of the self plan.
+            let item_of = |i: &Prepared| crate::alignment::FilterItem {
+                source: i.key.0,
+                position: i.x.fixed_rows::<3>(0).into_owned(),
+                class_id: i.class_id,
+                size: i.object_box.map(|b| [b.size[0], b.size[1]]),
+            };
+            let free: Vec<&Prepared> = (0..items.len()).filter(|i| !plan.taken[*i]).map(|i| &items[i]).collect();
+            let ego_items: Vec<_> = free.iter().filter(|i| i.key.0 == ego.agent).map(|i| item_of(i)).collect();
+            let other_items: Vec<_> = free.iter().filter(|i| i.key.0 != ego.agent).map(|i| item_of(i)).collect();
+            let mut links = Vec::new();
+            for (s, js) in &plan.assigned {
+                let x_self = items[*s].x.fixed_rows::<3>(0).into_owned();
+                let owner = items[*s].key.0;
+                for j in js {
+                    let (src, x_j) = (items[*j].key.0, items[*j].x.fixed_rows::<3>(0).into_owned());
+                    if owner == ego.agent && src != ego.agent {
+                        links.push(crate::alignment::LinkMeasurement { other: src, z: x_self - x_j });
+                    } else if owner != ego.agent && src == ego.agent {
+                        links.push(crate::alignment::LinkMeasurement { other: owner, z: x_j - x_self });
+                    }
+                }
+            }
+            let offsets = bank.update(t, ego.agent, ego.pose.pose.translation, &ego_items, &other_items, &links);
+            for o in &offsets {
+                for it in items.iter_mut().filter(|i| i.key.0 == o.source) {
+                    let moved = it.x.fixed_rows::<3>(0) + o.translation;
+                    it.x.fixed_rows_mut::<3>(0).copy_from(&moved);
+                    let widened = it.p.fixed_view::<3, 3>(0, 0) + o.cov;
+                    it.p.fixed_view_mut::<3, 3>(0, 0).copy_from(&widened);
+                }
+            }
+            snap.alignment = offsets;
+        } else if self.config.align.enabled {
             let rest: Vec<Prepared> = (0..items.len())
                 .filter(|i| !plan.taken[*i])
                 .map(|i| items[i])

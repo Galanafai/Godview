@@ -134,6 +134,9 @@ pub struct NodeConfig {
     /// sensor-only covariance of each published report and changes nothing in
     /// the reports or in the shared world.
     pub ego_view: bool,
+    /// The per-pair offset filter used by the ego view when enabled (see
+    /// `alignment::OffsetBank`); instead of the world model's per-frame alignment.
+    pub offset_filter: crate::alignment::OffsetFilterConfig,
     /// Apply the consistency monitor's trust view in fusion.
     pub disable_trust: bool,
 }
@@ -223,6 +226,8 @@ pub struct PerceptionNode {
     /// Sensor-only covariance (no pose error) of each of this node's published
     /// reports, packed like the report's own, for the ego view.
     own_sensor_cov: BTreeMap<ReportKey, [f32; 21]>,
+    /// Translation estimates of the other agents for the ego view.
+    offset_bank: crate::alignment::OffsetBank,
     /// Tracks whose latest report was live (for `publish` suppression).
     live_sent: BTreeSet<LocalTrackId>,
     /// For each own track, the world-object ID it belonged to in this node's
@@ -253,6 +258,7 @@ impl PerceptionNode {
             self_state: None,
             self_born: None,
             own_sensor_cov: BTreeMap::new(),
+            offset_bank: crate::alignment::OffsetBank::new(config.offset_filter),
             live_sent: BTreeSet::new(),
             names: BTreeMap::new(),
             stats: NodeStats::default(),
@@ -325,6 +331,8 @@ impl PerceptionNode {
         self.tracker = LocalTracker::new(self.config.tracker);
         self.tombstones.clear();
         self.names.clear();
+        self.own_sensor_cov.clear();
+        self.offset_bank = crate::alignment::OffsetBank::new(self.config.offset_filter);
     }
 
     /// Builds, signs and returns a batch reporting every published track at `t_valid`.
@@ -695,10 +703,11 @@ impl PerceptionNode {
 
     /// This agent's own view of the world at `t` (see `WorldModel::snapshot_ego`),
     /// given its current pose; `None` unless `NodeConfig::ego_view` is on and the
-    /// pose is global. A pure function of the received reports, this node's own
-    /// published sensor covariances and the pose; it changes nothing in the node
-    /// (the consistency monitor is read, not fed).
-    pub fn ego_world(&self, t: Timestamp, pose: &PoseEstimate) -> Option<WorldSnapshot> {
+    /// pose is global. A function of the received reports, this node's own
+    /// published sensor covariances, the pose and, with `offset_filter` enabled, the
+    /// filter's state, which it advances; nothing else in the node changes (the
+    /// consistency monitor is read, not fed).
+    pub fn ego_world(&mut self, t: Timestamp, pose: &PoseEstimate) -> Option<WorldSnapshot> {
         if !self.config.ego_view || pose.status != LocalizationStatus::Global {
             return None;
         }
@@ -712,7 +721,8 @@ impl PerceptionNode {
             pose: &pose.ecef_from_odom,
             own_sensor_cov: &self.own_sensor_cov,
         };
-        Some(self.world.snapshot_ego(&self.store, t, &view, &ego))
+        let bank = self.config.offset_filter.enabled.then_some(&mut self.offset_bank);
+        Some(self.world.snapshot_ego(&self.store, t, &view, &ego, bank))
     }
 
     /// The shared world state at `t` with no trust adjustments.
@@ -1208,7 +1218,7 @@ mod tests {
         // And the view is unavailable without the flag.
         let mut cfg = NodeConfig::default();
         cfg.self_reports = true;
-        let (a, _b, pose_a, _) = two_agents(cfg, 1.5, Vector3::zeros(), Vector3::new(6.05, 0.02, 0.0));
+        let (mut a, _b, pose_a, _) = two_agents(cfg, 1.5, Vector3::zeros(), Vector3::new(6.05, 0.02, 0.0));
         assert!(a.node.ego_world(Timestamp::from_millis(500), &pose_a).is_none());
     }
 

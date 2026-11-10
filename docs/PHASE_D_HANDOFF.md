@@ -454,3 +454,24 @@ ego view and on the shared world**.
   minus 0.5 point, for vehicle views, with self reports off and on (2 comparisons).
 
 **If any expectation fails, I stop and report. I stop at the end of D2 either way.**
+
+
+### D2 closed; decisions for what follows (2026-11-10)
+
+D2 is recorded in `docs/results/phase_d_d2_val.md`: E1 to E3 failed because the labels-plus-noise
+input has no pose error (the filter's noise, about 0.2 m median, was a pure cost; anchoring moved the
+vehicle's own objects, contradicting the ego view; self objects absorbed neighbouring vehicles).
+**No pose error is injected, and alignment and anchoring stay off for V2X-Real from here on.**
+
+**Bounded fix, stated before it is run:** with `WorldModelConfig::self_single_per_source`, a self
+object absorbs at most one report per source per frame: the one closest to its footprint, and only if no
+other confirmed (published) track of that source lies closer to the footprint (of any class). Unit test:
+four agents where only a unit sees the neighbour. **Acceptance on V2X-Real val, labels plus noise, self
+reports on, alignment off:** agent-involving wrong merges at most 20 (the self-off level is 10), AP
+unchanged (within 0.5 point). If not met, I report and D3 runs with self reports off.
+
+**D3 plan (variants fixed here):** a published or trained V2X-Real no-fusion detector (gated), error
+model on train and val, committed, then one test run; variants: self reports off or on (on only if the
+fix passes), ego views and shared world, alignment off; reported per class (vehicle, pedestrian, truck) as
+well as pooled. After D3, Phase D has two steps left: D4 (choose the demo moment by rule and export) and D5
+(render); no new mechanisms before the demo unless a gate fails.

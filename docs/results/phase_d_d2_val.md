@@ -87,3 +87,22 @@ Without `2023-03-17-16-03-02_11_1` the picture is the same (vehicle views 28.8 /
 * Not shown: whether the failures are tunable (the filter parameters are V2V4Real val's,
   unchanged; the self gate is 2 sigma). No setting was changed after seeing these results.
 * The three expectations failed as committed. Per the rule, I stop here, at the end of D2.
+
+
+## Record and decisions (2026-11-10, after review)
+
+**D2 as it stands.** E1 to E3 failed because the input had no pose error: the labels are in the
+exact shared frame, so every correction the filter or the anchor made was noise. The filter's cost
+with no offset to correct is its translation noise, about 0.2 m at the median (0.23 m for
+vehicle views, 0.17 m for unit views, 90th percentile up to 0.9 m), which costs AP where objects are
+small. **Anchoring moved the vehicle's own objects** (its own frame is corrected into the unit's
+by the estimated offset), which contradicts the ego view's principle that the agent's own objects
+are placed exactly; that is why it is 10 AP points worse than ego-fixed filtering for vehicle views.
+The self-report absorption (474 agent-involving wrong merges against 10) is a separate defect, with
+a bounded fix in the next section of `docs/PHASE_D_HANDOFF.md`.
+
+**Decisions.** No injected pose error: V2X-Real's map-frame poses agree to about 0.3 m (the labels'
+cross-agent disagreement), so there is little offset to correct, and adding synthetic error would turn
+the data back into a simulation. **Alignment and anchoring stay off for V2X-Real from here on** (the
+code and the V2V4Real results remain as they are). Wrong-merge accounting and AP for D3 use the
+same scoring rules, per class as well as pooled.

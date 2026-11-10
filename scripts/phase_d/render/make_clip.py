@@ -15,6 +15,7 @@ Real time is never stretched: the footage runs at its recorded speed, and the
 """
 
 import argparse
+import json
 import shutil
 import subprocess
 import tempfile
@@ -161,6 +162,8 @@ def split(left, right, text, fonts, size):
 
 def caption(img, text, fonts, scale):
     """Large caption, lower third, on a soft dark band. Text in *stars* is cyan."""
+    if not text:
+        return img.convert("RGB")
     w, h = img.size
     f = fonts.get("semi", int(52 * scale))
     band = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -214,8 +217,87 @@ def end_card(size, fonts, scale):
     fine = fonts.get("reg", int(21 * scale))
     for k, line in enumerate(["Real camera footage and lidar from the V2X-Real dataset (UCLA).",
                               "Detections from dataset annotations. 3D view: time paused."]):
-        centred(line, fine, h * 0.84 + k * fine.size * 1.4, (130, 145, 160))
+        centred(line, fine, h * 0.88 + k * fine.size * 1.4, (130, 145, 160))
     return img
+
+
+def card_caption(card, text, fonts):
+    """Voice caption on the end card, between the link and the fine print."""
+    if not text:
+        return card
+    img = card.copy()
+    w, h = img.size
+    f = fonts.get("semi", int(w * (0.026 if w / h > 1.5 else 0.045)))
+    draw_rich(ImageDraw.Draw(img), text, f, w / 2, h * 0.68, w * 0.85)
+    return img
+
+
+GLUE = {"a", "an", "the", "and", "or", "but", "of", "to", "at", "in", "on", "it", "its", "it's",
+        "is", "are", "was", "they", "that", "with", "for", "can't", "can", "what", "who", "this",
+        "my", "our", "your", "their", "be", "by", "from", "as", "so", "if"}
+
+
+def phrases(words, max_words=7):
+    """Caption phrases: break after punctuation, or near max_words but never after a small word
+    and never just before the last one or two words of a sentence."""
+    out, cur = [], []
+    for i, w in enumerate(words):
+        cur.append(w)
+        word = w["word"].lower().strip(".,?!;:\"'")
+        ahead = [x["word"] for x in words[i + 1:i + 3]]
+        ends_soon = any(x[-1:] in ".,?!;:" for x in ahead) or len(words) - i - 1 <= 2
+        if w["word"][-1:] in ".,?!;:":
+            brk = True
+        elif len(cur) >= max_words + 3:
+            brk = True
+        else:
+            brk = len(cur) >= max_words and word not in GLUE and not ends_soon
+        if brk:
+            out.append(cur)
+            cur = []
+    if cur:
+        out.append(cur)
+    return out
+
+
+def synth_bed(path, total, cuts, ping_at, voice_spans, sr=48000):
+    """Original sound bed: low drone, soft whooshes at cuts, one ping. Ducked under the voice."""
+    import wave
+    import numpy as np
+    n = int(total * sr)
+    t = np.arange(n) / sr
+    rng = np.random.default_rng(7)
+    drone = sum(a * np.sin(2 * np.pi * f * t + ph) for f, a, ph in
+                [(55.0, 1.0, 0.0), (82.4, 0.6, 1.1), (110.0, 0.35, 2.3), (164.8, 0.15, 0.4)])
+    drone *= 0.75 + 0.25 * np.sin(2 * np.pi * 0.07 * t)
+    noise = np.convolve(rng.standard_normal(n), np.ones(400) / 400, mode="same") * 6
+    bed = 0.020 * drone / 2.1 + 0.004 * noise
+    fade = np.clip(t / 1.5, 0, 1) * np.clip((total - t) / 2.0, 0, 1)
+    bed *= fade
+    for c in cuts:  # whoosh: band-limited noise swell
+        i0, i1 = int((c - 0.35) * sr), int((c + 0.15) * sr)
+        if i0 < 0 or i1 > n:
+            continue
+        seg = np.convolve(rng.standard_normal(i1 - i0), np.ones(25) / 25, mode="same")
+        env = np.sin(np.linspace(0, np.pi, i1 - i0)) ** 2
+        bed[i0:i1] += 0.05 * seg * env
+    if ping_at is not None and 0 < ping_at < total - 1:
+        i0 = int(ping_at * sr)
+        tt = np.arange(int(1.2 * sr)) / sr
+        ping = (np.sin(2 * np.pi * 1318.5 * tt) + 0.5 * np.sin(2 * np.pi * 1975.5 * tt)) * np.exp(-tt * 4.5)
+        bed[i0:i0 + len(tt)] += 0.07 * ping[:max(0, min(len(tt), n - i0))]
+    duck = np.ones(n)
+    for s0, s1 in voice_spans:
+        a0, a1 = int(max(0, s0 - 0.2) * sr), int(min(total, s1 + 0.3) * sr)
+        duck[a0:a1] = 0.45
+    duck = np.convolve(duck, np.ones(4800) / 4800, mode="same")
+    bed *= duck
+    pcm = (np.clip(bed, -1, 1) * 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(pcm.tobytes())
 
 
 def main():
@@ -232,6 +314,9 @@ def main():
     p.add_argument("--font-dir", default="")
     p.add_argument("--end-seconds", type=float, default=3.5)
     p.add_argument("--teaser", type=float, default=1.6)
+    p.add_argument("--voice", default="", help="voice.json from voice.py; captions become the words")
+    p.add_argument("--audio", default="", help="clean.wav from voice.py")
+    p.add_argument("--sound", action="store_true", help="add the sound bed (also without a voice)")
     a = p.parse_args()
     size = tuple(int(v) for v in a.size.split("x"))
     scale = size[0] / 1920.0
@@ -240,83 +325,173 @@ def main():
     dash = {int(f.stem): f for f in Path(a.dashcam).glob("*.jpeg")}
     over = {int(f.stem.split("_")[-1]): f for f in Path(a.overlay).glob("overlay_*.jpg")}
     orbit = sorted(Path(a.orbit).glob("*.png"))
+    live = sorted(Path(a.live).glob("*.png")) if a.live else []
     if not dash or not over or not orbit:
         raise SystemExit("missing input frames")
-
+    first_data = min(dash)
+    last_data = max(dash)
     paused = "TIME PAUSED  ·  3D VIEW OF WHAT GODVIEW KNOWS"
-
-    # Teaser: open on the payoff, then tell the story
     hook = Image.open(over[nearest(over, a.freeze + 5)])
-    t_frames = [compose(hook, "This car knows who is *behind that truck*.", fonts, size)
-                for _ in range(int(a.teaser * FPS))]
-
-    # A: real footage up to the paused moment
-    n_a = (a.freeze - a.start) * 3
-    a_frames = []
-    for i in range(n_a):
-        fr = a.start + i // 3
-        img = Image.open(dash[nearest(dash, fr)])
-        text = ("Its own cameras and lidar can't see past it." if i < n_a * 0.5
-                else "But it isn't the only sensor here.")
-        a_frames.append(compose(img, text, fonts, size))
-
-    # B: paused-time orbit
-    n_b = len(orbit)
-    b_frames = []
-    for i, f in enumerate(orbit):
-        text = ("Roadside units and another car share what they see." if i < n_b * 0.42
-                else "They see *people behind the truck*.")
-        b_frames.append(compose(Image.open(f), text, fonts, size, label=paused, crop=False))
-
-    # C: the same moment side by side, from the paused frame on
-    n_c = (a.end - a.freeze) * 3
-    c_frames = []
-    for i in range(n_c):
-        fr = a.freeze + i // 3
-        left = Image.open(dash[nearest(dash, fr)])
-        right = Image.open(over[nearest(over, fr)])
-        text = ("Same moment: the car alone, and *with GodView*." if i < n_c * 0.45
-                else "It knows they're there *before they step out*.")
-        c_frames.append(split(left, right, text, fonts, size))
-
-    # L: real-time 3D from above, if rendered
-    l_frames = []
-    live = sorted(Path(a.live).glob("*.png")) if a.live else []
-    for i, f in enumerate(live):
-        text = ("Same scene from above, in real time." if i < len(live) * 0.45
-                else "Every sensor feeds *one shared map*.")
-        l_frames.append(compose(Image.open(f), text, fonts, size,
-                                label="REAL TIME  ·  3D VIEW", crop=False))
-
-    # D: end card
     card = end_card(size, fonts, scale)
-    d_frames = [card] * int(a.end_seconds * FPS)
+    cache = {}
 
-    def join(seq, nxt, xf=0):
-        """Hard cut, or crossfade the last xf frames of seq into the first of nxt."""
-        for k in range(xf):
-            t = (k + 1) / (xf + 1)
-            seq[-xf + k] = Image.blend(seq[-xf + k], nxt[k], t)
-        return seq + nxt[xf:]
+    def load(path):
+        if path not in cache:
+            if len(cache) > 64:
+                cache.clear()
+            cache[path] = Image.open(path).convert("RGB")
+        return cache[path]
 
-    frames = join(t_frames, a_frames)
-    frames = join(frames, b_frames)
-    frames = join(frames, c_frames)
-    if l_frames:
-        frames = join(frames, l_frames)
-    frames = join(frames, d_frames, XFADE)
+    # Each section: (name, default length s, min s, max s, frame function(i, n) -> image without caption)
+    def f_hook(i, n):
+        return hook
+
+    def f_dash(i, n):
+        fr = max(first_data, a.freeze - -(-(n - i) // 3))
+        return load(dash[nearest(dash, fr)])
+
+    def f_orbit(i, n):
+        x = i * (len(orbit) - 1) / max(n - 1, 1)
+        k = int(x)
+        if k + 1 >= len(orbit) or x == k:
+            return load(orbit[min(k, len(orbit) - 1)])
+        return Image.blend(load(orbit[k]), load(orbit[k + 1]), x - k)
+
+    def f_split(i, n):
+        fr = min(last_data, a.freeze + i // 3)
+        return (load(dash[nearest(dash, fr)]), load(over[nearest(over, fr)]))
+
+    def f_live(i, n):
+        return load(live[min(i, len(live) - 1)])
+
+    def f_card(i, n):
+        return card
+
+    max_a = (a.freeze - first_data) / 10.0
+    max_c = (last_data - a.freeze) / 10.0
+    sections = [("hook", a.teaser, 1.2, 6.5, f_hook),
+                ("dash", (a.freeze - a.start) / 10.0, 1.5, max_a, f_dash),
+                ("orbit", len(orbit) / FPS, 3.5, 10.0, f_orbit),
+                ("split", (a.end - a.freeze) / 10.0, 3.0, max_c, f_split)]
+    if live:
+        sections.append(("live", len(live) / FPS, 2.5, len(live) / FPS, f_live))
+    sections.append(("card", a.end_seconds, 3.0, 9.0, f_card))
+
+    # Voice: section lengths follow the beats, captions are the spoken words
+    beats = json.loads(Path(a.voice).read_text())["beats"] if a.voice else None
+    lead, tail = 0.15, 0.45
+    if beats is not None and len(beats) != len(sections):
+        raise SystemExit(f"{len(beats)} beats for {len(sections)} sections; record one beat per section")
+    lengths, placed = [], []  # placed: (beat index, clip time where that beat's audio starts)
+    t_sec, t_free = 0.0, 0.0
+    for k, (name, dflt, lo, hi, fn) in enumerate(sections):
+        if beats is None:
+            lengths.append(min(max(dflt, lo), hi))
+            continue
+        b = beats[k]
+        t0 = max(t_sec + lead, t_free)
+        placed.append((k, t0))
+        t_free = t0 + (b["end"] - b["start"]) + 0.25
+        want = t_free - 0.25 + tail - t_sec
+        lengths.append(min(max(want, lo), hi))
+        t_sec += lengths[-1]
+    if beats is not None:
+        overflow = t_free + 0.6 - sum(lengths)
+        if overflow > 0:
+            lengths[-1] += overflow  # the end card holds until the voice is done
+    total = sum(lengths)
+
+    # caption timeline: (start, end, text)
+    caps = []
+    if beats is not None:
+        for k, t0 in placed:
+            b = beats[k]
+            ph = phrases(b["words"])
+            for j, words in enumerate(ph):
+                s0 = t0 + words[0]["start"] - b["start"] - 0.08
+                s1 = (t0 + ph[j + 1][0]["start"] - b["start"] - 0.08) if j + 1 < len(ph) \
+                    else t0 + b["end"] - b["start"] + 0.5
+                caps.append((s0, s1, " ".join(w["word"] for w in words)))
+    defaults = {"hook": ["This car knows who is *behind that truck*."],
+                "dash": ["Its own cameras and lidar can't see past it.",
+                         "But it isn't the only sensor here."],
+                "orbit": ["Roadside units and another car share what they see.",
+                          "They see *people behind the truck*."],
+                "split": ["Same moment: the car alone, and *with GodView*.",
+                          "It knows they're there *before they step out*."],
+                "live": ["Same scene from above, in real time.", "Every sensor feeds *one shared map*."],
+                "card": [""]}
+
+    def text_at(t, k, i, n):
+        if beats is None:
+            opts = defaults[sections[k][0]]
+            return opts[min(len(opts) - 1, int(len(opts) * i / max(n, 1)))]
+        for s0, s1, txt in caps:
+            if s0 <= t < s1:
+                return txt
+        return ""
 
     tmp = Path(tempfile.mkdtemp(prefix="clip_"))
+    n_frames = 0
+    k_card = sum(int(round(l * FPS)) for l in lengths[:-1])
     try:
-        for i, img in enumerate(frames):
-            img.save(tmp / f"{i:05d}.jpg", quality=94)
+        for k, (name, dflt, lo, hi, fn) in enumerate(sections):
+            n = int(round(lengths[k] * FPS))
+            for i in range(n):
+                t = n_frames / FPS
+                txt = text_at(t, k, i, n)
+                src = fn(i, n)
+                if name == "split":
+                    img = split(src[0], src[1], txt, fonts, size)
+                elif name == "card":
+                    img = card_caption(src, txt, fonts)
+                else:
+                    label = paused if name == "orbit" else (
+                        "REAL TIME  ·  3D VIEW" if name == "live" else None)
+                    img = compose(src, txt, fonts, size, label=label, crop=name in ("hook", "dash"))
+                back = k_card - n_frames  # fade the last XFADE frames into the end card
+                if 0 < back <= XFADE:
+                    img = Image.blend(img, card, (XFADE + 1 - back) / (XFADE + 1))
+                img.save(tmp / f"{n_frames:05d}.jpg", quality=94)
+                n_frames += 1
+        video_only = tmp / "video.mp4"
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(FPS),
                         "-i", str(tmp / "%05d.jpg"), "-c:v", "libx264", "-preset", "veryfast",
-                        "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", a.out],
-                       check=True)
+                        "-crf", "18", "-pix_fmt", "yuv420p", str(video_only)], check=True)
+        dur = n_frames / FPS
+        if beats is None and not a.sound:
+            shutil.move(str(video_only), a.out)
+        else:
+            cuts = [sum(lengths[:k]) for k in range(1, len(lengths))]
+            orbit_k = [s[0] for s in sections].index("orbit")
+            ping = sum(lengths[:orbit_k]) + 0.46 * lengths[orbit_k]
+            spans = [(t0, t0 + beats[k]["end"] - beats[k]["start"]) for k, t0 in placed] if beats else []
+            bed = tmp / "bed.wav"
+            synth_bed(bed, dur, cuts, ping, spans)
+            inputs = ["-i", str(video_only), "-i", str(bed)]
+            chains, labels = [], ["[1:a]"]
+            if beats is not None:
+                inputs += ["-i", a.audio]
+                for j, (k, t0) in enumerate(placed):
+                    b = beats[k]
+                    s0, s1 = max(0.0, b["start"] - 0.06), b["end"] + 0.3
+                    ms = int(t0 * 1000) - int((b["start"] - s0) * 1000)
+                    chains.append(f"[2:a]atrim=start={s0:.3f}:end={s1:.3f},asetpts=PTS-STARTPTS,"
+                                  f"afade=t=in:d=0.03,afade=t=out:st={s1 - s0 - 0.08:.3f}:d=0.08,"
+                                  f"adelay={max(ms, 0)}[v{j}]")
+                    labels.append(f"[v{j}]")
+            mix = "".join(labels) + (f"amix=inputs={len(labels)}:normalize=0:duration=longest,"
+                                     f"apad,atrim=0:{dur:.3f},loudnorm=I=-14:TP=-1.0:LRA=9[aout]")
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex",
+                            ";".join(chains + [mix]), "-map", "0:v", "-map", "[aout]",
+                            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                            "-movflags", "+faststart", a.out], check=True)
     finally:
         shutil.rmtree(tmp)
-    print(f"wrote {a.out}: {len(frames)} frames, {len(frames) / FPS:.1f} s")
+    print(f"wrote {a.out}: {n_frames} frames, {n_frames / FPS:.1f} s")
+    if beats is not None:
+        for (k, t0), (name, *_r) in zip(placed, sections):
+            print(f"  {name:6s} {lengths[k]:5.2f} s  voice at {t0:5.2f} s: {beats[k]['text']}")
 
 
 if __name__ == "__main__":

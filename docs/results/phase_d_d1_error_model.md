@@ -44,8 +44,11 @@ across the labeled box:
   `sigma(r) = sqrt(a^2 + (b r)^2)`: val a = 0.200 m, b = 0.0036; train1
   a = 0.125 m, b = 0.0037. At 50 m: 0.27 m (val), 0.22 m (train1).
 * The error is about twice as large along the box as across it (val per-scan
-  fits: 0.27 against 0.09 m at short range). GodView's input takes one
-  isotropic `sigma_m`, so this anisotropy cannot be declared.
+  fits: 0.27 against 0.09 m at short range). GodView's input took one
+  isotropic `sigma_m` when this was written; step 3 added along / across /
+  vertical sigmas, fitted separately on val: along a = 0.267 m,
+  b = 0.00373; across a = 0.092 m, b = 0.00347; vertical a = 0.067 m,
+  b = 0.00234.
 * Persistent part per object (val): along 0.33 m, across 0.17 m standard
   deviation; as a fraction of the half-length 0.087 and of the half-width
   0.136 (train1: 0.062 and 0.103). The simulator's `large_objects` uses 0.25,
@@ -109,7 +112,9 @@ across the labeled box:
 
 ## Proposed replay settings (from val)
 
-To be committed with the evaluation plan in step 3, before any test run:
+Superseded by the settings fixed in `docs/results/phase_d_d1_plan.md`
+(anisotropic covariance, a declared vertical error, `box_size_sys_m` chosen
+on val by rule). As proposed at the end of step 2:
 
 | GodView input | value | from |
 |---|---|---|

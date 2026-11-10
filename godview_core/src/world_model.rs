@@ -307,6 +307,11 @@ pub struct EgoContext<'a> {
     pub pose: &'a PoseWithCov,
     /// Packed sensor-only covariance of its own reports, by report key.
     pub own_sensor_cov: &'a BTreeMap<ReportKey, [f32; 21]>,
+    /// Agents whose frame is held fixed (for example roadside units with a surveyed
+    /// pose). With an anchor that has an estimate, every offset is taken relative to
+    /// it, so the agent's own frame is corrected into the anchor's; with none the agent's
+    /// own translation is held at zero.
+    pub anchors: &'a [AgentId],
 }
 
 impl EgoContext<'_> {
@@ -349,15 +354,24 @@ impl SelfPlan {
 /// translation is taken relative to the agent's, its covariance widened by the
 /// agent's. If the agent is in no group of sources connected by shared objects, no
 /// offset is defined relative to it and none is kept.
-fn fix_gauge(offsets: &mut Vec<SourceOffset>, agent: AgentId) {
-    let Some(f) = offsets.iter().find(|o| o.source == agent).copied() else {
+fn fix_gauge(offsets: &mut Vec<SourceOffset>, agent: AgentId, anchors: &[AgentId]) {
+    let Some(own) = offsets.iter().find(|o| o.source == agent).copied() else {
         offsets.clear();
         return;
     };
+    // An anchor in the agent's group with an estimate becomes the reference (the one
+    // with the smallest covariance); otherwise the agent itself is.
+    let anchor = anchors
+        .iter()
+        .filter(|a| **a != agent)
+        .filter_map(|a| offsets.iter().find(|o| o.source == *a && o.group == own.group))
+        .min_by(|a, b| a.cov.trace().total_cmp(&b.cov.trace()))
+        .copied();
+    let f = anchor.unwrap_or(own);
     // Only the agent's own connected group is defined relative to it.
     offsets.retain(|o| o.group == f.group);
     for o in offsets.iter_mut() {
-        if o.source == agent {
+        if o.source == f.source {
             o.translation = Vector3::zeros();
             o.cov = Matrix3::zeros();
         } else {
@@ -676,7 +690,8 @@ impl WorldModel {
                     }
                 }
             }
-            let offsets = bank.update(t, ego.agent, ego.pose.pose.translation, &ego_items, &other_items, &links);
+            let mut offsets = bank.update(t, ego.agent, ego.pose.pose.translation, &ego_items, &other_items, &links);
+            fix_gauge(&mut offsets, ego.agent, ego.anchors);
             for o in &offsets {
                 for it in items.iter_mut().filter(|i| i.key.0 == o.source) {
                     let moved = it.x.fixed_rows::<3>(0) + o.translation;
@@ -701,7 +716,7 @@ impl WorldModel {
                 })
                 .collect();
             let mut offsets = crate::alignment::estimate(&view, &self.config.align);
-            fix_gauge(&mut offsets, ego.agent);
+            fix_gauge(&mut offsets, ego.agent, ego.anchors);
             // Every report of a moved source moves, self and assigned reports included.
             for o in &offsets {
                 for it in items.iter_mut().filter(|i| i.key.0 == o.source) {
@@ -1220,6 +1235,38 @@ mod tests {
         let alone = model.snapshot(&store(&[selfr]), t, &TrustView::default());
         let at = site().from_ecef(&alone.objects[0].position());
         assert!(at.norm() < 1e-3, "{at:?}");
+    }
+
+    #[test]
+    fn the_gauge_holds_the_ego_or_an_anchor_at_zero() {
+        let id = |b: u8| AgentId([b; 32]);
+        let off = |s: u8, x: f64, tr: f64| SourceOffset {
+            source: id(s),
+            translation: Vector3::new(x, 0.0, 0.0),
+            cov: Matrix3::identity() * tr,
+            shared_objects: 3,
+            group: 0,
+        };
+        // Ego 1 at 0.5 (an arbitrary gauge), vehicle 2 at 1.5, unit 3 at 2.5.
+        let base = vec![off(1, 0.5, 0.1), off(2, 1.5, 0.1), off(3, 2.5, 0.05)];
+        // Ego-fixed: the ego is zero, the others relative to it.
+        let mut e = base.clone();
+        fix_gauge(&mut e, id(1), &[]);
+        assert_eq!(e[0].translation.x, 0.0);
+        assert!((e[1].translation.x - 1.0).abs() < 1e-12 && (e[2].translation.x - 2.0).abs() < 1e-12);
+        // Anchored on unit 3: the unit is zero and the ego's own frame moves by -2.
+        let mut a = base.clone();
+        fix_gauge(&mut a, id(1), &[id(3)]);
+        assert_eq!(a[2].translation.x, 0.0);
+        assert!((a[0].translation.x + 2.0).abs() < 1e-12 && (a[1].translation.x + 1.0).abs() < 1e-12);
+        assert!(a[0].cov[(0, 0)] > 0.0, "the ego inherits the anchor's uncertainty");
+        // An anchor that is the ego itself, or absent, leaves the ego-fixed gauge.
+        let mut b = base.clone();
+        fix_gauge(&mut b, id(3), &[id(3)]);
+        assert_eq!(b[2].translation.x, 0.0);
+        let mut c = base;
+        fix_gauge(&mut c, id(1), &[id(9)]);
+        assert_eq!(c[0].translation.x, 0.0);
     }
 
     #[test]

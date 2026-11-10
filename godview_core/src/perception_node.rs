@@ -228,6 +228,8 @@ pub struct PerceptionNode {
     own_sensor_cov: BTreeMap<ReportKey, [f32; 21]>,
     /// Translation estimates of the other agents for the ego view.
     offset_bank: crate::alignment::OffsetBank,
+    /// Agents whose frame is held fixed in the ego view's alignment.
+    anchors: Vec<AgentId>,
     /// Tracks whose latest report was live (for `publish` suppression).
     live_sent: BTreeSet<LocalTrackId>,
     /// For each own track, the world-object ID it belonged to in this node's
@@ -259,6 +261,7 @@ impl PerceptionNode {
             self_born: None,
             own_sensor_cov: BTreeMap::new(),
             offset_bank: crate::alignment::OffsetBank::new(config.offset_filter),
+            anchors: Vec::new(),
             live_sent: BTreeSet::new(),
             names: BTreeMap::new(),
             stats: NodeStats::default(),
@@ -298,6 +301,12 @@ impl PerceptionNode {
     /// Diagnostic counters.
     pub fn stats(&self) -> &NodeStats {
         &self.stats
+    }
+
+    /// Sets the agents whose frame the ego view's alignment holds fixed (anchors, for
+    /// example roadside units): offsets are then taken relative to them.
+    pub fn set_anchors(&mut self, anchors: Vec<AgentId>) {
+        self.anchors = anchors;
     }
 
     /// Sets the agent's own state for the self report published with the next
@@ -720,6 +729,7 @@ impl PerceptionNode {
             agent: self.id,
             pose: &pose.ecef_from_odom,
             own_sensor_cov: &self.own_sensor_cov,
+            anchors: &self.anchors,
         };
         let bank = self.config.offset_filter.enabled.then_some(&mut self.offset_bank);
         Some(self.world.snapshot_ego(&self.store, t, &view, &ego, bank))

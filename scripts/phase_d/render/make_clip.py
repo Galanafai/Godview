@@ -97,7 +97,7 @@ def draw_rich(d, text, f, cx, y, maxw):
     return len(lines) * lh
 
 
-def compose(img, text, fonts, size, label=None, crop_centre=0.42):
+def compose(img, text, fonts, size, label=None, crop_centre=0.42, crop=True):
     """16:9: caption over the picture. 4:5: picture in the middle, text above and below."""
     w, h = size
     if w / h > 1.5:
@@ -107,11 +107,12 @@ def compose(img, text, fonts, size, label=None, crop_centre=0.42):
     canvas = Image.new("RGB", size, (5, 8, 15))
     src = img.convert("RGB")
     sw, sh = src.size
-    cw = int(sh * 4 / 3)
-    cx = int(sw * crop_centre)
-    x0 = max(0, min(sw - cw, cx - cw // 2))
-    src = src.crop((x0, 0, x0 + cw, sh))
-    ph = int(w * 3 / 4)
+    if crop:
+        cw = int(sh * 4 / 3)
+        cx = int(sw * crop_centre)
+        x0 = max(0, min(sw - cw, cx - cw // 2))
+        src = src.crop((x0, 0, x0 + cw, sh))
+    ph = int(w * src.size[1] / src.size[0])
     top = int(h * 0.10)
     canvas.paste(src.resize((w, ph), Image.LANCZOS), (0, top))
     d = ImageDraw.Draw(canvas)
@@ -133,19 +134,15 @@ def split(left, right, text, fonts, size):
     names = [("WHAT THE CAR SEES", (235, 240, 245)), ("WITH GODVIEW", CYAN)]
     if w / h > 1.5:
         pw = w // 2 - 12
-        ph = int(pw * 3 / 4)
-        y = int(h * 0.12)
+        ph = int(pw * 9 / 16)
+        y = int(h * 0.22)
         boxes = [(8, y), (w // 2 + 4, y)]
         for (x, yy), im, (name, col) in zip(boxes, (left, right), names):
-            src = im.convert("RGB")
-            sw, sh = src.size
-            cw = int(sh * 4 / 3)
-            x0 = max(0, min(sw - cw, int(sw * 0.42) - cw // 2))
-            canvas.paste(src.crop((x0, 0, x0 + cw, sh)).resize((pw, ph), Image.LANCZOS), (x, yy))
+            canvas.paste(fit(im, (pw, ph)), (x, yy))
             tw = d.textbbox((0, 0), name, font=lab)[2]
             d.text((x + (pw - tw) / 2, yy - lab.size - 18), name, font=lab, fill=col)
         big = fonts.get("bold", int(w * 0.028))
-        draw_rich(d, text, big, w / 2, y + ph + int(h * 0.05), w * 0.9)
+        draw_rich(d, text, big, w / 2, y + ph + int(h * 0.08), w * 0.9)
     else:
         pw, ph = w, int(w * 0.44)
         ys = [int(h * 0.045), int(h * 0.045) + ph + int(h * 0.07)]
@@ -269,7 +266,7 @@ def main():
     for i, f in enumerate(orbit):
         text = ("Roadside units and another car share what they see." if i < n_b * 0.42
                 else "They see *people behind the truck*.")
-        b_frames.append(compose(Image.open(f), text, fonts, size, label=paused, crop_centre=0.5))
+        b_frames.append(compose(Image.open(f), text, fonts, size, label=paused, crop=False))
 
     # C: the same moment side by side, from the paused frame on
     n_c = (a.end - a.freeze) * 3
@@ -289,25 +286,25 @@ def main():
         text = ("Same scene from above, in real time." if i < len(live) * 0.45
                 else "Every sensor feeds *one shared map*.")
         l_frames.append(compose(Image.open(f), text, fonts, size,
-                                label="REAL TIME  ·  3D VIEW", crop_centre=0.5))
+                                label="REAL TIME  ·  3D VIEW", crop=False))
 
     # D: end card
     card = end_card(size, fonts, scale)
     d_frames = [card] * int(a.end_seconds * FPS)
 
-    def join(seq, nxt):
-        """Crossfade the last XFADE frames of seq into the first of nxt."""
-        for k in range(XFADE):
-            t = (k + 1) / (XFADE + 1)
-            seq[-XFADE + k] = Image.blend(seq[-XFADE + k], nxt[k], t)
-        return seq + nxt[XFADE:]
+    def join(seq, nxt, xf=0):
+        """Hard cut, or crossfade the last xf frames of seq into the first of nxt."""
+        for k in range(xf):
+            t = (k + 1) / (xf + 1)
+            seq[-xf + k] = Image.blend(seq[-xf + k], nxt[k], t)
+        return seq + nxt[xf:]
 
     frames = join(t_frames, a_frames)
     frames = join(frames, b_frames)
     frames = join(frames, c_frames)
     if l_frames:
         frames = join(frames, l_frames)
-    frames = join(frames, d_frames)
+    frames = join(frames, d_frames, XFADE)
 
     tmp = Path(tempfile.mkdtemp(prefix="clip_"))
     try:

@@ -349,6 +349,26 @@ def make_label(name, text, color, cam, font_path, size=0.85):
     return txt, [txt, plate]
 
 
+def make_leader(name, color):
+    """Thin vertical line from an object up to its label (unit length, scaled in z)."""
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.035, depth=1.0, vertices=8)
+    o = bpy.context.active_object
+    o.name = name
+    me = o.data
+    for v in me.vertices:
+        v.co.z += 0.5  # base at the origin, top at z = 1
+    o.data.materials.append(mat_emission(name + "_m", color, 3.0))
+    o.visible_diffuse = o.visible_glossy = o.visible_transmission = o.visible_shadow = False
+    return o
+
+
+def key_leader(leader, x, y, z0, z1, frame):
+    leader.location = (x, y, z0)
+    leader.scale = (1, 1, max(z1 - z0, 0.05))
+    leader.keyframe_insert("location", frame=frame)
+    leader.keyframe_insert("scale", frame=frame)
+
+
 def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, font_path):
     """Plain-language callouts: this car, the truck, the roadside sensors, the hidden people."""
     WHITE = (1.0, 1.0, 1.0)
@@ -356,10 +376,12 @@ def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, 
     # this car
     ego_states = {s["frame"]: s for s in sc.agent_tracks[sc.ego_index]["states"]}
     lab, parts = make_label("lab_ego", "THIS CAR", AMBER, cam, font_path)
+    led = make_leader("lead_ego", AMBER)
     for fr in frames_all:
         e = ego_states[fr]
-        lab.location = (e["centre"][0], e["centre"][1], gz + 4.0)
+        lab.location = (e["centre"][0], e["centre"][1], gz + 3.3)
         lab.keyframe_insert("location", frame=bf(fr))
+        key_leader(led, e["centre"][0], e["centre"][1], gz + 1.6, gz + 2.9, bf(fr))
     # the truck blocking the view: the closest truck to this car that it sees itself
     e0 = ego_states[f_first]["centre"]
     best = None
@@ -374,16 +396,19 @@ def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, 
     if best:
         tstates = {s["frame"]: s for s in sc.tracks[best[1]]["states"]}
         lab, parts = make_label("lab_truck", "TRUCK\nBLOCKS THE VIEW", WHITE, cam, font_path, 0.6)
+        led = make_leader("lead_truck", WHITE)
         for fr in frames_all:
             s = tstates.get(fr)
             if s:
-                lab.location = (s["pos"][0], s["pos"][1], s["pos"][2] + s["size"][2] / 2 + 1.4)
+                top = gz + s["size"][2]
+                lab.location = (s["pos"][0], s["pos"][1], top + 2.4)
                 lab.keyframe_insert("location", frame=bf(fr))
+                key_leader(led, s["pos"][0], s["pos"][1], top, top + 1.75, bf(fr))
     # roadside sensors and the other car
     for idx, at in sc.agent_tracks.items():
-        if idx == sc.ego_index:
+        if idx == sc.ego_index or at["kind"] != "rsu":
             continue
-        text = "ROADSIDE SENSOR" if at["kind"] == "rsu" else "OTHER CAR"
+        text = "ROADSIDE SENSOR"
         lab, parts = make_label(f"lab_agent{idx}", text, VIOLET, cam, font_path, 0.75)
         for s in at["states"]:
             if s["frame"] not in frames_all:
@@ -552,7 +577,9 @@ def build(args):
                 scale = (1.0, 1.0, h / H0)
             else:
                 scale = (l / L0, w / W0, h / H0)
-            loc = (s["pos"][0], s["pos"][1], s["pos"][2] - h / 2.0)
+            # Drawn standing on the ground: the clip shows where objects are on the
+            # street, not their estimated height, and height errors read as floating.
+            loc = (s["pos"][0], s["pos"][1], gz)
             for obj in (solid, ghost):
                 obj.location = loc
                 obj.rotation_euler = (0, 0, math.radians(s["yaw_deg"]))

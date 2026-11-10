@@ -41,6 +41,9 @@ class Scene:
         self.manifest = json.loads((self.dir / "manifest.json").read_text())
         files = sorted((self.dir / "frames").glob("*.json"))
         self.frames = [json.loads(f.read_text()) for f in files]
+        for fr in self.frames:  # the full package stores labels as "truth"
+            if "labels" not in fr and "truth" in fr:
+                fr["labels"] = fr["truth"]
         self.frame_ids = [f["frame"] for f in self.frames]
         self.ego_index = self.manifest["vehicle_of_interest"]["index"]
         self.agents = {a["index"]: a for a in self.manifest["agents"]}

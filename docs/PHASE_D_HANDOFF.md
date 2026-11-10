@@ -40,6 +40,11 @@ with CUDA 11.3, spconv-cu113. Use a GPU with compute capability 8.6 or lower
 (RTX 3090, A5000, A40); CUDA 11.3 builds have no kernels for newer cards.
 Install under `/workspace` (conda or venv) so it survives a pod stop.
 
+On a newer GPU (RTX 4090, L4, L40S: compute capability 8.9), the CUDA 11.3
+builds will not run. Use Python 3.8 or later, PyTorch 2.0.x with CUDA 11.8 and
+spconv-cu118 instead, and fix only what the newer versions break (record each
+change). The gate below decides whether that environment is acceptable.
+
 **Gate:** the V2V4Real repository's own evaluation of its published
 checkpoints reproduces its README on the test split to within about 1 AP
 point: No Fusion AP@0.5 39.8 and AP@0.7 22.0; Late Fusion 55.0 and 26.7

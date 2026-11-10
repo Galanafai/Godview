@@ -442,3 +442,29 @@ alignment off, per-frame (the existing estimate, ego-fixed gauge) or filtered. E
 also dumps the shared world for reference. Reported: dataset and standard AP,
 wrong merges, splits, missed, recording-car coverage, and the fraction of car-frames
 with an offset estimate (of all car-frames and of those that share any object).
+
+## Own-frame truth check on V2V4Real val (report only; metric stated before it runs)
+
+Written 2026-11-10 after the ego view validation. No setting changes from it. The six
+variants of `scripts/phase_d/ego_val.sh` (already run) are re-scored; nothing is rerun.
+
+**Metric.** For each car c in {0, 1} and each frame:
+
+* *Truth:* car c's own labels from the raw yaml (each in c's lidar frame, so in c's own
+  frame), within the dataset's range (x within 100 m, y within 40 m of c). Car c's own box is
+  not among them (a car does not label itself) and is excluded from the world as well.
+* *Boxes:* the ego view of c (`worlds[c]` of the dump, odometry frame to the map frame
+  to c's lidar frame by c's `lidar_pose`), without any box that stands for c itself: its own
+  self object, and any object whose members are attributed to the label of c's body
+  (the label within 4 m of c's lidar position, `cav` of truth.json). The same exclusion is
+  applied to the baselines, by dropping the detections attributed to that label before NMS.
+* *Baselines on the same truth:* No Fusion for c = c's own export detections (score at least
+  0.2); Late Fusion for c = both cars' detections in c's frame (the other car's by
+  `inv(pose_c) @ pose_other`), joint rotated NMS 0.15.
+* *Scoring:* the dataset AP and the standard AP (as `scripts/phase_d/ap_eval.py`) at IoU
+  0.5 and 0.7, with the frames of both cars pooled (frame order, car 0 then car 1).
+* *What sharing adds:* of c's own labels that c's own detector did not detect (no
+  detection of c attributed to the label), the share covered (IoU 0.5) by a box of the
+  method, and the number of such labels.
+
+The shared world is not scored here (it is not any car's view).

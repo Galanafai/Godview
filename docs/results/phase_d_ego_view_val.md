@@ -67,7 +67,16 @@ detections (1,496 of 1,496), so the two estimate fractions coincide for the filt
   shared world and 59.0% for the earlier fused shared-world result.
 * The filter has an estimate in 99% of car-frames against 62% for the per-frame estimate.
 
-## Why (i) and (ii) fail: the truth is in the other car's pose frame
+## Why (i) and (ii) fail: V2V4Real's truth places each object by one car's pose
+
+**Explanation (agreed with Galanafai, who specified the expectations):** V2V4Real's
+ground truth places each object by one car's pose (each label is in its annotating
+car's lidar frame, and the dataset builds its truth in car 0's frame from the cars'
+`lidar_pose`s). Correcting a pose error therefore moves a detection away from truth that
+contains that error, and the dataset's AP penalizes it. Expectations (i) and (ii) were
+badly specified on that account; they ask the metric to reward something it cannot see.
+The evidence is the coverage split below and the filter's agreement with the
+cross-car label offset.
 
 Coverage split by whose box it is and which car labeled it
 (`coverage_split.json`; the first four rows are the ego view):
@@ -112,7 +121,9 @@ Coverage split by whose box it is and which car labeled it
 * Whether V2X-Real behaves differently: its labels share one map frame across agents
   (0.29 m median disagreement), so a pose-frame error of this kind should not exist in
   its truth. Not tested.
-* Expectations (i) and (ii) failed as stated; (iii) held. The failures have the cause
-  above, which is a property of the V2V4Real evaluation, not a measured defect of the
-  ego view or the filter; that reading is mine and the numbers do not by themselves
-  separate the two.
+* Expectations (i) and (ii) failed as stated; (iii) held. The failures are explained by the
+  truth being placed by one car's pose (above), not by a measured defect of the ego view
+  or the filter: the coverage split (the other car 98.7%, the ego's own box 47.5%, car-1-only
+  objects 62.8% falling to 11.5% under the filter) and the filter's 0.28 m median agreement
+  with the cross-car label offset are the evidence. The numbers alone do not exclude a
+  defect that they cannot see; the next step scores each car against its own labels only.

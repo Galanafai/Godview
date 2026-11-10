@@ -8,6 +8,25 @@ Raw outputs: `docs/results/phase_d/d1/selfrep_val_runs.json`,
 `scripts/phase_d/selfreport_val.sh`, `selfreport_coverage.py`,
 `selfreport_offset_vs_alignment.py`.
 
+## Caveat that governs every number below
+
+On V2V4Real val, with self reports on and the self object's position fused from
+the self report and its assigned detections, only **59 percent** of the two
+recording cars' ground-truth boxes are covered (IoU 0.5), against 97 percent
+without self reports. The cause is structural, not a tuning matter: a report that
+one agent shares carries that agent's own pose uncertainty (the pose sigma is added
+to its covariance when the report is placed on the Earth). Fusion in the common
+frame therefore cannot prefer the observer's detection, which is precise
+relative to the observer, over the sender's report, which is only as good as the
+sender's pose. The fused self object sits a median 0.34 of the way from the
+self report to the other car's detection because the two carry comparable
+covariances (see "Update" at the end). The same mechanism explains the AP@0.7 loss
+under alignment (the shifted reports leave the frame the dataset's truth uses). The
+fix proposed in `docs/PHASE_D_HANDOFF.md` (ego view: each agent scores its own
+objects with sensor covariance only and the others' reports with their covariance
+plus its own pose covariance, with its own translation held at zero in alignment)
+is a separate step; the numbers in this file are for the shared world.
+
 ## What was implemented
 
 * **Self report.** With `NodeConfig::self_reports`, an agent publishes its own

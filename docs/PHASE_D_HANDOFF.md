@@ -345,3 +345,42 @@ assigned reports. On V2V4Real val that fused version covers 59 percent of the
 recording cars' ground-truth boxes against 97 percent without self reports
 (`docs/results/phase_d_selfreport_val.md`), which did not meet the expectation
 that coverage would return toward 97 percent, so D2 step 2 was held for review.
+
+## References and design proposals (recorded 2026-11-10)
+
+Context: the self-report validation on V2V4Real val showed that shared
+detections carry the sender's pose uncertainty, so fusion in the common frame cannot
+prefer the observer's precise detection; the same cause explains the AP@0.7
+loss under alignment. Galanafai did a literature review; the references below are
+as he supplied them and **were not independently checked here** (arXiv numbers and
+titles as given).
+
+* **CoAlign**, arXiv 2211.07214: an agent-object pose graph with the ego pose held
+  fixed and uncertainty-weighted constraints. Basis of the ego-fixed gauge in the
+  ego view below.
+* **RoCo**, arXiv 2408.00257: iterative matching and pose adjustment using the
+  neighbourhood structure of objects.
+* **FreeAlign**, arXiv 2405.02965.
+* **Fox, Burgard et al., collaborative multi-robot localization:** robots detecting
+  each other are used as a measurement of their relative pose. Basis of the
+  agent-agent links below.
+* **"Fusion or Confusion?"**, arXiv 2607.05889: GNSS error is the main driver of
+  ghost objects in cooperative fusion.
+* **Split covariance intersection:** Julier and Uhlmann (covariance intersection);
+  Li and Nashashibi (the split form, with independent and unknown-correlation parts).
+
+Design proposals (**not implemented**):
+
+1. **Split covariance intersection.** A report carries two covariances, the sensor
+   noise (independent between sources) and the sender's pose error (unknown
+   correlation), instead of their sum. Fusion by split CI keeps the observer's
+   precise detection precise. It needs a wire change (a second covariance per
+   report), so it comes after Phase D; the ego view below is the interim.
+2. **Heading correction in alignment.** Alignment estimates only a translation per
+   source (`godview_core/src/alignment.rs`); a heading offset between sources is not
+   estimated. A pose error with a heading part moves objects in proportion to their
+   range, which a translation cannot remove.
+3. **Neighbourhood-structure matching (RoCo style).** Match objects across agents
+   by the structure of their neighbourhoods (relative layout of several objects)
+   rather than one object at a time, so that a wrong pair is rejected by its
+   neighbours and a pose adjustment is estimated from the whole structure.

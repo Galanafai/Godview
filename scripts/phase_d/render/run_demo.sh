@@ -13,5 +13,7 @@ echo "orbit rendered in $(( $(date +%s) - start )) s"
 python3 "$HERE/overlay.py" --package "$PKG" --outdir "$OUT/overlay" --no-hud
 python3 "$HERE/overlay.py" --package "$PKG" --outdir "$OUT/overlay_hud" --frames 150,160,170
 python3 "$HERE/make_clip.py" --dashcam "$PKG/cameras/1/cam1" --overlay "$OUT/overlay" \
-  --orbit "$OUT/orbit" --out "$OUT/godview_demo.mp4"
+  --orbit "$OUT/orbit" --out "$OUT/godview_demo_16x9.mp4" --size 1920x1080
+python3 "$HERE/make_clip.py" --dashcam "$PKG/cameras/1/cam1" --overlay "$OUT/overlay" \
+  --orbit "$OUT/orbit" --out "$OUT/godview_demo_4x5.mp4" --size 1080x1350
 echo "done in $(( $(date +%s) - start )) s"

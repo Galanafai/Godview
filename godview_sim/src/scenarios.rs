@@ -123,6 +123,8 @@ pub enum ScenarioId {
     LargeObjects,
     /// Objects handed between agents keep their IDs.
     HandoffIds,
+    /// Drifting localization offsets corrected by relative alignment.
+    PoseDrift,
 
     /// Objects disappear and appear.
     ObjectExpiry,
@@ -150,6 +152,7 @@ impl ScenarioId {
             ScenarioId::CrossingTargets,
             ScenarioId::LargeObjects,
             ScenarioId::HandoffIds,
+            ScenarioId::PoseDrift,
             ScenarioId::ObjectExpiry,
             ScenarioId::EchoChamber,
             ScenarioId::SplitBrain,
@@ -200,6 +203,7 @@ impl ScenarioId {
             ScenarioId::CrossingTargets => "crossing_targets",
             ScenarioId::LargeObjects => "large_objects",
             ScenarioId::HandoffIds => "handoff_ids",
+            ScenarioId::PoseDrift => "pose_drift",
             ScenarioId::ObjectExpiry => "object_expiry",
             ScenarioId::EchoChamber => "echo_chamber",
             ScenarioId::SplitBrain => "split_brain",
@@ -329,6 +333,7 @@ impl ScenarioId {
             ScenarioId::CrossingTargets => "crossing_targets",
             ScenarioId::LargeObjects => "large_objects",
             ScenarioId::HandoffIds => "handoff_ids",
+            ScenarioId::PoseDrift => "pose_drift",
             ScenarioId::ObjectExpiry => "object_expiry",
             ScenarioId::EchoChamber => "echo_chamber",
             ScenarioId::AgentRestart => "agent_restart",
@@ -373,6 +378,7 @@ impl ScenarioId {
             ScenarioId::CrossingTargets => "Objects passing within 1.5 m keep identities",
             ScenarioId::LargeObjects => "Boxes: a truck seen from opposite ends is one object, with its size and heading",
             ScenarioId::HandoffIds => "IDs survive handoffs between agents and never jump between objects",
+            ScenarioId::PoseDrift => "Drifting position offsets between agents are estimated from shared objects",
             ScenarioId::ObjectExpiry => "Disappearing objects dropped, new ones confirmed",
             ScenarioId::EchoChamber => "Relayed echoes never reduce uncertainty",
             ScenarioId::AgentRestart => "Restarted agent's new epoch accepted on reconnection",
@@ -448,6 +454,7 @@ impl std::str::FromStr for ScenarioId {
             "crossing_targets" => Ok(ScenarioId::CrossingTargets),
             "large_objects" => Ok(ScenarioId::LargeObjects),
             "handoff_ids" => Ok(ScenarioId::HandoffIds),
+            "pose_drift" => Ok(ScenarioId::PoseDrift),
             "object_expiry" => Ok(ScenarioId::ObjectExpiry),
             "echo_chamber" => Ok(ScenarioId::EchoChamber),
             "agent_restart" => Ok(ScenarioId::AgentRestart),

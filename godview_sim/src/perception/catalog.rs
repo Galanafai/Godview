@@ -102,6 +102,11 @@ pub fn catalog() -> Vec<Entry> {
             run: localization_fusion,
         },
         Entry {
+            name: "pose_drift",
+            invariant: POSE_DRIFT,
+            run: pose_drift,
+        },
+        Entry {
             name: "localization_dropout",
             invariant: LOC_DROPOUT,
             run: localization_dropout,
@@ -1094,6 +1099,117 @@ fn slow_loris(seed: u64) -> ScenarioOutcome {
         Some(&rec),
         SLOW_LORIS,
         vec![("realized_loss", format!("{loss:.3}"))],
+    )
+}
+
+const POSE_DRIFT: &str = "Each agent's position error drifts by up to 2 m horizontally over a 30 s cycle while it \
+declares 0.3 m, as the two real cars of V2V4Real did. With relative alignment from shared objects, every object is \
+tracked once with no persistent duplicates, the estimated relative offsets follow the injected drift, and agents \
+converge. The same run without alignment must show duplicates or worlds emptied by the trust monitor excluding \
+every source (issue #5).";
+
+fn pose_drift(seed: u64) -> ScenarioOutcome {
+    let build = |align: bool| {
+        let mut spec = ScenarioSpec::new("pose_drift", seed);
+        spec.duration_s = 20.0;
+        spec.agents = ring(4, 45.0);
+        for a in &mut spec.agents {
+            a.localization = LocalizationSpec {
+                sigma_h_m: 0.3,
+                sigma_v_m: 0.2,
+                sigma_yaw_rad: 0.1f64.to_radians(),
+                sigma_tilt_rad: 0.05f64.to_radians(),
+                drift_amp_enu: Vector3::new(2.0, 2.0, 0.3),
+                drift_period_s: 30.0,
+                ..LocalizationSpec::default()
+            };
+        }
+        spec.objects = separated_objects(seed, 6, 30.0, 2.0, spec.duration_s, 12.0);
+        spec.node.world.align.enabled = align;
+        spec
+    };
+    let spec = build(true);
+    let rec = run(&spec);
+    let agents = [0, 1, 2, 3];
+    let mut c = Checker::new("pose_drift", seed);
+    c.tracked_world(&rec, &agents, 2.0, f64::INFINITY, 3.0, globally_observed);
+    c.converged(&rec);
+    // Estimated relative offsets against the injected drift. The agents'
+    // constant errors (0.3 m declared) and heading errors are not included in
+    // the reference, so agreement is only expected to within about a metre.
+    let r = EnuFrame::new(spec.site).ecef_from_enu();
+    let drift = |i: usize, t: f64| {
+        let l = &spec.agents[i].localization;
+        let ph = 2.0 * std::f64::consts::PI * t / l.drift_period_s + 2.1 * i as f64;
+        r * Vector3::from_fn(|k, _| l.drift_amp_enu[k] * (ph + k as f64).sin())
+    };
+    let mut residuals = Vec::new();
+    for smp in rec.samples.iter().filter(|s| s.t_s >= 2.0) {
+        let al = &smp.agents[0].world.alignment;
+        for x in al {
+            for y in al {
+                let (Some(i), Some(j)) = (
+                    rec.ids.iter().position(|id| *id == x.source),
+                    rec.ids.iter().position(|id| *id == y.source),
+                ) else {
+                    continue;
+                };
+                if i < j {
+                    let e =
+                        (x.translation - y.translation) + (drift(i, smp.t_s) - drift(j, smp.t_s));
+                    residuals.push(e.norm());
+                }
+            }
+        }
+    }
+    let mean_residual = residuals.iter().sum::<f64>() / residuals.len().max(1) as f64;
+    c.check(!residuals.is_empty() && mean_residual < 1.0, || {
+        format!(
+            "estimated relative offsets miss the injected drift by {mean_residual:.2} m on average"
+        )
+    });
+    // Ablation: no alignment, same drift.
+    let ablation = run(&build(false));
+    let dups = ablation
+        .samples
+        .iter()
+        .filter(|s| s.t_s >= 2.0)
+        .flat_map(|s| agents.iter().map(move |a| (s, *a)))
+        .filter(|(s, a)| {
+            ablation
+                .score(s, *a, CUTOFF_M, globally_observed)
+                .false_estimates
+                > 0
+        })
+        .count();
+    // Without alignment the trust monitor also sees every source disagree with
+    // every other and eventually excludes them all (issue #5); count the
+    // samples where an agent's world is empty although objects are in view.
+    let emptied = ablation
+        .samples
+        .iter()
+        .filter(|s| s.t_s >= 2.0)
+        .flat_map(|s| agents.iter().map(move |a| (s, *a)))
+        .filter(|(s, a)| {
+            s.agents[*a].world.objects.is_empty() && s.truths.iter().any(globally_observed)
+        })
+        .count();
+    c.check(dups + emptied > 0, || {
+        "without alignment no duplicate or emptied world appeared; drift not exercised".into()
+    });
+    c.finish(
+        Some(&rec),
+        POSE_DRIFT,
+        vec![
+            ("mean_rms_m", format!("{:.3}", mean_rms(&rec, &agents, 2.0))),
+            ("mean_offset_residual_m", format!("{mean_residual:.3}")),
+            ("ablation_duplicate_agent_samples", dups.to_string()),
+            ("ablation_emptied_world_agent_samples", emptied.to_string()),
+            (
+                "ablation_mean_rms_m",
+                format!("{:.3}", mean_rms(&ablation, &agents, 2.0)),
+            ),
+        ],
     )
 }
 

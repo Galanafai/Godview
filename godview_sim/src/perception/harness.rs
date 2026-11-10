@@ -146,6 +146,13 @@ pub struct LocalizationSpec {
     pub unmodeled_bias_enu: Vector3<f64>,
     /// Windows `[start, end)` in seconds with no global localization.
     pub outages: Vec<(f64, f64)>,
+    /// Amplitude of a slowly drifting, unreported position error (ENU, m):
+    /// on axis k, `amp[k] · sin(2π t / period + phase + k)`, with the phase
+    /// set by the agent's index. Like the offsets between the two real cars of
+    /// V2V4Real, it is not in the reported covariance.
+    pub drift_amp_enu: Vector3<f64>,
+    /// Period of that drift (s); 0 disables it.
+    pub drift_period_s: f64,
 }
 
 /// How an agent behaves.
@@ -502,6 +509,10 @@ struct SimAgent {
     node: PerceptionNode,
     /// ENU ← odometry (exact).
     enu_from_odom: Pose3,
+    /// ECEF ← ENU rotation of the site (for the drifting error).
+    r_ecef_enu: Matrix3<f64>,
+    /// Index of the agent (sets the phase of its drift).
+    index: usize,
     /// The agent's estimate of ECEF ← odometry (with its realized error).
     est_link: PoseWithCov,
     sensor_rng: ChaCha8Rng,
@@ -529,10 +540,22 @@ impl SimAgent {
             .any(|(a, b)| t_s >= *a && t_s < *b)
     }
 
+    /// The unreported drifting position error at `t_s` (ENU, m).
+    fn drift_enu(&self, t_s: f64) -> Vector3<f64> {
+        let l = &self.spec.localization;
+        if l.drift_period_s <= 0.0 {
+            return Vector3::zeros();
+        }
+        let phase = 2.0 * std::f64::consts::PI * t_s / l.drift_period_s + 2.1 * self.index as f64;
+        Vector3::from_fn(|k, _| l.drift_amp_enu[k] * (phase + k as f64).sin())
+    }
+
     fn pose(&self, t: Timestamp, t_s: f64) -> PoseEstimate {
+        let mut link = self.est_link;
+        link.pose.translation += self.r_ecef_enu * self.drift_enu(t_s);
         PoseEstimate {
             t,
-            ecef_from_odom: self.est_link,
+            ecef_from_odom: link,
             status: if self.in_outage(t_s) {
                 LocalizationStatus::LocalOnly
             } else {
@@ -595,6 +618,8 @@ pub fn run(spec: &ScenarioSpec) -> RunRecord {
                 node: PerceptionNode::new(key.clone(), 1, spec.node),
                 key,
                 enu_from_odom,
+                r_ecef_enu,
+                index: i,
                 est_link: PoseWithCov { pose: est, cov },
                 sensor_rng: stream(spec.seed, 1, i64_),
                 delay_rng: stream(spec.seed, 2, i64_),

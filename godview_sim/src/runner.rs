@@ -2504,6 +2504,6 @@ mod tests {
             assert!(s.is_legacy());
             assert_eq!(s.name().parse::<ScenarioId>().unwrap(), *s);
         }
-        assert_eq!(all.len() + legacy.len(), 35);
+        assert_eq!(all.len() + legacy.len(), 36);
     }
 }

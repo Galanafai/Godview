@@ -196,6 +196,9 @@ resurrected by a late replay.
 and query time give a bit-identical result on every agent.
 
 1. Every live global report is predicted to `t_query`.
+1a. If relative alignment is enabled (`WorldModelConfig::align`, off by
+   default), each source's reports are moved by a translation estimated from
+   objects it shares with other sources (section 6a).
 2. Candidate pairs are found with `SpatialIndex` (H3 partition over exact
    ECEF positions, with exact 3-D distance filtering, so pairs across cell
    edges are never lost) and gated on position and velocity (chi-square,
@@ -247,6 +250,43 @@ Limits:
   cannot change any estimate this way.
 * Names add up to 41 bytes per report.
 
+## 6a. Relative alignment of sources
+
+Each source's reports carry its own localization error, and much of it is an
+offset common to everything that source reports, drifting slowly. On real data
+(V2V4Real) two cars disagreed by 0.5 to 4 m, and the disagreement varied about
+4x between drives, so a fixed declared uncertainty is wrong somewhere: too
+tight and shared objects split in two, too loose and every fused position is
+less certain than it needs to be. `crate::alignment` estimates, at each
+snapshot, a translation per source from the objects sources share:
+
+* For each pair of sources, every pair of their reports within 8 m (same
+  class, compatible box sizes) is a candidate, and each candidate's difference
+  is tried as the pair's offset. The offset most candidates agree with (within
+  1 m, each report used once) wins, so a row of parked cars shifted by one car
+  does not. The offset is the mean of its inliers; its covariance comes from
+  their scatter, not from the reports' covariances, which include the very
+  pose error being estimated. At least three shared objects are required.
+* Per-source translations are solved jointly by least squares over all pair
+  offsets and anchored to the median source of each connected group, so one
+  biased source among several is corrected itself.
+* Each report is moved by its source's translation and its covariance widened
+  by the translation's covariance. The declared covariance is kept: alignment
+  removes disagreement between sources, not the error they share.
+
+It is a pure function of the reports, so agents agree on it, and nothing is
+fed back into reports or filters. The translations are in
+`WorldSnapshot::alignment`. Only translation is estimated, not a heading
+offset between sources.
+
+In DST `pose_drift` (four agents whose position errors drift by up to 2 m
+while they declare 0.3 m) alignment keeps every object single and tracked on
+15 of 15 seeds, the estimated relative offsets follow the injected drift to
+within 0.4 to 0.8 m on average, and fused position error is about 1.0 to 1.2 m
+against about 1.8 to 2.1 m without it. The absolute error the sources share
+is not removed. When alignment is enabled, the consistency monitor judges
+sources after alignment (section 7).
+
 `WorldObject::to_entity` converts to the consumer `Entity` (geodetic position,
 ENU covariance and, if present, the oriented box) for `SpatialEngine`.
 
@@ -265,6 +305,15 @@ Detection limits are documented by tests: a 6 m unreported bias is excluded,
 3.5 m is inflated, 2.5 m is below the detection threshold at the default
 sensor noise. The monitor needs partners, so it cannot judge a source that is
 alone in its area.
+
+When every source drifts beyond its declared uncertainty, every source
+disagrees with every other, and the monitor inflates and then excludes all of
+them, the observing agent's own reports included, leaving an empty world
+(issue #5, found with `pose_drift`). With alignment enabled the monitor
+judges sources after alignment, so an offset that a translation fully
+explains is not treated as misbehavior; a constant bias within the 8 m search
+range is then corrected rather than excluded. The monitor still has no
+"no consensus" rule.
 
 Revocation (`PerceptionNode::revoke`) rejects all later batches from a key and
 purges its reports.
@@ -371,7 +420,7 @@ cargo run --release -p godview_sim -- --scenario split_brain --seed 3
 cargo run --release -p godview_sim -- --scenario legacy --seed 42
 ```
 
-`all` runs the 19 perception scenarios below. The 16 scenarios that exercise
+`all` runs the 20 perception scenarios below. The 16 scenarios that exercise
 the legacy `TrackManager` path are kept under `legacy`. `--duration` applies
 to legacy scenarios only; perception scenarios have fixed durations.
 
@@ -388,6 +437,7 @@ to legacy scenarios only; perception scenarios have fixed durations.
 | `biased_source` | Unreported 6 m bias detected and excluded by all honest agents; an ablation with trust disabled shows the ghosts. |
 | `crossing_targets` | Two objects within 1.5 m are not merged and keep their identities. |
 | `large_objects` | Cars, vans, trucks and buses as oriented boxes, from detectors that see only part of an object and cannot tell front from back: each is one world object from every side, with size consistent with its uncertainty (pooled NEES below 6) and heading within 15 degrees (modulo 180 unless it moves). The same run without the declared systematic center error must show duplicates. |
+| `pose_drift` | Four agents whose position errors drift by up to 2 m over a 30 s cycle while they declare 0.3 m. With relative alignment, every object is tracked once with no persistent duplicates, the estimated relative offsets follow the injected drift to within 1 m on average, and agents converge. The same run without alignment must show duplicates or worlds emptied by the trust monitor (issue #5). |
 | `handoff_ids` | Objects drive past a row of short-range agents in both directions, so sources keep joining and leaving. Each object keeps one ID for its whole drive past (at most two changes per run tolerated) and no ID is given to two objects. Comparison runs: under the oldest-track rule every change is its holder leaving or an older track joining and each object passes through at least three holders; the smallest-key rule must rename objects on a join. |
 | `object_expiry` | Disappearing objects leave every world within coast plus validity time; new ones appear. |
 | `echo_chamber` | Relayed and repeated reports change nothing: world equals the one built from each source's own reports. |

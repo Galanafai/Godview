@@ -316,6 +316,14 @@ def key_visible(parts, frame, visible):
 # scene
 
 
+def no_motion_blur(obj):
+    """Labels and leaders stay crisp; motion blur smears them when they move."""
+    try:
+        obj.cycles.use_motion_blur = False
+    except AttributeError:
+        pass
+
+
 def make_label(name, text, color, cam, font_path, size=0.85):
     """Camera-facing text on a dark plate; returns the root object to animate."""
     cu = bpy.data.curves.new(name, "FONT")
@@ -342,6 +350,7 @@ def make_label(name, text, color, cam, font_path, size=0.85):
     for o in (txt, plate):
         o.visible_diffuse = o.visible_glossy = o.visible_transmission = False
         o.visible_shadow = o.visible_volume_scatter = False
+        no_motion_blur(o)
     tc = txt.constraints.new("TRACK_TO")
     tc.target = cam
     tc.track_axis = "TRACK_Z"
@@ -359,6 +368,7 @@ def make_leader(name, color):
         v.co.z += 0.5  # base at the origin, top at z = 1
     o.data.materials.append(mat_emission(name + "_m", color, 3.0))
     o.visible_diffuse = o.visible_glossy = o.visible_transmission = o.visible_shadow = False
+    no_motion_blur(o)
     return o
 
 
@@ -430,6 +440,7 @@ def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, 
     led = make_leader("lead_hidden", CYAN) if shot == "live" else None
     if led:
         parts = parts + [led]
+    prev = None
     for fr in frames_all:
         pts = [s["pos"] for tid in focus_ids for s in sc.tracks[tid]["states"]
                if s["frame"] == fr and s["status"] == "ghost"]
@@ -437,6 +448,10 @@ def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, 
         if pts:
             cx = sum(p[0] for p in pts) / len(pts)
             cy = sum(p[1] for p in pts) / len(pts)
+            # glide when the group changes (someone becomes visible) instead of jumping
+            if prev is not None and not freeze:
+                cx, cy = prev[0] + 0.25 * (cx - prev[0]), prev[1] + 0.25 * (cy - prev[1])
+            prev = (cx, cy)
             lab.location = (cx, cy, gz + lift)
             lab.keyframe_insert("location", frame=f)
             if led:

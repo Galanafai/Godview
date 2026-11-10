@@ -6,11 +6,16 @@ PKG=$1; OUT=$2; BLENDER=$3; SAMPLES=${4:-128}
 HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$OUT"
 start=$(date +%s)
-# 1. paused-time orbit (150 frames)
+# 1. paused-time orbit (150 frames); reused if already rendered (REUSE_ORBIT=dir to copy one)
+if [ -n "${REUSE_ORBIT:-}" ] && [ ! -d "$OUT/orbit" ]; then cp -r "$REUSE_ORBIT" "$OUT/orbit"; fi
+if [ "$(ls "$OUT/orbit"/*.png 2>/dev/null | wc -l)" -ge 150 ]; then
+  echo "reusing $OUT/orbit"
+else
 "$BLENDER" -b --python "$HERE/build_scene.py" -- --package "$PKG" --outdir "$OUT/orbit" \
   --res 1920x1080 --samples "$SAMPLES" --device GPU --points 300000 \
   --freeze 145 --orbit-frames 150 --shot orbit --animation
-echo "orbit rendered after $(( $(date +%s) - start )) s"
+fi
+echo "orbit ready after $(( $(date +%s) - start )) s"
 # 2. real-time view from above, dataset frames 145 to 205 (181 frames)
 "$BLENDER" -b --python "$HERE/build_scene.py" -- --package "$PKG" --outdir "$OUT/live" \
   --res 1920x1080 --samples "$SAMPLES" --device GPU --points 300000 \

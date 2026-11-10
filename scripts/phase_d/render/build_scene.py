@@ -369,7 +369,8 @@ def key_leader(leader, x, y, z0, z1, frame):
     leader.keyframe_insert("scale", frame=frame)
 
 
-def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, font_path):
+def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, font_path,
+               shot="hero"):
     """Plain-language callouts: this car, the truck, the roadside sensors, the hidden people."""
     WHITE = (1.0, 1.0, 1.0)
     f_first = frames_all[0]
@@ -393,7 +394,7 @@ def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, 
                 d = math.hypot(s["pos"][0] - e0[0], s["pos"][1] - e0[1])
                 if d < 12 and (best is None or d < best[0]):
                     best = (d, tid)
-    if best:
+    if best and shot != "live":  # the moving view has enough labels; the orbit names the truck
         tstates = {s["frame"]: s for s in sc.tracks[best[1]]["states"]}
         lab, parts = make_label("lab_truck", "TRUCK\nBLOCKS THE VIEW", WHITE, cam, font_path, 0.6)
         led = make_leader("lead_truck", WHITE)
@@ -408,6 +409,13 @@ def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, 
     for idx, at in sc.agent_tracks.items():
         if idx == sc.ego_index or at["kind"] != "rsu":
             continue
+        if shot == "live":
+            # in the wide moving view, label only sensors near the camera; far labels are tiny
+            scene.frame_set(scene.frame_start)
+            c = cam.matrix_world.translation
+            p0 = at["states"][0]["sensor"]
+            if math.hypot(p0[0] - c.x, p0[1] - c.y) > 32:
+                continue
         text = "ROADSIDE SENSOR"
         lab, parts = make_label(f"lab_agent{idx}", text, VIOLET, cam, font_path, 0.75)
         for s in at["states"]:
@@ -418,14 +426,21 @@ def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, 
             lab.keyframe_insert("location", frame=bf(s["frame"]))
     # the hidden people: centre of the focus ghosts, shown while any is a ghost
     lab, parts = make_label("lab_hidden", "HIDDEN PEOPLE", CYAN, cam, font_path)
+    lift = 6.5 if shot == "live" else 3.0  # above the roadside sensor labels in the wide view
+    led = make_leader("lead_hidden", CYAN) if shot == "live" else None
+    if led:
+        parts = parts + [led]
     for fr in frames_all:
         pts = [s["pos"] for tid in focus_ids for s in sc.tracks[tid]["states"]
                if s["frame"] == fr and s["status"] == "ghost"]
         f = bf(fr)
         if pts:
-            lab.location = (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts),
-                            gz + 3.0)
+            cx = sum(p[0] for p in pts) / len(pts)
+            cy = sum(p[1] for p in pts) / len(pts)
+            lab.location = (cx, cy, gz + lift)
             lab.keyframe_insert("location", frame=f)
+            if led:
+                key_leader(led, cx, cy, gz + 2.0, gz + lift - 0.45, f)
         if freeze:
             key_visible(parts, 1, False)
             key_visible(parts, ghost_on, bool(pts))
@@ -744,7 +759,8 @@ def build(args):
     mod.node_group = ng
 
     if not args.no_labels:
-        add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, args.font)
+        add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, args.font,
+                   shot=args.shot)
 
     # render settings
     r = scene.render

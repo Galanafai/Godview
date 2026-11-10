@@ -263,10 +263,11 @@ into its own directory (11 GB), read with `python -I` and a safe YAML loader
 
 (`docs/results/phase_d/d2/val_overlap.txt`) The two units are 37.9 m apart and
 share about 20 labels per frame in every scenario. The two vehicles are close
-in four scenarios (median 8 to 39 m, 22 to 45 shared labels per frame) and far
-in the other two (256 m and 194 m, 0 to 1 shared labels), so the first
-scenario (`11_1`) has no vehicle-to-vehicle overlap at all. Units and vehicles
-overlap from 2 to 33 shared labels per frame depending on the scenario.
+in three scenarios (median 8 to 39 m apart, 22 to 45 shared labels per frame),
+far in two (256 m and 194 m, 0 to 1 shared labels) and `45_0` has a single
+vehicle, so the first scenario (`11_1`) has no vehicle-to-vehicle overlap at
+all. A unit and a vehicle share 0 to 33 labels per frame at the median
+depending on the pair and the scenario.
 
 ### Not determined
 

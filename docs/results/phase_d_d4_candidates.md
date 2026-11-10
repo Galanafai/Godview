@@ -49,8 +49,10 @@ the interval, the object's projected centre ringed in red (`docs/results/phase_d
 * **Not checked by eye:** that the rank-1 pedestrian is the one who emerges at the end; the frames between the start and
   the end; the other 30 candidates (only the top 5 were rendered).
 
-## Pick (to be recorded)
+## Pick (recorded 2026-11-10)
 
-The pick and its rank are made by Galanafai with the team and will be recorded here. The scene package (the D4 list
-in the handoff: poses, detections, the vehicle's ego view per frame with who contributed, labels, the vehicle's front
-camera images and calibration, a static point cloud and per-frame moving points) and a Rerun `.rrd` follow the pick.
+**Chosen by Galanafai: scene `2023-04-03-18-19-32_13_0`, vehicle 1, showing pedestrians 43, 58, 30 and 46 together,
+ranks 1, 2, 4 and 5 of the top 5** (rank 1 pedestrian 43, rank 2 pedestrian 58, rank 4 pedestrian 30, rank 5
+pedestrian 46). Rank 3 (scene `2023-04-04-14-27-53_44_0`) was not chosen. The scene package and a Rerun `.rrd` follow;
+the analysis of the four pedestrians, the camera strips and the wrong-merge check are in
+`docs/results/phase_d_d4_scene.md`.

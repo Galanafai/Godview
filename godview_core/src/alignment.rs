@@ -183,10 +183,11 @@ fn pair_offset(
         scatter += e * e.transpose();
     }
     scatter /= (n - 1.0).max(1.0);
+    // With few inliers the deviations from their mean span fewer than three
+    // directions, so the scatter is singular. Add the floor in every
+    // direction (not only on the diagonal) so the inverse stays bounded.
     let floor = cfg.scatter_floor_m * cfg.scatter_floor_m;
-    for k in 0..3 {
-        scatter[(k, k)] = scatter[(k, k)].max(floor);
-    }
+    scatter += Matrix3::identity() * floor;
     Some((offset, scatter / n, v.len()))
 }
 
@@ -270,11 +271,17 @@ pub(crate) fn estimate(items: &[AlignItem], cfg: &AlignConfig) -> Vec<SourceOffs
                 g[kb + r] -= wo[r];
             }
         }
-        // Minimum-norm solution: the group's mean translation is zero.
-        let Ok(hp) = h.clone().pseudo_inverse(1e-9) else {
+        // Minimum-norm solution: the group's mean translation is zero. The
+        // tolerance is relative, so rounding in the gauge direction is
+        // treated as zero rather than inverted.
+        let tol = 1e-9 * h.amax().max(1.0);
+        let Ok(hp) = h.clone().pseudo_inverse(tol) else {
             continue;
         };
         let t = &hp * &g;
+        if t.iter().any(|v| !v.is_finite()) {
+            continue;
+        }
         // Anchor to the median source, axis by axis.
         let mut shift = Vector3::zeros();
         for axis in 0..3 {
@@ -343,6 +350,47 @@ mod tests {
             .find(|o| o.source == AgentId([src; 32]))
             .unwrap()
             .translation
+    }
+
+    /// Issue found on V2V4Real: with exactly three matched objects the
+    /// deviations from their mean sum to zero, so the scatter matrix is
+    /// singular. A floor on the diagonal alone left it nearly singular, its
+    /// inverse huge, and the solve moved cars by up to about 1e15 m.
+    #[test]
+    fn three_shared_objects_never_blow_up() {
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut unit = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+        };
+        let cfg = on();
+        for _ in 0..2000 {
+            let offset = Vector3::new(3.0 * unit(), 3.0 * unit(), 0.5 * unit());
+            let mut items = Vec::new();
+            for (x, y) in SCENE.iter().take(3) {
+                let p = Vector3::new(*x, *y, 0.0);
+                let noise = Vector3::new(0.3 * unit(), 0.3 * unit(), 0.3 * unit());
+                items.push(AlignItem {
+                    position: p,
+                    ..item(1, 0.0, 0.0)
+                });
+                items.push(AlignItem {
+                    position: p + offset + noise,
+                    ..item(2, 0.0, 0.0)
+                });
+            }
+            for o in estimate(&items, &cfg) {
+                assert!(
+                    o.translation.iter().all(|v| v.is_finite())
+                        && o.translation.norm() <= cfg.max_offset_m,
+                    "translation {:?} for offset {:?}",
+                    o.translation,
+                    offset
+                );
+            }
+        }
     }
 
     #[test]

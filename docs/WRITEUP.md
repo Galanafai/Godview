@@ -86,9 +86,31 @@ In plain terms: on real recordings of two cars, sharing gives each car about a
 quarter more of what is around it, and the shared picture rarely misses a
 vehicle or shows one twice.
 
-**With relative alignment:** pending. The held-out test will be rerun with
-alignment enabled, with its settings pre-registered the same way, and
-reported here and in the results as a separate section next to the original.
+**With relative alignment (run A).** The frozen settings plus alignment, run
+once on test2 and test3. Details are in the results under "Held-out runs with
+relative alignment"; the original table above is unchanged.
+
+| | Run A | Original held-out |
+|:--|:--|:--|
+| Vehicles both cars detected, fused into one | 93.3% | 93.6% |
+| Expected vehicles missed | 1.8% | 0.8% |
+| Object-frames a car saw only through sharing | 22.8% | 22.7% |
+| ID changes per object | 1.77 | 1.42 |
+| Position NEES, objects both cars labeled | 0.27 | 0.25 |
+
+Alignment estimated an offset in 65% of car-frames, with a median relative
+offset of 0.39 m. In the two scenes where it ran almost every frame, results
+matched or improved (ID changes in one fell from 1.15 to 0.56 per object). In
+the other three scenes where it ran, misses and ID changes rose, and those
+are the scenes where it hit the bug described below. Run A used the code
+before the fix, so these numbers are not yet a fair test of alignment.
+
+Run B (a smaller pose uncertainty, chosen on the validation split by a rule
+committed before any validation replay) was not run: no candidate kept the
+merged rate within 2 points of the reference. That check also ran on the
+code before the fix, so it may change. test1 cannot be used to choose
+alignment settings at all: no frame has the 3 objects both cars see that
+alignment needs.
 
 ## Where it fails, and what is not proven
 
@@ -100,7 +122,12 @@ reported here and in the results as a separate section next to the original.
   is the mean of the two cars' labels.
 - **Too cautious on held-out data.** Position NEES of 0.25 means GodView says
   it is less sure than it is: one fixed pose uncertainty cannot fit offsets
-  that vary about 4x between drives. Alignment is the attempt to fix this.
+  that vary about 4x between drives. Alignment is the attempt to fix this;
+  it has not yet been shown to fix it on real data.
+- **Alignment and the label truth.** With two cars, alignment moves each car
+  to the midpoint, which is also where the truth (the mean of the two cars'
+  labels) sits. That flatters objects both cars labeled, and moved objects
+  only one car labeled further from their truth (NEES 0.11 to 0.27).
 - **Labels that flip front and back** between the two cars split those
   objects at the heading check; a real detector would mark such headings as
   uncertain instead.
@@ -125,6 +152,14 @@ reported here and in the results as a separate section next to the original.
   and by leaving a heading ambiguous when two agents confidently disagree.
 - **The trust monitor excluding everyone** (above), found while building
   alignment.
+- **Alignment moving a car by up to about 1e15 m.** Found on real data: in
+  51 of 2,070 aligned held-out car-frames the estimated shift exceeded
+  8.5 m. With exactly three matched objects the offset covariance is
+  singular, and its floor was applied only to the diagonal, so the inverse
+  was huge and the solve amplified rounding. Fixed by adding the floor in
+  every direction and using a relative tolerance in the solve; a test now
+  checks 2,000 three-object cases (it reproduced a shift of about 2e14 m
+  before the fix). Run A has not yet been repeated with the fix.
 - **Three rare simulator failures** that also fail on code before this work
   are open with reproduction commands:
   [#2](https://github.com/Galanafai/Godview/issues/2),

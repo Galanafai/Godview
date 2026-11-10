@@ -75,7 +75,16 @@ def main():
     Y = [[load_yaml(f'{sc}/{c}/{f}.yaml') for c in (0, 1)] for f in frames]
     T = [[np.array(y['lidar_pose'], dtype=float) for y in yy] for yy in Y]
 
-    fit = fit_map_to_enu([t for tt in T for t in tt], [y['gps'] for yy in Y for y in yy])
+    if all('gps' in y for yy in Y for y in yy):
+        fit = fit_map_to_enu([t for tt in T for t in tt], [y['gps'] for yy in Y for y in yy])
+    else:
+        # The val split has no gps field. Anchor the map frame at a fixed
+        # made-up point near the test splits (Columbus, Ohio) with its x axis
+        # East. Both cars and the truth share it, so only relative geometry
+        # matters; the map frame's true orientation (about 1 deg off East on
+        # test1) is unknown here.
+        fit = {'rot_deg': 0.0, 'lat0': 39.98, 'lon0': -83.02, 'h0': 0.0, 'rms_h': None,
+               'max_h': None, 'rms_v': None, 'heading_offset': lambda k: None, 'no_gps': True}
     rot = np.radians(fit['rot_deg'])
     R = np.array([[np.cos(rot), -np.sin(rot)], [np.sin(rot), np.cos(rot)]])
     origin = np.mean([t[:3, 3] for tt in T for t in tt], axis=0)
@@ -196,7 +205,8 @@ def main():
         'scenario': name, 'anchor': anchor, 'origin_map': origin.tolist(), 'dt_ns': DT_NS,
         'min_points': args.min_points, 'max_range': args.max_range,
         'gps_fit': {'rot_deg': fit['rot_deg'], 'rms_h_m': fit['rms_h'], 'max_h_m': fit['max_h'],
-                    'rms_v_m': fit['rms_v'], 'heading_offset_deg': fit['heading_offset'](2)},
+                    'rms_v_m': fit['rms_v'], 'heading_offset_deg': fit['heading_offset'](2),
+                    'no_gps_made_up_anchor': fit.get('no_gps', False)},
         'declared': {'pose_sigma_h_m': args.sigma_h, 'pose_sigma_v_m': args.sigma_v,
                      'pose_sigma_yaw_deg': args.sigma_yaw_deg, 'det_sigma_m': args.det_sigma,
                      'size_sigma_m': args.size_sigma, 'yaw_sigma_deg': args.yaw_sigma_deg, 'seed': args.seed},
@@ -207,8 +217,9 @@ def main():
     with open(os.path.join(args.out_dir, 'truth.json'), 'w') as fh:
         json.dump(truth, fh)
     nd = [sum(len(json.loads(x)['detections']) for x in car_lines[c]) for c in (0, 1)]
-    print('%s: %d frames, detections car0 %d car1 %d, gps fit rms %.2f m, class disagreements %d, multi-links %s'
-          % (name, len(frames), nd[0], nd[1], fit['rms_h'], class_disagree, multi))
+    print('%s: %d frames, detections car0 %d car1 %d, gps fit rms %s m, class disagreements %d, multi-links %s'
+          % (name, len(frames), nd[0], nd[1], 'none (no gps)' if fit['rms_h'] is None else '%.2f' % fit['rms_h'],
+             class_disagree, multi))
 
 
 if __name__ == '__main__':

@@ -114,8 +114,19 @@ impl ConsistencyMonitor {
     ///
     /// Uses raw (uninflated) covariances and includes excluded sources, so a
     /// source can recover once its reports become consistent again.
+    ///
+    /// When the world model aligns sources, the monitor judges them after
+    /// alignment: a disagreement that a translation between sources fully
+    /// explains is a pose offset, not misbehavior. Without this, drifting
+    /// localization makes every source look inconsistent with every other,
+    /// and the monitor excludes them all, the observing agent included (seen
+    /// in DST `pose_drift`). A source with a constant bias within the
+    /// alignment's search range is then corrected rather than excluded.
     pub fn observe(&mut self, store: &ReportStore, t: Timestamp) -> usize {
-        let (items, _) = self.model.prepare(store, t, &TrustView::default());
+        let (mut items, _) = self.model.prepare(store, t, &TrustView::default());
+        if self.model.config.align.enabled {
+            self.model.align(&mut items);
+        }
         let mut index = SpatialIndex::new(self.model.config.resolution);
         for (i, it) in items.iter().enumerate() {
             let _ = index.upsert(i, Ecef(it.x.fixed_rows::<3>(0).into_owned()));

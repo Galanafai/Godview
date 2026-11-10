@@ -49,6 +49,7 @@
 //! own track belongs to. Names never enter gating, clustering or fusion, so
 //! they cannot change any estimate or covariance; they only choose IDs.
 
+use crate::alignment::{AlignConfig, AlignItem, SourceOffset};
 use crate::extent::{fuse_boxes, BoxGate, BoxModel, ObjectBox};
 use crate::frames::{cv_process_noise, cv_transition, ecef_from_enu_rotation, symmetrize, Ecef};
 use crate::godview_space::Entity;
@@ -88,6 +89,9 @@ pub struct WorldModelConfig {
     pub box_model: BoxModel,
     /// Which member names a fused object.
     pub id_rule: IdRule,
+    /// Relative alignment of sources from shared objects (off by default;
+    /// see [`crate::alignment`]).
+    pub align: AlignConfig,
 }
 
 /// How a fused object's ID is chosen.
@@ -116,6 +120,7 @@ impl Default for WorldModelConfig {
             box_gate: BoxGate::default(),
             box_model: BoxModel::default(),
             id_rule: IdRule::default(),
+            align: AlignConfig::default(),
         }
     }
 }
@@ -228,6 +233,9 @@ pub struct WorldSnapshot {
     pub skipped_untrusted: usize,
     /// Reports skipped because they are stamped in the future.
     pub skipped_future: usize,
+    /// Translation applied to each source's reports before association
+    /// (empty unless alignment is enabled and sources share objects).
+    pub alignment: Vec<SourceOffset>,
 }
 
 impl WorldSnapshot {
@@ -340,6 +348,31 @@ impl WorldModel {
         (items, snap)
     }
 
+    /// Estimates each source's translation from shared objects and applies it
+    /// to that source's prepared reports (position moved, covariance widened
+    /// by the translation's covariance).
+    pub(crate) fn align(&self, items: &mut [Prepared]) -> Vec<SourceOffset> {
+        let view: Vec<AlignItem> = items
+            .iter()
+            .map(|i| AlignItem {
+                source: i.key.0,
+                position: i.x.fixed_rows::<3>(0).into_owned(),
+                class_id: i.class_id,
+                size: i.object_box.map(|b| [b.size[0], b.size[1]]),
+            })
+            .collect();
+        let offsets = crate::alignment::estimate(&view, &self.config.align);
+        for o in &offsets {
+            for it in items.iter_mut().filter(|i| i.key.0 == o.source) {
+                let moved = it.x.fixed_rows::<3>(0) + o.translation;
+                it.x.fixed_rows_mut::<3>(0).copy_from(&moved);
+                let widened = it.p.fixed_view::<3, 3>(0, 0) + o.cov;
+                it.p.fixed_view_mut::<3, 3>(0, 0).copy_from(&widened);
+            }
+        }
+        offsets
+    }
+
     /// Constant-velocity prediction in ECEF with ENU-defined process noise.
     pub fn predict(
         &self,
@@ -359,7 +392,10 @@ impl WorldModel {
 
     /// Computes the shared world state at `t` (see the module documentation).
     pub fn snapshot(&self, store: &ReportStore, t: Timestamp, trust: &TrustView) -> WorldSnapshot {
-        let (items, mut snap) = self.prepare(store, t, trust);
+        let (mut items, mut snap) = self.prepare(store, t, trust);
+        if self.config.align.enabled {
+            snap.alignment = self.align(&mut items);
+        }
         let clusters = self.cluster(&items);
         let ids = name_clusters(&items, &clusters, self.config.id_rule);
         snap.objects = clusters
@@ -972,6 +1008,64 @@ mod tests {
         };
         let snap = wm.snapshot(&store(&[a, b, c]), t, &trust);
         assert_eq!(snap.objects[0].id, b.key());
+    }
+
+    #[test]
+    fn alignment_merges_objects_split_by_an_unreported_offset() {
+        // Two sources see the same six objects; source 2 is offset by 2.5 m
+        // east, far beyond its declared uncertainty (variance 0.05 m²).
+        let pts = [
+            (0.0, 0.0),
+            (12.0, 3.0),
+            (25.0, -4.0),
+            (31.0, 9.0),
+            (-8.0, 15.0),
+            (5.0, -12.0),
+        ];
+        let mut reports = Vec::new();
+        for (k, (x, y)) in pts.iter().enumerate() {
+            reports.push(report(
+                1,
+                10 + k as u64,
+                1,
+                Vector3::new(*x, *y, 0.0),
+                0.05,
+                5000,
+            ));
+            reports.push(report(
+                2,
+                20 + k as u64,
+                1,
+                Vector3::new(x + 2.5, *y, 0.0),
+                0.05,
+                5000,
+            ));
+        }
+        let st = store(&reports);
+        let t = Timestamp::from_millis(5000);
+        let plain = WorldModel::default().snapshot(&st, t, &TrustView::default());
+        assert_eq!(
+            plain.objects.len(),
+            12,
+            "without alignment every object is split"
+        );
+        assert!(plain.alignment.is_empty());
+        let aligned = WorldModel::new(WorldModelConfig {
+            align: AlignConfig {
+                enabled: true,
+                ..AlignConfig::default()
+            },
+            ..WorldModelConfig::default()
+        })
+        .snapshot(&st, t, &TrustView::default());
+        assert_eq!(aligned.objects.len(), 6);
+        assert!(aligned.objects.iter().all(|o| o.members.len() == 2));
+        assert_eq!(aligned.alignment.len(), 2);
+        let shift: f64 = aligned.alignment.iter().map(|o| o.translation.norm()).sum();
+        assert!(
+            (shift - 2.5).abs() < 0.05,
+            "the two sources meet halfway: {shift}"
+        );
     }
 
     #[test]

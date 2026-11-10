@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
-[![DST](https://img.shields.io/badge/DST-19%20perception%20scenarios-blue.svg)](docs/PERCEPTION_SHARING.md#10-deterministic-simulation-dst)
+[![DST](https://img.shields.io/badge/DST-20%20perception%20scenarios-blue.svg)](docs/PERCEPTION_SHARING.md#10-deterministic-simulation-dst)
 
 > **Status: research prototype.** The pipeline runs end to end, across separate processes over Zenoh, and is tested under injected network faults and adversaries in deterministic simulation. It has not yet been run on real sensor data, over a real radio network, or at fleet scale. See [What is and is not proven](#what-is-and-is-not-proven).
 
@@ -18,6 +18,7 @@ Three things make this hard, and GodView handles each one:
 |:--|:--|:--|
 | **Different frames** | Each robot measures in its own drifting coordinate frame, and its own position is uncertain. | Reports are converted to a shared Earth frame (ECEF) with the robot's localization and clock uncertainty folded into each report's covariance. |
 | **Double counting** | Relayed and echoed reports make the fused picture look more certain than it is. | Only each agent's own tracks are ever shared, no fused estimate is ever fed back (only object IDs travel back, as labels), and fusion uses covariance intersection, which is safe under unknown correlation. |
+| **Drifting positions** | Each robot's GPS error drifts, so two robots place the same object a few meters apart and it shows up twice. | Optionally, robots are aligned to each other at every update using the objects they both see, so shared objects line up without declaring a huge uncertainty. |
 | **Different sizes** | A truck seen from opposite ends looks like two objects, and a car beside a truck can look like one. | Detections can carry oriented boxes. Sizes and headings must agree for reports to fuse, and a detector's systematic errors (a center shifted by seeing only part of an object, a size or heading it always gets wrong) are published as uncertainty. |
 | **Untrusted data** | A robot can be miscalibrated, compromised or impersonated. | Every batch is Ed25519-signed and validated; replays and forgeries are rejected; a consistency monitor inflates or excludes sources that disagree with their peers. |
 
@@ -39,7 +40,7 @@ Three things make this hard, and GodView handles each one:
 4. **Report store.** Received reports go into a last-writer-wins store keyed by source and track. Duplicated, reordered and relayed messages all converge to the same store.
 5. **World model.** Each agent computes the shared world from its store: predict to a common time, find candidates with an H3 index, gate on position and velocity, cluster with at most one track per source, and fuse by covariance intersection. Each report also carries the ID its track belongs to, so an object keeps its ID as it is handed from one agent's sensors to the next. The same store always gives a bit-identical world, IDs included.
 
-The full contract, frames, formats and parameters are in [docs/PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md).
+The full contract, frames, formats and parameters are in [docs/PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md). The short version of the evidence, including where GodView fails, is [docs/WRITEUP.md](docs/WRITEUP.md).
 
 ## Quick start
 
@@ -49,7 +50,7 @@ Requires a stable Rust toolchain.
 # All tests (unit, integration, multi-process). Use --release for realistic timing.
 cargo test --workspace
 
-# Deterministic simulation: all 19 perception scenarios for one seed, or many seeds
+# Deterministic simulation: all 20 perception scenarios for one seed, or many seeds
 cargo run --release -p godview_sim -- --scenario all --seed 42
 cargo run --release -p godview_sim -- --scenario all --seed 1 --seeds 100
 
@@ -83,7 +84,7 @@ my_detector | target/release/godview-node --connect tcp/<peer>:7447
 
 **Tested, with the scope stated in each test:**
 
-- **Deterministic simulation (`godview_sim`).** 19 scenarios, each checking one stated invariant: different coordinate frames, localization error and dropout, H3 cell edges, loss, duplication, corruption and reordering, relays and echoes, partitions, restarts, a biased source, a fabricating source, replay and forgery, late measurements, large objects reported as boxes by detectors that see only part of them, and objects handed between agents. Every run is reproducible from its seed. The 17 earlier scenarios passed for each of 260 seeds checked (4,420 runs) before boxes and IDs changed; since then, all 19 passed for the 9 seeds run so far (171 runs), and the handoff scenario for 40 seeds. The runs check that each invariant held for those seeds; they are not a proof that it holds in general.
+- **Deterministic simulation (`godview_sim`).** 20 scenarios, each checking one stated invariant: different coordinate frames, localization error and dropout, H3 cell edges, loss, duplication, corruption and reordering, relays and echoes, partitions, restarts, a biased source, a fabricating source, replay and forgery, late measurements, large objects reported as boxes by detectors that see only part of them, objects handed between agents, and drifting localization offsets. Every run is reproducible from its seed. The 17 earlier scenarios passed for each of 260 seeds checked (4,420 runs) before boxes and IDs changed; since then, all 19 passed for the 9 seeds run so far (171 runs), and the handoff scenario for 40 seeds. The runs check that each invariant held for those seeds; they are not a proof that it holds in general.
 - **Multi-process tests (`godview_node`).** Real node processes over Zenoh on localhost:
   - Four nodes with 20% loss, 20% duplication and 10 to 70 ms delays track every object, and they compute a bit-identical world after a final fault-free round.
   - A node 5 km away in the same mesh receives no traffic.
@@ -94,11 +95,11 @@ my_detector | target/release/godview-node --connect tcp/<peer>:7447
 
 **Not yet:**
 
-- real sensor data or a real detector;
+- a real detector (the real-data replay uses the dataset's labels with added noise);
 - a real radio network;
 - many agents or many objects (scale is not benchmarked);
-- boxes from a real detector (simulated detectors only so far);
 - re-identification: an object that drops out of every sensor's view and reappears gets a new ID;
+- estimating a heading offset between sources (alignment estimates translation only), and a trust monitor that does not exclude everyone when all sources drift (issue #5);
 - Biscuit capability checks per batch;
 - revocations that survive a restart.
 

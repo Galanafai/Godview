@@ -92,8 +92,8 @@ detection scores; detector threshold is 0.2):
 this gives, with sharing and alignment off, 67.17 / 42.06 against the
 committed tracker's 50.23 / 29.80, Late Fusion 52.01 / 28.80 and No Fusion
 45.95 / 25.73, and 0.44 false objects from sharing per car-frame against 2.89,
-while objects gained through sharing stay at 1.36 against 1.46 (0.93 -> 0.05
-for gained at no sharing is the reference). Without sharing the same settings
+while objects gained through sharing stay about the same (1.36 per
+car-frame against 1.46). Without sharing the same settings
 score 52.03 / 33.38 (its passthrough, raw boxes: 51.01 / 29.52).
 
 ## 4. Alignment gauge

@@ -505,3 +505,36 @@ well as pooled. After D3, Phase D has two steps left: D4 (choose the demo moment
   from Box with the recorded hashes; D1's exports and summaries stay), or train on part of the train split
   (train1 and train2 only fit in the current space), or add disk; (2) the training budget (epochs or GPU hours), with the
   gate deciding whether the result is used.
+
+### D4: the rule for the demo moment, committed before any search (2026-11-10)
+
+**The demo uses dataset annotations as detections** (labels plus noise, as in D2), not a detector. What it
+shows is GodView's sharing and ego view on real footage and real geometry; it says nothing about detector
+quality. This goes into every write-up and the video's end card.
+
+**Scenes searched:** all V2X-Real val and test scenes (LiDAR-Cameras versions; test downloaded for this).
+
+**Input for the search:** the D2 converter (labels plus noise: an agent detects a label of its own list with
+at least 5 of its own lidar points inside it, within 100 m, noise 0.3 m / 0.2 m / 3 degrees), the replay
+`v2x-replay` with the D2 tracker (fresh-only, overlap pruning 0.3 keeping the more recent, publish threshold
+0.3), **self reports on with `self_single_per_source`** (and same-source exactness and competition),
+**alignment off**, scored on each vehicle's **ego view**.
+
+**An object-vehicle pair at a frame qualifies when all of:**
+
+1. the object (a label of the shared truth, not a recording vehicle's body) is within 50 m (horizontal) of the vehicle's lidar;
+2. its box centre projects inside the vehicle's front camera image (`cam1`, 1920 x 1080, depth over 3 m);
+3. **occluded:** none of the vehicle's own lidar points lie inside the label's box;
+4. **known through sharing:** the vehicle's ego view holds a world object attributed to that label whose members are
+   only other agents' reports (none from the vehicle), and at least one other agent detected it in this frame.
+
+**Interval:** a maximal run of qualifying frames, bridging gaps of at most 2 frames in conditions 2 and 4
+(not in 3). **It counts only if afterwards the object becomes directly visible:** within 30 frames after
+the interval ends, the vehicle has at least 5 of its own lidar points in the box in at least 3 of 10
+consecutive frames while the object is within 50 m. Minimum length 10 frames (1 s).
+
+**Ranking:** objects that are pedestrians or cyclists (classes Pedestrian, BicycleRider, ScooterRider, Scooter)
+first, then by interval length (frames), longest first; ties by scenario name, then vehicle, then label id. One
+candidate per scenario, vehicle and label. **Report the top 5** with length, class, the agents that saw it, and
+a front-camera thumbnail at the start and end of each interval; **the pick and its rank are made by
+Galanafai with the team and recorded here.** Then the scene package (D4 list above) and a Rerun `.rrd`.

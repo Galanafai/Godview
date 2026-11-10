@@ -103,10 +103,38 @@ def draw_frame(img, objs, font, scale, hud=True):
             if strong:
                 gd.line(seg, fill=col + (255,), width=lw * 4)
     glow = glow.filter(ImageFilter.GaussianBlur(radius=10 * scale))
+    tag_pos = []
+    for o in objs:
+        if not (o.get("drawn") and o["focus"]):
+            continue
+        uv = o["uvz"][:, :2]
+        x, y = float(uv[:, 0].mean()), float(uv[:, 1].min())
+        if any(abs(x - tx) < 330 * scale and abs(y - ty) < 60 * scale for tx, ty in tag_pos):
+            continue
+        tag_pos.append((x, y))
+        o["tag"] = (x, y)
     out = img.convert("RGBA")
     out = Image.alpha_composite(out, glow)
     out = Image.alpha_composite(out, fill)
     out = Image.alpha_composite(out, lines)
+    td = ImageDraw.Draw(out)
+    small = font.font_variant(size=max(12, int(font.size * 1.35)))
+    for o in objs:
+        if "tag" not in o:
+            continue
+        x, y = o["tag"]
+        revealed = o.get("color", CYAN) != CYAN
+        noun = "PERSON" if o.get("cls", 2) == 2 else "CAR"
+        text = f"{noun}  ·  NOW VISIBLE" if revealed else f"HIDDEN {noun}"
+        bb = td.textbbox((0, 0), text, font=small)
+        tw, th = bb[2] - bb[0], bb[3] - bb[1]
+        pad = 7 * scale
+        y1 = y - 10 * scale
+        x0 = min(max(x - tw / 2 - pad, 4), out.size[0] - tw - 2 * pad - 4)
+        col = o.get("color", CYAN)
+        td.rounded_rectangle([x0, y1 - th - 2 * pad, x0 + tw + 2 * pad, y1], radius=6 * scale,
+                             fill=(6, 14, 22, 215), outline=col + (255,), width=max(1, int(2 * scale)))
+        td.text((x0 + pad, y1 - th - pad - bb[1]), text, font=small, fill=col + (255,))
     if hud:
         draw_hud(out, objs, font, scale)
     return out.convert("RGB")
@@ -203,7 +231,8 @@ def main():
                 continue
             corners = box_corners(s["pos"], s["size"], s["yaw_deg"])
             objs.append({"uvz": project(corners, origin, cal), "focus": tid in focus,
-                         "agents": s["agents"], "color": WHITE if revealed else CYAN})
+                         "agents": s["agents"], "color": WHITE if revealed else CYAN,
+                         "cls": t["class_id"]})
         img = Image.open(img_path).convert("RGB")
         scale = img.size[0] / 1920.0
         font = load_font(args.font, int(22 * scale))

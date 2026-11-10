@@ -55,10 +55,13 @@ def parse_args():
     p.add_argument("--stills", default="")
     p.add_argument("--animation", action="store_true")
     p.add_argument("--save", default="")
-    p.add_argument("--shot", default="hero", choices=["hero", "top", "egotop", "orbit"])
+    p.add_argument("--shot", default="hero", choices=["hero", "top", "egotop", "orbit", "live"])
     p.add_argument("--freeze", type=int, default=0,
                    help="dataset frame to pause time at; the camera still moves")
     p.add_argument("--orbit-frames", type=int, default=150)
+    p.add_argument("--range", default="", help="dataset frames a,b to render with --animation")
+    p.add_argument("--no-labels", action="store_true")
+    p.add_argument("--font", default="/usr/share/fonts/opentype/inter/Inter-Bold.otf")
     return p.parse_args(argv)
 
 
@@ -313,6 +316,98 @@ def key_visible(parts, frame, visible):
 # scene
 
 
+def make_label(name, text, color, cam, font_path, size=0.85):
+    """Camera-facing text on a dark plate; returns the root object to animate."""
+    cu = bpy.data.curves.new(name, "FONT")
+    cu.body = text
+    cu.align_x = "CENTER"
+    cu.align_y = "CENTER"
+    cu.size = size
+    if font_path and Path(font_path).exists():
+        cu.font = bpy.data.fonts.load(font_path, check_existing=True)
+    txt = bpy.data.objects.new(name, cu)
+    bpy.context.scene.collection.objects.link(txt)
+    txt.data.materials.append(mat_emission(name + "_m", color, 6.0))
+    bpy.context.view_layer.update()
+    w, h = txt.dimensions.x, txt.dimensions.y
+    me = bpy.data.meshes.new(name + "_plate")
+    pad = 0.35 * size
+    me.from_pydata([(-w / 2 - pad, -h / 2 - pad, -0.02), (w / 2 + pad, -h / 2 - pad, -0.02),
+                    (w / 2 + pad, h / 2 + pad, -0.02), (-w / 2 - pad, h / 2 + pad, -0.02)],
+                   [], [(0, 1, 2, 3)])
+    plate = bpy.data.objects.new(name + "_plate", me)
+    bpy.context.scene.collection.objects.link(plate)
+    plate.data.materials.append(mat_principled(name + "_pm", (0.004, 0.006, 0.01), rough=0.9, coat=0.0))
+    plate.parent = txt
+    for o in (txt, plate):
+        o.visible_diffuse = o.visible_glossy = o.visible_transmission = False
+        o.visible_shadow = o.visible_volume_scatter = False
+    tc = txt.constraints.new("TRACK_TO")
+    tc.target = cam
+    tc.track_axis = "TRACK_Z"
+    tc.up_axis = "UP_Y"
+    return txt, [txt, plate]
+
+
+def add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, font_path):
+    """Plain-language callouts: this car, the truck, the roadside sensors, the hidden people."""
+    WHITE = (1.0, 1.0, 1.0)
+    f_first = frames_all[0]
+    # this car
+    ego_states = {s["frame"]: s for s in sc.agent_tracks[sc.ego_index]["states"]}
+    lab, parts = make_label("lab_ego", "THIS CAR", AMBER, cam, font_path)
+    for fr in frames_all:
+        e = ego_states[fr]
+        lab.location = (e["centre"][0], e["centre"][1], gz + 4.0)
+        lab.keyframe_insert("location", frame=bf(fr))
+    # the truck blocking the view: the closest truck to this car that it sees itself
+    e0 = ego_states[f_first]["centre"]
+    best = None
+    for tid, t in sc.tracks.items():
+        if t["class_id"] != 3:
+            continue
+        for s in t["states"]:
+            if s["frame"] == f_first and s["status"] == "solid":
+                d = math.hypot(s["pos"][0] - e0[0], s["pos"][1] - e0[1])
+                if d < 12 and (best is None or d < best[0]):
+                    best = (d, tid)
+    if best:
+        tstates = {s["frame"]: s for s in sc.tracks[best[1]]["states"]}
+        lab, parts = make_label("lab_truck", "TRUCK\nBLOCKS THE VIEW", WHITE, cam, font_path, 0.6)
+        for fr in frames_all:
+            s = tstates.get(fr)
+            if s:
+                lab.location = (s["pos"][0], s["pos"][1], s["pos"][2] + s["size"][2] / 2 + 1.4)
+                lab.keyframe_insert("location", frame=bf(fr))
+    # roadside sensors and the other car
+    for idx, at in sc.agent_tracks.items():
+        if idx == sc.ego_index:
+            continue
+        text = "ROADSIDE SENSOR" if at["kind"] == "rsu" else "OTHER CAR"
+        lab, parts = make_label(f"lab_agent{idx}", text, VIOLET, cam, font_path, 0.75)
+        for s in at["states"]:
+            if s["frame"] not in frames_all:
+                continue
+            base = s["sensor"] if at["kind"] == "rsu" else s["centre"]
+            lab.location = (base[0], base[1], max(base[2], gz + 2.0) + 1.5)
+            lab.keyframe_insert("location", frame=bf(s["frame"]))
+    # the hidden people: centre of the focus ghosts, shown while any is a ghost
+    lab, parts = make_label("lab_hidden", "HIDDEN PEOPLE", CYAN, cam, font_path)
+    for fr in frames_all:
+        pts = [s["pos"] for tid in focus_ids for s in sc.tracks[tid]["states"]
+               if s["frame"] == fr and s["status"] == "ghost"]
+        f = bf(fr)
+        if pts:
+            lab.location = (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts),
+                            gz + 3.0)
+            lab.keyframe_insert("location", frame=f)
+        if freeze:
+            key_visible(parts, 1, False)
+            key_visible(parts, ghost_on, bool(pts))
+        else:
+            key_visible(parts, f, bool(pts))
+
+
 def build(args):
     sc = Scene(args.package)
     focus_labels = [g for g in args.focus.split(",") if g]
@@ -382,29 +477,6 @@ def build(args):
     bpy.ops.mesh.primitive_plane_add(size=600, location=(ex, ey, gz))
     ground = bpy.context.active_object
     ground.active_material = m_ground
-
-    # static lidar scan as points
-    pts = sc.static_points(args.points)
-    pts = pts[np.hypot(pts[:, 0] - ex, pts[:, 1] - ey) < args.radius * 1.6]
-    me = bpy.data.meshes.new("scan")
-    me.vertices.add(len(pts))
-    me.vertices.foreach_set("co", pts.astype(np.float32).ravel())
-    scan = bpy.data.objects.new("scan", me)
-    col.objects.link(scan)
-    ng = bpy.data.node_groups.new("to_points", "GeometryNodeTree")
-    ng.interface.new_socket(name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
-    ng.interface.new_socket(name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
-    gi = ng.nodes.new("NodeGroupInput")
-    go = ng.nodes.new("NodeGroupOutput")
-    m2p = ng.nodes.new("GeometryNodeMeshToPoints")
-    m2p.inputs["Radius"].default_value = 0.035
-    sm = ng.nodes.new("GeometryNodeSetMaterial")
-    sm.inputs["Material"].default_value = mat_points("scan", gz, gz + 14.0)
-    ng.links.new(gi.outputs[0], m2p.inputs["Mesh"])
-    ng.links.new(m2p.outputs["Points"], sm.inputs["Geometry"])
-    ng.links.new(sm.outputs["Geometry"], go.inputs[0])
-    mod = scan.modifiers.new("points", "NODES")
-    mod.node_group = ng
 
     meshes = {1: mesh_car(), 2: mesh_person(), 3: mesh_truck()}
 
@@ -575,15 +647,19 @@ def build(args):
     up = Vector((0, 0, 1))
     end = scene.frame_end
     if args.shot == "orbit":
-        pivot = ego + 0.55 * (focus - ego)
+        pivot = ego + 0.62 * (focus - ego)
         base = math.atan2(-fwd.y, -fwd.x)  # behind the ego car
         shots = []
-        for k, (deg, radius, height) in enumerate([(-25, 19, 8.5), (15, 18, 8.0), (45, 16.5, 7.5),
-                                                    (72, 15, 7.0), (92, 14, 6.5)]):
+        for k, (deg, radius, height) in enumerate([(-25, 20, 9.0), (12, 19.5, 9.0), (42, 19, 9.0),
+                                                    (68, 19, 9.5), (86, 19, 10.0)]):
             ang = base + math.radians(deg) * (1 if left.dot(Vector((math.cos(base + 1), math.sin(base + 1), 0))) > 0 else -1)
             pos = pivot + Vector((radius * math.cos(ang), radius * math.sin(ang), 0)) + height * up
             f = 1 + int(round(k * (end - 1) / 4))
             shots.append((f, pos, pivot + 1.0 * up))
+    elif args.shot == "live":
+        mid = ego + 0.6 * (focus - ego)
+        shots = [(1, ego - 13 * fwd - 7 * left + 11 * up, mid),
+                 (end, ego - 6 * fwd - 10 * left + 9 * up, mid + 1.5 * fwd)]
     elif args.shot == "egotop":
         shots = [(1, ego + 26 * up - 2 * fwd, ego + 4 * fwd)]
     elif args.shot == "top":
@@ -602,6 +678,46 @@ def build(args):
         target.location = tpos
         cam.keyframe_insert("location", frame=f)
         target.keyframe_insert("location", frame=f)
+
+    # static lidar scan as points
+    pts = sc.static_points(args.points)
+    pts = pts[np.hypot(pts[:, 0] - ex, pts[:, 1] - ey) < args.radius * 1.6]
+    # drop points close to the camera path; near the lens they render as large blobs
+    path = [np.array(c[1]) for c in shots]
+    samples = [path[0]]
+    for p0, p1 in zip(path, path[1:]):
+        samples += [p0 + (p1 - p0) * t for t in np.linspace(0, 1, 12)[1:]]
+    keep = np.ones(len(pts), bool)
+    if args.shot == "live":
+        # cut away overhanging canopy near the intersection so the street stays visible
+        mid = np.array([ex, ey]) + 0.6 * (np.array(focus[:2]) - np.array([ex, ey]))
+        near = np.hypot(pts[:, 0] - mid[0], pts[:, 1] - mid[1]) < 22
+        keep &= ~(near & (pts[:, 2] > gz + 4.5))
+    for c in samples:
+        keep &= np.linalg.norm(pts - c, axis=1) > 7.0
+    pts = pts[keep]
+    me = bpy.data.meshes.new("scan")
+    me.vertices.add(len(pts))
+    me.vertices.foreach_set("co", pts.astype(np.float32).ravel())
+    scan = bpy.data.objects.new("scan", me)
+    col.objects.link(scan)
+    ng = bpy.data.node_groups.new("to_points", "GeometryNodeTree")
+    ng.interface.new_socket(name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+    ng.interface.new_socket(name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    gi = ng.nodes.new("NodeGroupInput")
+    go = ng.nodes.new("NodeGroupOutput")
+    m2p = ng.nodes.new("GeometryNodeMeshToPoints")
+    m2p.inputs["Radius"].default_value = 0.035
+    sm = ng.nodes.new("GeometryNodeSetMaterial")
+    sm.inputs["Material"].default_value = mat_points("scan", gz, gz + 14.0)
+    ng.links.new(gi.outputs[0], m2p.inputs["Mesh"])
+    ng.links.new(m2p.outputs["Points"], sm.inputs["Geometry"])
+    ng.links.new(sm.outputs["Geometry"], go.inputs[0])
+    mod = scan.modifiers.new("points", "NODES")
+    mod.node_group = ng
+
+    if not args.no_labels:
+        add_labels(sc, scene, cam, bf, frames_all, focus_ids, freeze, ghost_on, gz, args.font)
 
     # render settings
     r = scene.render
@@ -649,6 +765,9 @@ def main():
         bpy.ops.render.render(write_still=True)
         print("wrote", scene.render.filepath)
     if args.animation:
+        if args.range and not args.freeze:
+            a_, b_ = (int(v) for v in args.range.split(","))
+            scene.frame_start, scene.frame_end = bf(a_), bf(b_)
         scene.render.image_settings.file_format = "PNG"
         scene.render.filepath = str((out / f"{args.shot}_").resolve())
         bpy.ops.render.render(animation=True)

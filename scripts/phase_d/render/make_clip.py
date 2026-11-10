@@ -124,6 +124,44 @@ def compose(img, text, fonts, size, label=None, crop_centre=0.42):
     return canvas
 
 
+def split(left, right, text, fonts, size):
+    """Same moment side by side (16:9) or stacked (4:5): the car alone, and with GodView."""
+    w, h = size
+    canvas = Image.new("RGB", size, (5, 8, 15))
+    d = ImageDraw.Draw(canvas)
+    lab = fonts.get("bold", int(w * (0.022 if w / h > 1.5 else 0.040)))
+    names = [("WHAT THE CAR SEES", (235, 240, 245)), ("WITH GODVIEW", CYAN)]
+    if w / h > 1.5:
+        pw = w // 2 - 12
+        ph = int(pw * 3 / 4)
+        y = int(h * 0.12)
+        boxes = [(8, y), (w // 2 + 4, y)]
+        for (x, yy), im, (name, col) in zip(boxes, (left, right), names):
+            src = im.convert("RGB")
+            sw, sh = src.size
+            cw = int(sh * 4 / 3)
+            x0 = max(0, min(sw - cw, int(sw * 0.42) - cw // 2))
+            canvas.paste(src.crop((x0, 0, x0 + cw, sh)).resize((pw, ph), Image.LANCZOS), (x, yy))
+            tw = d.textbbox((0, 0), name, font=lab)[2]
+            d.text((x + (pw - tw) / 2, yy - lab.size - 18), name, font=lab, fill=col)
+        big = fonts.get("bold", int(w * 0.028))
+        draw_rich(d, text, big, w / 2, y + ph + int(h * 0.05), w * 0.9)
+    else:
+        pw, ph = w, int(w * 0.44)
+        ys = [int(h * 0.045), int(h * 0.045) + ph + int(h * 0.07)]
+        for yy, im, (name, col) in zip(ys, (left, right), names):
+            src = im.convert("RGB")
+            sw, sh = src.size
+            ch = int(sw * ph / pw)
+            y0 = int((sh - ch) * 0.65)
+            canvas.paste(src.crop((0, y0, sw, y0 + ch)).resize((pw, ph), Image.LANCZOS), (0, yy))
+            tw = d.textbbox((0, 0), name, font=lab)[2]
+            d.text(((w - tw) / 2, yy + ph + 6), name, font=lab, fill=col)
+        big = fonts.get("bold", int(w * 0.046))
+        draw_rich(d, text, big, w / 2, ys[1] + ph + int(h * 0.05), w * 0.92)
+    return canvas
+
+
 def caption(img, text, fonts, scale):
     """Large caption, lower third, on a soft dark band. Text in *stars* is cyan."""
     w, h = img.size
@@ -188,6 +226,7 @@ def main():
     p.add_argument("--dashcam", required=True)
     p.add_argument("--overlay", required=True)
     p.add_argument("--orbit", required=True)
+    p.add_argument("--live", default="", help="build_scene.py --shot live frames (30 fps)")
     p.add_argument("--out", required=True)
     p.add_argument("--freeze", type=int, default=145)
     p.add_argument("--start", type=int, default=118)
@@ -232,15 +271,25 @@ def main():
                 else "They see *people behind the truck*.")
         b_frames.append(compose(Image.open(f), text, fonts, size, label=paused, crop_centre=0.5))
 
-    # C: footage again from the paused moment, with GodView's ghosts
+    # C: the same moment side by side, from the paused frame on
     n_c = (a.end - a.freeze) * 3
     c_frames = []
     for i in range(n_c):
         fr = a.freeze + i // 3
-        img = Image.open(over[nearest(over, fr)])
-        text = ("GodView fuses it into one shared picture," if i < n_c * 0.4
-                else "so the car knows *before they step out*.")
-        c_frames.append(compose(img, text, fonts, size))
+        left = Image.open(dash[nearest(dash, fr)])
+        right = Image.open(over[nearest(over, fr)])
+        text = ("Same moment: the car alone, and *with GodView*." if i < n_c * 0.45
+                else "It knows they're there *before they step out*.")
+        c_frames.append(split(left, right, text, fonts, size))
+
+    # L: real-time 3D from above, if rendered
+    l_frames = []
+    live = sorted(Path(a.live).glob("*.png")) if a.live else []
+    for i, f in enumerate(live):
+        text = ("Same scene from above, in real time." if i < len(live) * 0.45
+                else "Every sensor feeds *one shared map*.")
+        l_frames.append(compose(Image.open(f), text, fonts, size,
+                                label="REAL TIME  ·  3D VIEW", crop_centre=0.5))
 
     # D: end card
     card = end_card(size, fonts, scale)
@@ -256,6 +305,8 @@ def main():
     frames = join(t_frames, a_frames)
     frames = join(frames, b_frames)
     frames = join(frames, c_frames)
+    if l_frames:
+        frames = join(frames, l_frames)
     frames = join(frames, d_frames)
 
     tmp = Path(tempfile.mkdtemp(prefix="clip_"))

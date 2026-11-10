@@ -20,10 +20,24 @@ if [ "$(id -u)" -ne 0 ]; then SUDO=sudo; fi
 
 echo "== system packages"
 export DEBIAN_FRONTEND=noninteractive
-$SUDO apt-get update -y -qq
-$SUDO apt-get install -y -qq --no-install-recommends \
-  build-essential pkg-config git curl ca-certificates tmux unzip \
-  python3 python3-venv python3-pip >/dev/null
+# Skip apt when everything is already there (most RunPod images), or when
+# SKIP_APT=1. apt output is shown so a slow mirror or a held lock is visible.
+missing=""
+for c in cc make pkg-config git curl tmux unzip python3; do
+  command -v "$c" >/dev/null || missing="$missing $c"
+done
+python3 -c "import venv, ensurepip" 2>/dev/null || missing="$missing python3-venv"
+if [ "${SKIP_APT:-0}" = 1 ]; then
+  echo "skipped (SKIP_APT=1); missing:${missing:- none}"
+elif [ -z "$missing" ]; then
+  echo "all present, skipped"
+else
+  echo "missing:$missing"
+  $SUDO apt-get update -y </dev/null
+  $SUDO apt-get install -y --no-install-recommends </dev/null \
+    build-essential pkg-config git curl ca-certificates tmux unzip \
+    python3 python3-venv python3-pip
+fi
 
 echo "== environment file ($WS/godview.env)"
 cat >"$WS/godview.env" <<EOF

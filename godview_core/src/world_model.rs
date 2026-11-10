@@ -51,9 +51,9 @@
 
 use crate::alignment::{AlignConfig, AlignItem, SourceOffset};
 use crate::extent::{fuse_boxes, BoxGate, BoxModel, ObjectBox};
-use crate::frames::{cv_process_noise, cv_transition, ecef_from_enu_rotation, symmetrize, Ecef};
+use crate::frames::{cv_process_noise, cv_transition, ecef_from_enu_rotation, symmetrize, Ecef, PoseWithCov};
 use crate::godview_space::Entity;
-use crate::report::{AgentId, FrameRef, ReportKey, TrackLifecycle, SELF_TRACK};
+use crate::report::{AgentId, FrameRef, ReportKey, TrackLifecycle, TrackReport, SELF_TRACK};
 use crate::report_store::{Fnv, ReportStore};
 use crate::spatial_index::SpatialIndex;
 use godview_env::Timestamp;
@@ -297,6 +297,76 @@ impl WorldSnapshot {
     }
 }
 
+/// One agent's own view: who it is, its current pose with covariance, and the
+/// sensor-only covariance of its own published reports (see
+/// [`WorldModel::snapshot_ego`]).
+pub struct EgoContext<'a> {
+    /// The agent whose view this is.
+    pub agent: AgentId,
+    /// Its current odometry-to-ECEF pose with covariance.
+    pub pose: &'a PoseWithCov,
+    /// Packed sensor-only covariance of its own reports, by report key.
+    pub own_sensor_cov: &'a BTreeMap<ReportKey, [f32; 21]>,
+}
+
+impl EgoContext<'_> {
+    /// The covariance an error in the agent's pose induces on a state in ECEF,
+    /// at that state (lever arm included).
+    pub(crate) fn pose_induced_cov(&self, x: &Vector6<f64>) -> Matrix6<f64> {
+        let inv = self.pose.pose.inverse();
+        let p = inv.transform_point(&Vector3::new(x[0], x[1], x[2]));
+        let v = inv.transform_vector(&Vector3::new(x[3], x[4], x[5]));
+        let x_odom = Vector6::new(p.x, p.y, p.z, v.x, v.y, v.z);
+        let zero = PoseWithCov {
+            pose: self.pose.pose,
+            cov: self.pose.cov,
+        };
+        zero.transform_state(&x_odom, &Matrix6::zeros()).1
+    }
+}
+
+/// The self reports of a snapshot and the reports assigned to them.
+struct SelfPlan {
+    /// Indices of the self reports.
+    selfs: Vec<usize>,
+    /// Self reports and assigned reports (not clustered).
+    taken: Vec<bool>,
+    /// Assigned report indices by self report index.
+    assigned: BTreeMap<usize, Vec<usize>>,
+}
+
+impl SelfPlan {
+    fn default_for(n: usize) -> Self {
+        Self {
+            selfs: Vec::new(),
+            taken: vec![false; n],
+            assigned: BTreeMap::new(),
+        }
+    }
+}
+
+/// Re-expresses alignment offsets with `agent` held at zero: every other source's
+/// translation is taken relative to the agent's, its covariance widened by the
+/// agent's. If the agent is in no group of sources connected by shared objects, no
+/// offset is defined relative to it and none is kept.
+fn fix_gauge(offsets: &mut Vec<SourceOffset>, agent: AgentId) {
+    let Some(f) = offsets.iter().find(|o| o.source == agent).copied() else {
+        offsets.clear();
+        return;
+    };
+    // Only the agent's own connected group is defined relative to it.
+    offsets.retain(|o| o.group == f.group);
+    for o in offsets.iter_mut() {
+        if o.source == agent {
+            o.translation = Vector3::zeros();
+            o.cov = Matrix3::zeros();
+        } else {
+            o.translation -= f.translation;
+            o.cov += f.cov;
+        }
+    }
+}
+
 /// A report predicted to the query time.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Prepared {
@@ -338,6 +408,21 @@ impl WorldModel {
         t: Timestamp,
         trust: &TrustView,
     ) -> (Vec<Prepared>, WorldSnapshot) {
+        self.prepare_with(store, t, trust, None)
+    }
+
+    /// [`WorldModel::prepare`], optionally for one agent's own view: that agent's
+    /// own reports use their sensor-only covariance (no pose error: in its own
+    /// frame its pose is exact), and every other source's reports gain the
+    /// pose-induced covariance of the agent's pose at the object, since what
+    /// matters is the uncertainty relative to the agent.
+    pub(crate) fn prepare_with(
+        &self,
+        store: &ReportStore,
+        t: Timestamp,
+        trust: &TrustView,
+        ego: Option<&EgoContext>,
+    ) -> (Vec<Prepared>, WorldSnapshot) {
         let mut snap = WorldSnapshot {
             t,
             ..Default::default()
@@ -364,9 +449,16 @@ impl WorldModel {
                 continue;
             }
             let dt = t.secs_since(r.t_valid);
-            let (x, mut p) = self.predict(&r.state(), &r.covariance(), dt);
+            let own_cov = ego
+                .filter(|e| r.source == e.agent)
+                .and_then(|e| e.own_sensor_cov.get(&r.key()))
+                .map(|c| TrackReport { cov: *c, ..*r }.covariance());
+            let (x, mut p) = self.predict(&r.state(), &own_cov.unwrap_or_else(|| r.covariance()), dt);
             if let Some(f) = trust.inflate.get(&r.source) {
                 p *= f.max(1.0);
+            }
+            if let Some(e) = ego.filter(|e| r.source != e.agent) {
+                p += e.pose_induced_cov(&x);
             }
             items.push(Prepared {
                 key: r.key(),
@@ -451,24 +543,39 @@ impl WorldModel {
 
     /// Splits the prepared reports into self reports (each its own world
     /// object), reports assigned to a self report (members of that object, not
-    /// fused and not clustered), and the rest, which stay in `items`.
+    /// clustered), and the rest, which stay in `items`.
     fn assign_self_reports(
         &self,
         items: &mut Vec<Prepared>,
         snap: &mut WorldSnapshot,
         t: Timestamp,
     ) -> Vec<WorldObject> {
+        let plan = self.plan_self(items, snap);
+        if plan.selfs.is_empty() {
+            return Vec::new();
+        }
+        let objects = Self::fuse_self_objects(items, &plan, t);
+        let rest: Vec<Prepared> = (0..items.len())
+            .filter(|i| !plan.taken[*i])
+            .map(|i| items[i])
+            .collect();
+        *items = rest;
+        objects
+    }
+
+    /// Which prepared reports are self reports and which are assigned to which.
+    fn plan_self(&self, items: &[Prepared], snap: &mut WorldSnapshot) -> SelfPlan {
         let selfs: Vec<usize> = (0..items.len())
             .filter(|i| items[*i].key.1 == SELF_TRACK)
             .collect();
-        if selfs.is_empty() {
-            return Vec::new();
-        }
         let mut taken = vec![false; items.len()];
+        let mut assigned: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        if selfs.is_empty() {
+            return SelfPlan { selfs, taken, assigned };
+        }
         for s in &selfs {
             taken[*s] = true;
         }
-        let mut assigned: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for j in 0..items.len() {
             if taken[j] {
                 continue;
@@ -497,14 +604,18 @@ impl WorldModel {
                 snap.assigned_to_self += 1;
             }
         }
-        let mut objects = Vec::with_capacity(selfs.len());
-        for s in &selfs {
-            // The identity is the self report's; the state is fused from the self
-            // report and its assigned reports like any cluster (covariance
-            // intersection in key order), so a precise detection pulls it.
+        SelfPlan { selfs, taken, assigned }
+    }
+
+    /// The self objects of a plan: identity from the self report, state fused
+    /// from the self report and its assigned reports (covariance intersection in
+    /// key order), so a precise detection pulls the position.
+    fn fuse_self_objects(items: &[Prepared], plan: &SelfPlan, t: Timestamp) -> Vec<WorldObject> {
+        let mut objects = Vec::with_capacity(plan.selfs.len());
+        for s in &plan.selfs {
             let key = items[*s].key;
             let mut members: Vec<usize> = std::iter::once(*s)
-                .chain(assigned.get(s).into_iter().flatten().copied())
+                .chain(plan.assigned.get(s).into_iter().flatten().copied())
                 .collect();
             members.sort_by_key(|m| items[*m].key);
             if let Some(mut o) = fuse_cluster(items, &members, t, key) {
@@ -512,9 +623,80 @@ impl WorldModel {
                 objects.push(o);
             }
         }
-        let rest: Vec<Prepared> = (0..items.len()).filter(|i| !taken[*i]).map(|i| items[i]).collect();
-        *items = rest;
         objects
+    }
+
+    /// Computes one agent's own view of the world at `t`, from the store, its own
+    /// sensor-only covariances and its current pose (see [`EgoContext`]).
+    ///
+    /// Differences from [`WorldModel::snapshot`], which is not touched: the agent's
+    /// own reports carry only sensor covariance, every other source's reports carry
+    /// their covariance plus the agent's pose-induced covariance, and with
+    /// alignment on the agent's own translation is held at zero (the ego-fixed
+    /// gauge: other sources are moved into the agent's frame, never the reverse).
+    /// Self objects use the same fusion, so the agent's own precise detection of
+    /// another agent dominates that agent's position. With all pose covariances
+    /// zero the result equals the shared snapshot.
+    pub fn snapshot_ego(
+        &self,
+        store: &ReportStore,
+        t: Timestamp,
+        trust: &TrustView,
+        ego: &EgoContext,
+    ) -> WorldSnapshot {
+        let (mut items, mut snap) = self.prepare_with(store, t, trust, Some(ego));
+        let plan = if self.config.self_reports {
+            self.plan_self(&items, &mut snap)
+        } else {
+            SelfPlan::default_for(items.len())
+        };
+        if self.config.align.enabled {
+            let rest: Vec<Prepared> = (0..items.len())
+                .filter(|i| !plan.taken[*i])
+                .map(|i| items[i])
+                .collect();
+            let view: Vec<AlignItem> = rest
+                .iter()
+                .map(|i| AlignItem {
+                    source: i.key.0,
+                    position: i.x.fixed_rows::<3>(0).into_owned(),
+                    class_id: i.class_id,
+                    size: i.object_box.map(|b| [b.size[0], b.size[1]]),
+                })
+                .collect();
+            let mut offsets = crate::alignment::estimate(&view, &self.config.align);
+            fix_gauge(&mut offsets, ego.agent);
+            // Every report of a moved source moves, self and assigned reports included.
+            for o in &offsets {
+                for it in items.iter_mut().filter(|i| i.key.0 == o.source) {
+                    let moved = it.x.fixed_rows::<3>(0) + o.translation;
+                    it.x.fixed_rows_mut::<3>(0).copy_from(&moved);
+                    let widened = it.p.fixed_view::<3, 3>(0, 0) + o.cov;
+                    it.p.fixed_view_mut::<3, 3>(0, 0).copy_from(&widened);
+                }
+            }
+            snap.alignment = offsets;
+        }
+        let mut objects = if plan.selfs.is_empty() {
+            Vec::new()
+        } else {
+            Self::fuse_self_objects(&items, &plan, t)
+        };
+        let rest: Vec<Prepared> = (0..items.len())
+            .filter(|i| !plan.taken[*i])
+            .map(|i| items[i])
+            .collect();
+        let clusters = self.cluster(&rest);
+        let ids = name_clusters(&rest, &clusters, self.config.id_rule);
+        objects.extend(
+            clusters
+                .iter()
+                .zip(ids)
+                .filter_map(|(members, id)| fuse_cluster(&rest, members, t, id)),
+        );
+        objects.sort_by_key(|o| o.id);
+        snap.objects = objects;
+        snap
     }
 
     /// How far, in combined standard deviations, the centre of report `c` lies

@@ -22,7 +22,7 @@
 use crate::consistency::{ConsistencyConfig, ConsistencyMonitor};
 use crate::extent::{box_to_enu, center_sys_cov, with_systematic, wrap_pi, ObjectBox};
 use crate::filter::CvState;
-use crate::frames::{add_clock_uncertainty, Ecef};
+use crate::frames::{add_clock_uncertainty, Ecef, PoseWithCov};
 use crate::local_tracker::{Detection, LocalTrack, LocalTracker, LocalTrackerConfig, ScanOutcome};
 use crate::localization::{LocalizationStatus, PoseEstimate};
 use crate::report::{
@@ -129,6 +129,11 @@ pub struct NodeConfig {
     /// the self report and those reports. Off by default; sets
     /// `world.self_reports`.
     pub self_reports: bool,
+    /// Make [`PerceptionNode::ego_world`] available: the agent's own view of the
+    /// world (see `WorldModel::snapshot_ego`). Off by default; it records the
+    /// sensor-only covariance of each published report and changes nothing in
+    /// the reports or in the shared world.
+    pub ego_view: bool,
     /// Apply the consistency monitor's trust view in fusion.
     pub disable_trust: bool,
 }
@@ -215,6 +220,9 @@ pub struct PerceptionNode {
     /// The agent's own state for the next self report, and when it first set one.
     self_state: Option<SelfState>,
     self_born: Option<Timestamp>,
+    /// Sensor-only covariance (no pose error) of each of this node's published
+    /// reports, packed like the report's own, for the ego view.
+    own_sensor_cov: BTreeMap<ReportKey, [f32; 21]>,
     /// Tracks whose latest report was live (for `publish` suppression).
     live_sent: BTreeSet<LocalTrackId>,
     /// For each own track, the world-object ID it belonged to in this node's
@@ -244,6 +252,7 @@ impl PerceptionNode {
             tombstones: Vec::new(),
             self_state: None,
             self_born: None,
+            own_sensor_cov: BTreeMap::new(),
             live_sent: BTreeSet::new(),
             names: BTreeMap::new(),
             stats: NodeStats::default(),
@@ -420,9 +429,14 @@ impl PerceptionNode {
                 pp += sys;
             }
             state.p[(2, 2)] += tc.box_center_sys_z_m * tc.box_center_sys_z_m;
+            let mut sensor_p: Option<Matrix6<f64>> = None;
             let (frame, x, mut p) = match global {
                 Some(g) => {
                     let (x, p) = g.ecef_from_odom.transform_state(&state.x, &state.p);
+                    if self.config.ego_view {
+                        // The same state with the pose taken as exact: sensor noise only.
+                        sensor_p = Some(PoseWithCov::exact(g.ecef_from_odom.pose).transform_state(&state.x, &state.p).1);
+                    }
                     (FrameRef::Ecef, x, p)
                 }
                 None => (
@@ -435,6 +449,9 @@ impl PerceptionNode {
             };
             let vel = Vector3::new(x[3], x[4], x[5]);
             add_clock_uncertainty(&mut p, &vel, self.config.publish.clock_sigma_s);
+            if let Some(sp) = sensor_p.as_mut() {
+                add_clock_uncertainty(sp, &vel, self.config.publish.clock_sigma_s);
+            }
             if !finite(&x, &p) {
                 continue;
             }
@@ -475,7 +492,20 @@ impl PerceptionNode {
             if frame != FrameRef::Ecef {
                 self.stats.reports_published_local += 1;
             }
+            if let Some(sp) = sensor_p {
+                self.own_sensor_cov.insert((self.id, track.id), quantize_covariance(&sp));
+            }
             reports.push(report);
+        }
+        if self.config.ego_view {
+            let live: BTreeSet<LocalTrackId> = self
+                .tracker
+                .tracks()
+                .map(|t| t.id)
+                .chain(self.tombstones.iter().map(|(t, _)| t.id))
+                .collect();
+            self.own_sensor_cov
+                .retain(|k, _| k.1 == SELF_TRACK || live.contains(&k.1));
         }
         if let (true, Some(s), Some(g)) = (want_self, self.self_state, global) {
             if let Some(r) = self.self_report(t_valid, &s, g, valid_for_ms) {
@@ -513,6 +543,11 @@ impl PerceptionNode {
         if !finite(&x, &p) {
             return None;
         }
+        let sensor_p = self.config.ego_view.then(|| {
+            let mut sp = PoseWithCov::exact(pose.ecef_from_odom.pose).transform_state(&x_odom, &p_odom).1;
+            add_clock_uncertainty(&mut sp, &vel, self.config.publish.clock_sigma_s);
+            sp
+        });
         let footprint = ObjectBox {
             size: s.size,
             size_var: [s.sigma_size_m.powi(2); 3],
@@ -546,6 +581,9 @@ impl PerceptionNode {
             return None;
         }
         self.next_seq += 1;
+        if let Some(sp) = sensor_p {
+            self.own_sensor_cov.insert((self.id, SELF_TRACK), quantize_covariance(&sp));
+        }
         Some(report)
     }
 
@@ -653,6 +691,28 @@ impl PerceptionNode {
             })
             .collect();
         snap
+    }
+
+    /// This agent's own view of the world at `t` (see `WorldModel::snapshot_ego`),
+    /// given its current pose; `None` unless `NodeConfig::ego_view` is on and the
+    /// pose is global. A pure function of the received reports, this node's own
+    /// published sensor covariances and the pose; it changes nothing in the node
+    /// (the consistency monitor is read, not fed).
+    pub fn ego_world(&self, t: Timestamp, pose: &PoseEstimate) -> Option<WorldSnapshot> {
+        if !self.config.ego_view || pose.status != LocalizationStatus::Global {
+            return None;
+        }
+        let view = if self.config.disable_trust {
+            TrustView::default()
+        } else {
+            self.monitor.trust_view()
+        };
+        let ego = crate::world_model::EgoContext {
+            agent: self.id,
+            pose: &pose.ecef_from_odom,
+            own_sensor_cov: &self.own_sensor_cov,
+        };
+        Some(self.world.snapshot_ego(&self.store, t, &view, &ego))
     }
 
     /// The shared world state at `t` with no trust adjustments.
@@ -918,6 +978,13 @@ mod tests {
     /// A pose with a horizontal position uncertainty of `sigma_h` (m) per axis.
     fn uncertain_pose(rig: &Rig, t: Timestamp, sigma_h: f64) -> PoseEstimate {
         let link = site().ecef_from_enu_pose().compose(&rig.odom);
+        if sigma_h <= 0.0 {
+            return PoseEstimate {
+                t,
+                ecef_from_odom: PoseWithCov::exact(link),
+                status: LocalizationStatus::Global,
+            };
+        }
         let mut cov_enu = nalgebra::Matrix6::zeros();
         cov_enu[(0, 0)] = sigma_h * sigma_h;
         cov_enu[(1, 1)] = sigma_h * sigma_h;
@@ -1043,6 +1110,138 @@ mod tests {
         let (on_objects, on_selfs, on_kinds) = run(true);
         assert_eq!(on_selfs, 2, "{on_kinds:?}");
         assert_eq!(on_objects, 3, "two agents and the common car: {on_kinds:?}");
+    }
+
+    /// Two agents A (origin) and B (6 m East) that each see a common car C 15 m
+    /// aside and each other; returns the nodes after six frames of exchange and
+    /// the last pose of A. `sigma_h` is each agent's pose uncertainty; B's self
+    /// report is offset by `b_self_error` from where B really is (its pose error).
+    fn two_agents(
+        cfg: NodeConfig,
+        sigma_h: f64,
+        b_self_error: Vector3<f64>,
+        a_sees_b_at: Vector3<f64>,
+    ) -> (Rig, Rig, PoseEstimate, Vec<Vec<u8>>) {
+        let mut a = Rig::new(51, Vector3::new(0.0, 0.0, 0.0), 0.0);
+        let mut b = Rig::new(52, Vector3::new(6.0, 0.0, 0.0), 0.0);
+        a.node = PerceptionNode::new(SigningKey::from_bytes(&[51; 32]), 1, cfg);
+        b.node = PerceptionNode::new(SigningKey::from_bytes(&[52; 32]), 1, cfg);
+        let det = |r: &mut Rig, t: Timestamp, enu: Vector3<f64>, var: f64| {
+            r.next_obs += 1;
+            Detection {
+                obs_id: r.next_obs,
+                t,
+                z: r.odom.inverse().transform_point(&enu),
+                r: Matrix3::identity() * var,
+                class_id: 1,
+                class_prob: 0.9,
+                object_box: Some(crate::extent::ObjectBox {
+                    size: [4.5, 2.0, 1.6],
+                    size_var: [0.04; 3],
+                    yaw: 0.0,
+                    yaw_var: 0.0025,
+                    yaw_ambiguous: true,
+                }),
+            }
+        };
+        let mut bytes = Vec::new();
+        let mut pose_a = uncertain_pose(&a, Timestamp::from_millis(0), sigma_h);
+        for k in 0..6 {
+            let t = Timestamp::from_millis(k * 100);
+            let c = Vector3::new(3.0, 15.0, 0.0);
+            let da = vec![det(&mut a, t, a_sees_b_at, 0.04), det(&mut a, t, c, 0.04)];
+            let db = vec![det(&mut b, t, c, 0.04)];
+            a.node.ingest(&da);
+            b.node.ingest(&db);
+            a.node.maintain(t);
+            b.node.maintain(t);
+            a.node.set_self_state(Some(footprint()));
+            let mut sb = footprint();
+            sb.position = b_self_error;
+            b.node.set_self_state(Some(sb));
+            pose_a = uncertain_pose(&a, t, sigma_h);
+            let pose_b = uncertain_pose(&b, t, sigma_h);
+            let ba = a.node.publish(t, Some(&pose_a));
+            let bb = b.node.publish(t, Some(&pose_b));
+            if let Some(x) = ba {
+                bytes.push(x.clone());
+                b.node.receive(&x, t).ok();
+            }
+            if let Some(x) = bb {
+                bytes.push(x.clone());
+                a.node.receive(&x, t).ok();
+            }
+        }
+        (a, b, pose_a, bytes)
+    }
+
+    #[test]
+    fn the_ego_view_equals_the_shared_world_with_all_pose_sigmas_zero() {
+        for self_reports in [false, true] {
+            let mut cfg = NodeConfig::default();
+            cfg.ego_view = true;
+            cfg.self_reports = self_reports;
+            let (mut a, _b, pose_a, _) = two_agents(cfg, 0.0, Vector3::new(1.0, 0.4, 0.0), Vector3::new(6.05, 0.02, 0.0));
+            let t = Timestamp::from_millis(500);
+            let shared = a.node.world(t);
+            let ego = a.node.ego_world(t, &pose_a).expect("ego view");
+            assert_eq!(ego.digest(), shared.digest(), "self_reports {self_reports}");
+            assert_eq!(ego.objects.len(), shared.objects.len());
+        }
+    }
+
+    #[test]
+    fn the_ego_view_flag_changes_nothing_in_the_published_bytes_or_the_shared_world() {
+        let run = |ego_view: bool| {
+            let mut cfg = NodeConfig::default();
+            cfg.self_reports = true;
+            cfg.ego_view = ego_view;
+            let (mut a, mut b, _pose, bytes) = two_agents(cfg, 1.5, Vector3::new(1.0, 0.4, 0.0), Vector3::new(6.05, 0.02, 0.0));
+            let t = Timestamp::from_millis(500);
+            (bytes, a.node.world(t).digest(), b.node.world(t).digest())
+        };
+        let off = run(false);
+        let on = run(true);
+        assert_eq!(off.0, on.0, "the same signed batches");
+        assert_eq!(off.1, on.1);
+        assert_eq!(off.2, on.2);
+        // And the view is unavailable without the flag.
+        let mut cfg = NodeConfig::default();
+        cfg.self_reports = true;
+        let (a, _b, pose_a, _) = two_agents(cfg, 1.5, Vector3::zeros(), Vector3::new(6.05, 0.02, 0.0));
+        assert!(a.node.ego_world(Timestamp::from_millis(500), &pose_a).is_none());
+    }
+
+    #[test]
+    fn an_own_precise_detection_dominates_a_self_objects_position_in_the_ego_view() {
+        // B's pose is 1 m / 0.4 m off, so its self report says (7.0, 0.4) while B is
+        // really at (6, 0). A sees B precisely, at (6.05, 0.02), in its own frame.
+        // Both agents have a 1.5 m pose uncertainty.
+        let mut cfg = NodeConfig::default();
+        cfg.self_reports = true;
+        cfg.ego_view = true;
+        cfg.world.self_same_source_exact = true;
+        cfg.world.self_compete = true;
+        let (mut a, _b, pose_a, _) = two_agents(cfg, 1.5, Vector3::new(1.0, 0.4, 0.0), Vector3::new(6.05, 0.02, 0.0));
+        let t = Timestamp::from_millis(500);
+        let b_id = _b.node.id();
+        let find = |w: &crate::world_model::WorldSnapshot, who| {
+            w.objects.iter().find(|o| o.self_agent == Some(who)).map(|o| (site().from_ecef(&o.position()), o.members.len()))
+        };
+        let ego = a.node.ego_world(t, &pose_a).expect("ego view");
+        let (at_b, members) = find(&ego, b_id).expect("B's self object in A's ego view");
+        assert!(members >= 2, "B's self report and A's detection of B");
+        assert!((at_b - Vector3::new(6.05, 0.02, 0.0)).norm() < 0.15, "A's precise detection dominates: {at_b:?}");
+        // A's own self object sits at its own position, tight.
+        let (at_a, _) = find(&ego, a.node.id()).expect("A's self object");
+        assert!(at_a.norm() < 0.05, "{at_a:?}");
+        // In the shared world the two carry comparable covariances (each has its
+        // sender's pose uncertainty): covariance intersection keeps the one with the
+        // smaller trace, B's self report, and A's precise detection is not preferred.
+        let shared = a.node.world(t);
+        let (sh_b, _) = find(&shared, b_id).expect("B's self object in the shared world");
+        assert!((sh_b - Vector3::new(7.0, 0.4, 0.0)).norm() < 0.5, "{sh_b:?}");
+        assert!((sh_b - at_b).norm() > 0.8, "the views differ: {sh_b:?} against {at_b:?}");
     }
 
     #[test]

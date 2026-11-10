@@ -86,6 +86,9 @@ pub struct SourceOffset {
     pub cov: Matrix3<f64>,
     /// Shared objects behind it, over all pairs with this source.
     pub shared_objects: usize,
+    /// Sources solved together (connected by shared objects) have the same group
+    /// number; offsets of different groups are not related to each other.
+    pub group: usize,
 }
 
 /// An offset between two sources: positions of `b` minus positions of `a`.
@@ -248,7 +251,7 @@ pub(crate) fn estimate(items: &[AlignItem], cfg: &AlignConfig) -> Vec<SourceOffs
         }
     }
     let mut out = Vec::new();
-    for members in groups.values() {
+    for (group_no, members) in groups.values().enumerate() {
         let idx: BTreeMap<usize, usize> =
             members.iter().enumerate().map(|(k, s)| (*s, k)).collect();
         let m = members.len();
@@ -306,6 +309,7 @@ pub(crate) fn estimate(items: &[AlignItem], cfg: &AlignConfig) -> Vec<SourceOffs
                 translation,
                 cov: (cov + cov.transpose()) / 2.0,
                 shared_objects,
+                group: group_no,
             });
         }
     }

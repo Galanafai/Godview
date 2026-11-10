@@ -135,9 +135,17 @@ fn dump_world(
                 .iter()
                 .filter_map(|s| node_ids.iter().position(|n| n == s))
                 .collect();
+            let r = odom_from_ecef.rotation;
+            let cov: nalgebra::Matrix3<f64> = r * o.cov.fixed_view::<3, 3>(0, 0).into_owned() * r.transpose();
+            let vel = r * o.velocity();
+            let id_agent = node_ids.iter().position(|n| *n == o.id.0);
             json!({
+                "id": format!("{}:{}", id_agent.map_or("?".to_string(), |k| k.to_string()), o.id.1 .0),
+                "cov_pos": [[cov[(0,0)], cov[(0,1)], cov[(0,2)]], [cov[(1,0)], cov[(1,1)], cov[(1,2)]], [cov[(2,0)], cov[(2,1)], cov[(2,2)]]],
+                "vel": [vel.x, vel.y, vel.z], "p_exist": o.p_exist,
                 "x": p.x, "y": p.y, "z": p.z, "class_id": o.class_id, "class_prob": o.class_prob,
-                "box": o.object_box.map(|b| json!({"l": b.size[0], "w": b.size[1], "h": b.size[2], "yaw_deg": b.yaw.to_degrees()})),
+                "box": o.object_box.map(|b| json!({"l": b.size[0], "w": b.size[1], "h": b.size[2], "yaw_deg": b.yaw.to_degrees(),
+                                                   "size_var": b.size_var, "yaw_var": b.yaw_var})),
                 "self_agent": o.self_agent.and_then(|a| node_ids.iter().position(|n| *n == a)),
                 "labels": labels, "sources": sources, "members": o.members.len(),
             })

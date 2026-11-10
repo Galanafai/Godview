@@ -1,0 +1,225 @@
+{
+ "by_agent_ego_view": {
+  "-2": {
+   "wrong_merges": 574
+  },
+  "-1": {
+   "wrong_merges": 536
+  },
+  "1": {
+   "wrong_merges": 583
+  },
+  "2": {
+   "wrong_merges": 582
+  }
+ },
+ "vehicle1_ego_view": {
+  "wrong_merges": 583,
+  "involving_vehicles_around": 24
+ },
+ "vehicle1_per_pedestrian": {
+  "30": {
+   "frames_in_a_merged_object": 106,
+   "merged_with_vehicle": 0,
+   "frames_present_in_vehicle1_ego_view": 118,
+   "frames_with_a_clean_object": 12
+  },
+  "43": {
+   "frames_in_a_merged_object": 103,
+   "merged_with_vehicle": 0,
+   "frames_present_in_vehicle1_ego_view": 120,
+   "frames_with_a_clean_object": 60
+  },
+  "58": {
+   "frames_in_a_merged_object": 100,
+   "merged_with_vehicle": 0,
+   "frames_present_in_vehicle1_ego_view": 130,
+   "frames_with_a_clean_object": 30
+  },
+  "46": {
+   "frames_in_a_merged_object": 95,
+   "merged_with_vehicle": 0,
+   "frames_present_in_vehicle1_ego_view": 112,
+   "frames_with_a_clean_object": 21
+  }
+ },
+ "top_merged_label_pairs_by_agent": {
+  "-2": [
+   [
+    [
+     "46",
+     "47"
+    ],
+    98
+   ],
+   [
+    [
+     "30",
+     "58"
+    ],
+    97
+   ],
+   [
+    [
+     "55",
+     "59"
+    ],
+    54
+   ],
+   [
+    [
+     "51",
+     "57"
+    ],
+    23
+   ],
+   [
+    [
+     "49",
+     "51"
+    ],
+    21
+   ],
+   [
+    [
+     "0",
+     "9"
+    ],
+    21
+   ]
+  ],
+  "-1": [
+   [
+    [
+     "30",
+     "58"
+    ],
+    96
+   ],
+   [
+    [
+     "46",
+     "47"
+    ],
+    93
+   ],
+   [
+    [
+     "55",
+     "59"
+    ],
+    55
+   ],
+   [
+    [
+     "17",
+     "51"
+    ],
+    28
+   ],
+   [
+    [
+     "49",
+     "51"
+    ],
+    26
+   ],
+   [
+    [
+     "56",
+     "57"
+    ],
+    23
+   ]
+  ],
+  "1": [
+   [
+    [
+     "30",
+     "58"
+    ],
+    99
+   ],
+   [
+    [
+     "46",
+     "47"
+    ],
+    93
+   ],
+   [
+    [
+     "55",
+     "59"
+    ],
+    49
+   ],
+   [
+    [
+     "17",
+     "51"
+    ],
+    28
+   ],
+   [
+    [
+     "49",
+     "51"
+    ],
+    26
+   ],
+   [
+    [
+     "0",
+     "9"
+    ],
+    22
+   ]
+  ],
+  "2": [
+   [
+    [
+     "46",
+     "47"
+    ],
+    98
+   ],
+   [
+    [
+     "30",
+     "58"
+    ],
+    87
+   ],
+   [
+    [
+     "55",
+     "59"
+    ],
+    57
+   ],
+   [
+    [
+     "51",
+     "57"
+    ],
+    28
+   ],
+   [
+    [
+     "49",
+     "51"
+    ],
+    22
+   ],
+   [
+    [
+     "56",
+     "57"
+    ],
+    21
+   ]
+  ]
+ },
+ "frames": "110 to 239"
+}

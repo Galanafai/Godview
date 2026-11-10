@@ -182,6 +182,7 @@ def main():
     p.add_argument('--skip-scenario', action='append', default=[])
     p.add_argument('--check-library', action='store_true')
     p.add_argument('--exclude-self', action='append', default=[], help='dump NAMEs scored without the self objects (explanation only)')
+    p.add_argument('--shared', action='append', default=[], help='dump NAMEs scored on the shared world (`shared_worlds`) instead of the ego view')
     a = p.parse_args()
     sys.path.insert(0, a.opencood)
     import torch
@@ -266,7 +267,7 @@ def main():
         for n in dumps:
             fr = dumps[n][s][i]
             assert fr['frame'] == i
-            dets[n] = world_boxes(fr['worlds'][0], origin, inv0, exclude_self=n in a.exclude_self)
+            dets[n] = world_boxes(fr['shared_worlds' if n in a.shared else 'worlds'][0], origin, inv0, exclude_self=n in a.exclude_self)
         none = [False] * len(gt)
         for mth, (dc, dsc) in dets.items():
             n_boxes[mth] += len(dc)

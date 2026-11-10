@@ -76,6 +76,9 @@ struct Args {
     self_same_source_exact: bool,
     self_compete: bool,
     self_size: [f64; 3],
+    self_offset: [f64; 2],
+    ego_view: bool,
+    offset_filter: bool,
     dump: String,
     no_sharing: bool,
     align: bool,
@@ -109,6 +112,9 @@ fn parse_args() -> Args {
         self_same_source_exact: false,
         self_compete: false,
         self_size: [4.5, 2.0, 1.7],
+        self_offset: [0.0, 0.0],
+        ego_view: false,
+        offset_filter: false,
         dump: String::new(),
         no_sharing: false,
         align: false,
@@ -137,6 +143,18 @@ fn parse_args() -> Args {
         }
         if v[i] == "--self-same-source-exact" {
             a.self_same_source_exact = true;
+            i += 1;
+            continue;
+        }
+        // Score each car's ego view (sensor-only own objects, ego-fixed alignment) and dump
+        // the shared world next to it; the offset filter replaces the per-frame alignment.
+        if v[i] == "--ego-view" {
+            a.ego_view = true;
+            i += 1;
+            continue;
+        }
+        if v[i] == "--offset-filter" {
+            a.offset_filter = true;
             i += 1;
             continue;
         }
@@ -179,6 +197,10 @@ fn parse_args() -> Args {
             // (world object whose members are attributed to two or more labels).
             "--merge-diag" => a.merge_diag = val,
             "--self-gate-sigma" => a.self_gate_sigma = val.parse().expect("--self-gate-sigma"),
+            "--self-offset" => {
+                let v: Vec<f64> = val.split(',').map(|x| x.parse().expect("--self-offset FORWARD,LEFT")).collect();
+                a.self_offset = [v[0], v[1]];
+            }
             "--self-size" => {
                 let v: Vec<f64> = val.split(',').map(|x| x.parse().expect("--self-size L,W,H")).collect();
                 a.self_size = [v[0], v[1], v[2]];
@@ -258,6 +280,10 @@ struct CarStats {
     /// the ones attributed to a label other than the recording car's.
     self_assigned_own_source: usize,
     self_assigned_own_source_other_label: usize,
+    /// Car-frames with an offset estimate for the other car, that share an object, and both.
+    offset_estimate_frames: usize,
+    share_frames: usize,
+    share_frames_with_estimate: usize,
 }
 
 fn quantile(v: &[f64], q: f64) -> f64 {
@@ -355,6 +381,8 @@ fn main() {
     };
     config.publish.fresh_only = args.fresh_only;
     config.self_reports = args.self_reports;
+    config.ego_view = args.ego_view;
+    config.offset_filter.enabled = args.offset_filter;
     config.world.self_gate_sigma = args.self_gate_sigma;
     config.world.self_same_source_exact = args.self_same_source_exact;
     config.world.self_compete = args.self_compete;
@@ -469,7 +497,9 @@ fn main() {
             if args.self_reports {
                 let line: Value = serde_json::from_str(&lines[c][i]).unwrap();
                 let yaw_deg = line["agent_yaw_deg"].as_f64().expect("agent_yaw_deg in the input (convert_detections.py)");
-                let pos = parsed[c].agent_odom;
+                let (cs, sn) = (yaw_deg.to_radians().cos(), yaw_deg.to_radians().sin());
+                let pos = parsed[c].agent_odom
+                    + Vector3::new(cs * args.self_offset[0] - sn * args.self_offset[1], sn * args.self_offset[0] + cs * args.self_offset[1], 0.0);
                 let vel = prev_agent[c]
                     .map(|(pt, pp)| (pos - pp) / (t.as_nanos() - pt) as f64 * 1e9)
                     .unwrap_or_else(Vector3::zeros);
@@ -537,8 +567,16 @@ fn main() {
 
         let mut dump_worlds: Vec<Value> = Vec::new();
         let mut dump_align: Vec<Value> = Vec::new();
+        let mut dump_shared: Vec<Value> = Vec::new();
         for c in 0..2 {
-            let world = nodes[c].world(t);
+            let shared = nodes[c].world(t);
+            let world = if args.ego_view {
+                nodes[c]
+                    .ego_world(t, parsed[c].pose.as_ref().expect("pose"))
+                    .expect("ego view needs a global pose and the ego_view flag")
+            } else {
+                shared.clone()
+            };
             if world.alignment.len() == 2 {
                 stats[c].aligned_frames += 1;
                 let rel = world.alignment[0].translation - world.alignment[1].translation;
@@ -600,6 +638,25 @@ fn main() {
                     })
                     .collect();
                 dump_worlds.push(Value::Array(objs_dump));
+                if args.ego_view {
+                    dump_shared.push(Value::Array(
+                        shared
+                            .objects
+                            .iter()
+                            .map(|w| {
+                                let p = odom_from_ecef.transform_point(&w.position().0);
+                                json!({
+                                    "x": p.x, "y": p.y, "z": p.z, "class_prob": w.class_prob,
+                                    "self": w.self_agent.is_some(),
+                                    "box": w.object_box.map(|b| json!({
+                                        "l": b.size[0], "w": b.size[1], "h": b.size[2],
+                                        "yaw_deg": b.yaw.to_degrees() - odom_yaw,
+                                    })),
+                                })
+                            })
+                            .collect(),
+                    ));
+                }
                 dump_align.push(Value::Array(
                     world
                         .alignment
@@ -618,6 +675,14 @@ fn main() {
                 .collect();
             let sc = score(&est, &truth_ecef, args.cutoff_m);
             let st = &mut stats[c];
+            {
+                let other = node_ids[1 - c];
+                let has_est = world.alignment.iter().any(|o| o.source == other);
+                let sharing = objs.iter().any(|o| o["cav"].is_null() && o["detected_by"].as_array().map_or(false, |d| d.len() == 2));
+                st.offset_estimate_frames += has_est as usize;
+                st.share_frames += sharing as usize;
+                st.share_frames_with_estimate += (has_est && sharing) as usize;
+            }
             if let Some(attr) = &attribution {
                 let mut per_label: BTreeMap<&str, usize> = BTreeMap::new();
                 let mut objs_of: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
@@ -864,7 +929,7 @@ fn main() {
                     })
                     .collect();
                 dump_lines.push(
-                    json!({"frame": i, "ego": fr["ego_odom"], "labels": labels, "worlds": dump_worlds, "alignments": dump_align}).to_string(),
+                    json!({"frame": i, "ego": fr["ego_odom"], "labels": labels, "worlds": dump_worlds, "shared_worlds": dump_shared, "alignments": dump_align}).to_string(),
                 );
             }
             if !args.diag.is_empty() && (!d_missed.is_empty() || !d_dup.is_empty()) {
@@ -924,6 +989,9 @@ fn main() {
             "gained_object_frames_per_frame": st.gained as f64 / st.frames.max(1) as f64,
             "members_seen": st.members,
             "coasting_object_frames": st.coasting_objects,
+            "offset_estimate_car_frames": st.offset_estimate_frames,
+            "share_car_frames": st.share_frames,
+            "share_car_frames_with_estimate": st.share_frames_with_estimate,
             "self_objects": st.self_objects,
             "self_assigned_reports": st.self_assigned,
             "self_assigned_to_the_recording_car_label": st.self_assigned_to_recording_car,
@@ -950,7 +1018,7 @@ fn main() {
         "tracker_options": {
             "confirm_hits": config.tracker.confirm_hits, "score_mode": args.score_mode,
             "raw_box": args.raw_box, "fresh_only": args.fresh_only, "self_reports": args.self_reports,
-            "self_gate_sigma": args.self_gate_sigma, "self_same_source_exact": args.self_same_source_exact, "self_compete": args.self_compete, "self_size": args.self_size, "pub_min_score": args.pub_min_score,
+            "ego_view": args.ego_view, "offset_filter": args.offset_filter, "self_offset": args.self_offset, "self_gate_sigma": args.self_gate_sigma, "self_same_source_exact": args.self_same_source_exact, "self_compete": args.self_compete, "self_size": args.self_size, "pub_min_score": args.pub_min_score,
             "overlap_iou": args.overlap_iou, "overlap_keep": args.overlap_keep,
         },
         "cutoff_m": args.cutoff_m,

@@ -24,7 +24,8 @@ def agg(d, skip=None):
                       'objects_gained_only_through_sharing', 'n_both_labeled', 'n_box', 'coasting_object_frames',
                       'self_objects', 'self_assigned_reports', 'self_assigned_to_the_recording_car_label',
                       'self_assigned_to_another_label', 'self_assigned_to_no_label', 'self_in_own_world',
-                      'self_assigned_from_the_agent_itself', 'self_assigned_from_the_agent_itself_to_another_label'):
+                      'self_assigned_from_the_agent_itself', 'self_assigned_from_the_agent_itself_to_another_label',
+                      'offset_estimate_car_frames', 'share_car_frames', 'share_car_frames_with_estimate'):
                 T[k] = T.get(k, 0) + c.get(k, 0)
             T['world_objects'] = T.get('world_objects', 0) + c['world_objects_per_frame'] * c['frames']
             sq += c['rms_m'] ** 2 * c['matched']

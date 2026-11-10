@@ -1,0 +1,4 @@
+noself_perframe            frames with a label offset 690, with an estimate 460; error median 0.29 m, p90 1.26 m, within 0.5 m 0.75; median label offset 1.29 m
+noself_filter              frames with a label offset 690, with an estimate 681; error median 0.36 m, p90 2.76 m, within 0.5 m 0.60; median label offset 1.37 m
+self_perframe              frames with a label offset 690, with an estimate 460; error median 0.29 m, p90 1.26 m, within 0.5 m 0.75; median label offset 1.29 m
+self_filter                frames with a label offset 690, with an estimate 684; error median 0.28 m, p90 0.96 m, within 0.5 m 0.71; median label offset 1.37 m

@@ -25,12 +25,13 @@ import ap_eval as E  # noqa: E402
 def main():
     opencood, export, inputs, out = sys.argv[1:5]
     specs = [a.split('=', 1) for a in sys.argv[5:]]
+    shared = {a[:-len(':shared')] for a, _ in specs if False}
     recs = [json.loads(l) for l in gzip.open(export, 'rt')]
     scen = sorted({r['scenario'] for r in recs})
     truth = {s: json.load(open(os.path.join(inputs, s, 'truth.json'))) for s in scen}
     fidx = {s: {f['frame']: i for i, f in enumerate(truth[s]['frames'])} for s in scen}
     dumps = {n: {s: [json.loads(l) for l in open(os.path.join(d, s + '.dump.jsonl')) if l.strip()] for s in scen}
-             for n, d in specs}
+             for n, d in specs}   # a name ending in @shared scores the dump's shared world
     cov = defaultdict(lambda: defaultdict(int))
     off = defaultdict(list)
     for r in recs:
@@ -40,21 +41,26 @@ def main():
         origin = np.array(truth[s]['origin_map'])
         gt = np.array(r['gt_corners_ego'], float).reshape(-1, 8, 3)
         gp = E.polys(gt)
-        cand = [(o['gid'], o['cav'], np.array(v)) for o in truth[s]['frames'][i]['objects'] for v in o['per_car_pos'].values()]
+        cand = [(o['gid'], o['cav'], np.array(v), tuple(o['labeled_by'])) for o in truth[s]['frames'][i]['objects'] for v in o['per_car_pos'].values()]
         kind = []
         for c in gt.mean(axis=1):
             pm = pose0[:3, :3] @ c + pose0[:3, 3] - origin
-            d = [np.linalg.norm(pm - v) for _, _, v in cand]
+            d = [np.linalg.norm(pm - v) for _, _, v, _ in cand]
             k = int(np.argmin(d)) if d else -1
-            kind.append('recording car' if (k >= 0 and d[k] <= 0.2 and cand[k][1] is not None) else 'other')
+            if k >= 0 and d[k] <= 0.2:
+                g, cav, _, lb = cand[k]
+                kind.append(('recording car 0 (the ego)' if cav == 0 else 'recording car 1 (the other)') if cav is not None
+                            else 'other, labeled by ' + ('both' if len(lb) == 2 else 'car %d only' % lb[0]))
+            else:
+                kind.append('other, unidentified')
         for n in dumps:
-            cb, _ = E.world_boxes(dumps[n][s][i]['worlds'][0], origin, inv0)
+            cb, _ = E.world_boxes(dumps[n][s][i]['shared_worlds' if n.endswith('@shared') else 'worlds'][0], origin, inv0)
             dp = E.polys(cb)
             ious = E.iou_matrix(dp, gp) if len(dp) else np.zeros((0, len(gp)))
             for j in range(len(gt)):
                 cov[(n, kind[j])]['gt'] += 1
                 cov[(n, kind[j])]['covered'] += bool(len(dp) and ious[:, j].max() >= 0.5)
-                if kind[j] == 'recording car' and len(dp):
+                if kind[j].startswith('recording car') and len(dp):
                     cents = np.array([[p.centroid.x, p.centroid.y] for p in dp])
                     off[n].append(float(np.min(np.linalg.norm(cents - np.array([gp[j].centroid.x, gp[j].centroid.y]), axis=1))))
     res = {'coverage': {'%s | %s' % k: {'gt_boxes': v['gt'], 'covered': v['covered'], 'share': v['covered'] / v['gt']} for k, v in cov.items()},

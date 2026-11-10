@@ -127,3 +127,46 @@ Coverage split by whose box it is and which car labeled it
   objects 62.8% falling to 11.5% under the filter) and the filter's 0.28 m median agreement
   with the cross-car label offset are the evidence. The numbers alone do not exclude a
   defect that they cannot see; the next step scores each car against its own labels only.
+
+## Report-only check: each car's ego view against its own labels
+
+Metric as stated before it ran (`docs/results/phase_d_d1_plan.md`, "Own-frame truth check");
+script `scripts/phase_d/own_frame_eval.py`, output `docs/results/phase_d/d1/own_frame_val.json`.
+Truth: each car's own labels in its own lidar frame (within x 100 / y 40 m); a car's own box
+is excluded from its view (its self object, and any object attributed to the label of its
+body), and the same detections are dropped for the baselines. AP@0.5 / AP@0.7, both cars
+pooled; "sharing adds" is the share of the car's own labels that its own detector did not
+detect (2,410 of them) that a box of the method covers at IoU 0.5. No setting changed;
+the six variants of the previous section are re-scored, nothing is rerun (2 minutes of CPU).
+
+| method (selected tracker, sharing, ego views) | dataset AP | standard AP | labels the car missed that are covered |
+|---|---|---|---|
+| self off, alignment off | 59.5 / 37.5 | 66.8 / 45.8 | 4.4% |
+| self off, per-frame | 60.3 / 37.6 | 67.9 / 46.2 | 8.6% |
+| self off, filtered | 60.4 / 37.6 | 67.9 / 46.1 | 7.5% |
+| self on, alignment off | 59.2 / 37.5 | 68.3 / 49.3 | 4.4% |
+| self on, per-frame | 60.1 / 37.7 | 69.4 / 49.6 | 8.7% |
+| self on, filtered | **60.9 / 37.7** | **70.3 / 49.8** | **10.3%** |
+| No Fusion (the car's own detections) | 67.1 / 41.6 | 78.8 / 54.7 | 0.1% |
+| Late Fusion (both cars, joint NMS) | 38.3 / 19.7 | 47.5 / 26.1 | 6.3% |
+
+* **The sign of the alignment effect reverses.** On the dataset's truth (the first table of
+  this file) filtered alignment cost 11 to 20 AP@0.7 points; on each car's own labels it is
+  no loss: +0.9 / 0.0 (self off) and +1.7 / +0.2 (self on) dataset AP against alignment off,
+  and +1.1 / +0.3 and +2.0 / +0.5 standard. This is the explanation above: the filter's
+  correction was penalized only because the dataset's truth for the other car's objects
+  sits in the other car's pose frame.
+* **Sharing adds little to a car's own labels, and alignment doubles it.** Of the 2,410
+  labels a car's detector missed, the unaligned ego view covers 4.4%, aligned views 7.5% to
+  10.3% (Late Fusion, which uses the dataset's poses, 6.3%); most of what a car misses
+  the other car does not see either. Filtered alignment with self reports is the best.
+* **No Fusion scores higher than every GodView variant on this truth** (67.1 against
+  60.9 dataset AP@0.5). The truth is the car's own labels, which are exactly what its own
+  detector (labels plus the V2V4Real detector's errors) reports; GodView adds the other
+  car's objects, which are mostly absent from this car's labels (false positives for this
+  metric) and the metric has no credit for them beyond the 2,410 missed labels. So this
+  truth cannot show a benefit of sharing beyond that coverage; it only shows that alignment is no
+  longer penalized. Late Fusion is far lower because it places the other car's boxes by the
+  dataset's poses with no correction.
+* Not shown: whether the filter's correction is right in an absolute sense (no independent
+  pose reference in V2V4Real); only that it is consistent with each car's own frame.

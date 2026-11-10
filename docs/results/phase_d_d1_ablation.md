@@ -127,3 +127,36 @@ shifted into car 0's world) is not separated here.
   fast oncoming objects) is not addressed by these settings.
 * Nothing here used test. A second test run with these settings would be
   labeled separately from the first.
+
+## Design proposal (not implemented, not run): observed and remembered objects
+
+Fresh-only publishing buys the AP by dropping every track without a detection
+this frame. That also drops what GodView is for in the demo: an object known
+for a moment after the sensor lost it (occlusion, a missed frame, a dropped
+packet). The proposal is to keep both and say which is which, instead of
+choosing one.
+
+* The world snapshot gets two classes of object. **Observed:** at least one
+  member was updated by a detection in this frame (the current "fresh" set;
+  what a metric against this frame's labels should score). **Remembered:** all
+  members are coasting; the position is a prediction and the covariance grows
+  with the time since the last detection. Each object carries
+  `observed: bool` and `last_seen_s` (time since any member's last detection);
+  the report already carries the lifecycle, so this is a field in the world
+  object, not a protocol change.
+* Consumers pick: a planner or the demo reads both; an evaluation against
+  per-frame labels reads the observed set; the existing coasting state
+  remains the mechanism. A remembered object is dropped when its predicted
+  position falls inside the free space of a fresh detection of another object
+  (a stale box over an object that moved on is the ghost the AP punishes), or
+  after `terminate_after_s`.
+* How it would be tested: the same val runs with the observed set scored for
+  AP (should match the fresh-only numbers, 67.17 / 42.06 with sharing), and
+  separately a persistence metric over the remembered set (of the objects in
+  the world only as remembered, the share within 5 m of a label, and the
+  number of frames a hidden object stays correctly present). That metric does
+  not exist yet; it is what the demo needs and the AP cannot give.
+* What it does not fix: tracks that restart (pose steps, fast oncoming
+  objects) still leave a remembered duplicate next to the new observed track
+  until pruned; the overlap rule (keep the more recently updated) covers the
+  case where their boxes overlap.

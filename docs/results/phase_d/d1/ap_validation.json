@@ -1,0 +1,42 @@
+{
+ "toy": {
+  "case1": {
+   "dataset": 0.8333333333333333,
+   "expected_dataset": 0.8333333333333334,
+   "standard": 0.9166666666666666,
+   "expected_standard": 0.9166666666666666
+  },
+  "case2": {
+   "dataset": 1.0,
+   "expected_dataset": 1.0,
+   "standard": 0.5,
+   "expected_standard": 0.5
+  },
+  "case3": {
+   "standard": 0.5,
+   "expected_standard": 0.5
+  }
+ },
+ "val_no_fusion_0.2": {
+  "iou_0.5": {
+   "ground_truth": 9447,
+   "detections": 7480,
+   "true_positives": 5497,
+   "dataset_matching_true_positives": 5497,
+   "sklearn_average_precision": 0.5565846915179358,
+   "stepwise_area_ap_eval_logic": 0.5565846915179358,
+   "voc_ap_opencood_on_same_curve": 0.5568052478821082,
+   "ap_eval_standard_ap": 0.5568052478821082
+  },
+  "iou_0.7": {
+   "ground_truth": 9447,
+   "detections": 7480,
+   "true_positives": 3970,
+   "dataset_matching_true_positives": 3970,
+   "sklearn_average_precision": 0.3543443463589338,
+   "stepwise_area_ap_eval_logic": 0.3543443463589338,
+   "voc_ap_opencood_on_same_curve": 0.3549198106638182,
+   "ap_eval_standard_ap": 0.3549198106638182
+  }
+ }
+}

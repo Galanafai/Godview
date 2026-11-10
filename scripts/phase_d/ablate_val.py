@@ -1,7 +1,7 @@
 """Phase D1: run named tracker configurations on val and summarize them.
 
 For each NAME=FLAGS: the replay on the three val scenarios (with world dumps),
-then the dataset AP of car 0's world (scripts/phase_d/ap_eval.py), then one
+then the dataset AP of car 0's world (scripts/phase_d/ap_eval_ablation.py), then one
 summary row: AP@0.5 / AP@0.7 (all frames), duplicates, split label-frames,
 wrong merges, coasting object-frames, world objects per frame, objects gained
 and false objects introduced by sharing (per car-frame).
@@ -45,7 +45,7 @@ def run_replays(out, name, flags, extra):
 
 def run_ap(out, name, d, variants, baselines):
     res = os.path.join(out, name + '.ap.json')
-    cmd = [PY, '-I', os.path.join(ROOT, 'scripts/phase_d/ap_eval.py'), '--opencood', '/workspace/tools/V2V4Real',
+    cmd = [PY, '-I', os.path.join(ROOT, 'scripts/phase_d/ap_eval_ablation.py'), '--opencood', '/workspace/tools/V2V4Real',
            '--export', D + '/d1_detections/val.jsonl.gz', '--inputs', D + '/d1_replay_in/val2',
            '--out', res, '--dumps', f'{name}={d}', '--score-keys', 'class_prob']
     if variants:

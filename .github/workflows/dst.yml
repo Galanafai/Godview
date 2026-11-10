@@ -1,7 +1,13 @@
 # GodView Deterministic Simulation Testing (DST) Workflow
 #
-# Runs chaos engineering scenarios with 100 randomized seeds per commit
-# to ensure deterministic behavior and catch Heisenbugs.
+# Pushes and pull requests run a FIXED set of seeds (1 to 12, every
+# scenario), split across parallel jobs: a few minutes, and the same seeds
+# every time, so a failure means the code changed, not that a new rare seed
+# was drawn.
+#
+# The broad sweep (100 random seeds per run) runs nightly and on demand. It
+# hunts for rare failures; when it finds one, reproduce it with the printed
+# command and open an issue. It does not block pull requests.
 
 name: DST
 
@@ -10,12 +16,14 @@ on:
     branches: [main, v4, develop]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '17 10 * * *'   # nightly sweep, 02:17 Pacific
   workflow_dispatch:
     inputs:
       seed_count:
-        description: 'Number of random seeds to test'
+        description: 'Random seeds per batch (10 batches)'
         required: false
-        default: '100'
+        default: '10'
       scenario:
         description: 'Scenario to run (all = perception catalog, legacy, or a scenario name such as two_views, split_brain, byzantine)'
         required: false
@@ -55,9 +63,34 @@ jobs:
           name: godview-sim
           path: target/release/godview-sim
 
-  # Run DST with multiple seeds in parallel
-  dst:
+  # Pushes and pull requests: fixed seeds 1 to 12, 4 parallel batches of 3
+  dst-fixed:
     needs: build
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed_batch: [0, 1, 2, 3]
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: godview-sim
+          path: ./
+
+      - name: Make executable
+        run: chmod +x ./godview-sim
+
+      - name: Run fixed seeds, batch ${{ matrix.seed_batch }}
+        run: |
+          START=$(( ${{ matrix.seed_batch }} * 3 + 1 ))
+          ./godview-sim --scenario all --seed $START --seeds 3
+
+  # Nightly / on-demand sweep: 100 random seeds in 10 parallel batches
+  dst-sweep:
+    needs: build
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -82,12 +115,11 @@ jobs:
         run: |
           # Calculate seed range for this batch
           BATCH=${{ matrix.seed_batch }}
-          SEEDS_PER_BATCH=10
+          SEEDS_PER_BATCH=${{ github.event.inputs.seed_count || '10' }}
           START_SEED=$((BATCH * SEEDS_PER_BATCH))
           
-          # Generate base seed from commit hash for reproducibility
-          COMMIT_HASH="${{ github.sha }}"
-          BASE_SEED=$(printf '%d' "0x${COMMIT_HASH:0:8}")
+          # A new base seed per run (from the run id), printed for reproduction
+          BASE_SEED=$(( ${{ github.run_id }} % 4000000000 ))
           
           echo "Running seeds $START_SEED to $((START_SEED + SEEDS_PER_BATCH - 1))"
           echo "Base seed: $BASE_SEED"
@@ -123,17 +155,22 @@ jobs:
 
   # Summary job
   summary:
-    needs: dst
+    needs: [dst-fixed, dst-sweep]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check results
         run: |
-          if [ "${{ needs.dst.result }}" == "failure" ]; then
-            echo "::error::Some DST seeds failed! Check artifacts for failed_seeds.txt"
+          if [ "${{ needs.dst-fixed.result }}" == "failure" ]; then
+            echo "::error::Fixed-seed DST failed: a code change broke an invariant. See the dst-fixed logs."
             exit 1
           fi
-          echo "✅ All 100 seeds passed!"
+          if [ "${{ needs.dst-sweep.result }}" == "failure" ]; then
+            echo "::error::The random-seed sweep found a rare failure. Reproduce it from the dst-sweep logs and open an issue."
+            exit 1
+          fi
+          echo "DST passed (fixed: ${{ needs.dst-fixed.result }}, sweep: ${{ needs.dst-sweep.result }})"
+
 
   # Fast unit tests (always run)
   unit-tests:

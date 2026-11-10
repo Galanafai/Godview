@@ -484,6 +484,7 @@ fn main() {
             "objects_gained_only_through_sharing": st.gained_objects.len(),
             "aligned_frames": st.aligned_frames,
             "align_relative_offset_m_median": quantile(&st.align_relative_m, 0.5),
+            "align_relative_offset_m": st.align_relative_m,
             "matched_not_detected_by_own_sensor_this_frame": st.not_detected_now,
             "objects_with_id": objects,
             "id_changes_total": total_changes,

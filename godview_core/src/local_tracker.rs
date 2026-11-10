@@ -85,6 +85,11 @@ pub struct LocalTrackerConfig {
     /// does not average out, so it is added to published covariances (see
     /// [`crate::extent::center_sys_cov`]) rather than to the measurement noise.
     pub box_center_sys_frac: f64,
+    /// Systematic vertical center error of the detector (m, standard
+    /// deviation), added to published covariances along the odometry z axis
+    /// (0 trusts the detector's covariance). `box_center_sys_frac` covers
+    /// length and width only.
+    pub box_center_sys_z_m: f64,
     /// Systematic size error of the detector (m, standard deviation, every
     /// dimension; 0 trusts the detector's variances). Added to published size
     /// variances (see [`crate::extent::with_systematic`]).
@@ -111,6 +116,7 @@ impl Default for LocalTrackerConfig {
             box_gate: BoxGate::default(),
             box_model: BoxModel::default(),
             box_center_sys_frac: 0.0,
+            box_center_sys_z_m: 0.0,
             box_size_sys_m: 0.0,
             box_yaw_sys_rad: 0.0,
         }
@@ -135,6 +141,9 @@ pub struct LocalTrack {
     pub created: Timestamp,
     /// Latest observation time fused.
     pub last_update: Timestamp,
+    /// Observation id of the latest-timed detection fused (provenance, for
+    /// offline scoring; not used by the tracker).
+    pub last_obs_id: u64,
     /// Box estimate (odometry frame), if any detection carried one.
     object_box: Option<ObjectBox>,
     /// Time `object_box` refers to.
@@ -412,6 +421,9 @@ impl LocalTracker {
                     tr.update_box(&d);
                     out.updated += 1;
                     tr.hits += 1;
+                    if d.t >= tr.last_update {
+                        tr.last_obs_id = d.obs_id;
+                    }
                     tr.last_update = tr.last_update.max(d.t);
                     tr.class_prob += (d.class_prob - tr.class_prob) / tr.hits as f32;
                     if tr.lifecycle == TrackLifecycle::Coasting
@@ -479,6 +491,7 @@ impl LocalTracker {
                     hits: 1,
                     created: d.t,
                     last_update: d.t,
+                    last_obs_id: d.obs_id,
                     object_box: d.object_box,
                     box_t: d.t,
                     box_model: self.config.box_model,

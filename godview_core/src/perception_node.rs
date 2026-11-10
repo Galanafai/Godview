@@ -351,6 +351,7 @@ impl PerceptionNode {
                 let mut pp = state.p.fixed_view_mut::<3, 3>(0, 0);
                 pp += sys;
             }
+            state.p[(2, 2)] += tc.box_center_sys_z_m * tc.box_center_sys_z_m;
             let (frame, x, mut p) = match global {
                 Some(g) => {
                     let (x, p) = g.ecef_from_odom.transform_state(&state.x, &state.p);
@@ -688,6 +689,7 @@ mod tests {
         cfg.tracker.box_center_sys_frac = 0.25;
         cfg.tracker.box_size_sys_m = 0.4;
         cfg.tracker.box_yaw_sys_rad = 0.05;
+        cfg.tracker.box_center_sys_z_m = 0.3;
         let mut plain = Rig::new(8, Vector3::zeros(), 0.7);
         let mut rig = Rig::new(8, Vector3::zeros(), 0.7);
         rig.node = PerceptionNode::new(SigningKey::from_bytes(&[8; 32]), 1, cfg);
@@ -746,6 +748,17 @@ mod tests {
             "systematic error added along the length: {} vs {}",
             var(&s),
             var(&p)
+        );
+        let up = site().ecef_from_enu() * Vector3::z();
+        let var_up = |r: &TrackReport| {
+            let c = r.covariance();
+            let pp: Matrix3<f64> = c.fixed_view::<3, 3>(0, 0).into_owned();
+            up.dot(&(pp * up))
+        };
+        let added = var_up(&s) - var_up(&p);
+        assert!(
+            (added - 0.09).abs() < 1e-6,
+            "vertical systematic variance added {added}"
         );
     }
 

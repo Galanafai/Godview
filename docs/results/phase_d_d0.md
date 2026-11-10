@@ -22,7 +22,9 @@ By range (AP@0.5 / AP@0.7), from the same runs:
 | No Fusion | 69.1 / 42.7 | 29.3 / 14.4 | 4.8 / 1.6 |
 | Late Fusion | 73.5 / 36.7 | 43.7 / 22.2 | 36.3 / 17.2 |
 
-Raw outputs: `docs/results/phase_d/d0/*_eval.yaml`.
+Raw outputs: `docs/results/phase_d/d0/*_eval.yaml.gz` (gzipped on
+2026-11-10 to keep the repository small; SHA-256 of the uncompressed files in
+`eval_yaml_sha256.txt`, the AP values alone in `eval_summary.json`).
 
 ## What was run
 

@@ -416,6 +416,9 @@ fn a_node_fed_json_lines_on_stdin_fuses_with_a_synthetic_peer() {
                     y: z.y - w,
                     z: z.z,
                     sigma_m: 0.3,
+                    sigma_along_m: None,
+                    sigma_across_m: None,
+                    sigma_z_m: None,
                     class_id: 1,
                     class_prob: 0.9,
                     // Boxes the same as the synthetic peer's objects, heading in this

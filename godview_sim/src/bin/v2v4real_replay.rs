@@ -20,6 +20,20 @@
 //!   object is neither credited nor penalized;
 //! * duplicate: an unmatched estimate within the cutoff of some labeled
 //!   object (the object appears twice); false: any other unmatched estimate.
+//!
+//! With `attribution.json` in the input directory (Phase D, real detections,
+//! written by `scripts/phase_d/convert_detections.py`), each detection carries
+//! the label it was matched to in its own car's frame. A world object's
+//! member is attributed to the label of the latest detection its track fused
+//! (as of the batch that delivered it), and per car and frame:
+//! * wrong merge: a world object whose members are attributed to two or more
+//!   different labels (object-frames);
+//! * split: a label to which two or more world objects are attributed
+//!   (label-frames);
+//! * false from sharing: a false estimate (above) whose sources are only the
+//!   other car.
+
+#![recursion_limit = "256"]
 
 use godview_core::extent::{wrap_pi, yaw_residual};
 use godview_core::frames::{EnuFrame, Geodetic};
@@ -44,6 +58,8 @@ struct Args {
     ablate: Vec<String>,
     box_size_sys_m: f64,
     box_yaw_sys_deg: f64,
+    box_center_sys_frac: f64,
+    box_center_sys_z_m: f64,
     diag: String,
     dump: String,
     no_sharing: bool,
@@ -60,6 +76,8 @@ fn parse_args() -> Args {
         ablate: Vec::new(),
         box_size_sys_m: 0.0,
         box_yaw_sys_deg: 0.0,
+        box_center_sys_frac: 0.0,
+        box_center_sys_z_m: 0.0,
         diag: String::new(),
         dump: String::new(),
         no_sharing: false,
@@ -96,6 +114,8 @@ fn parse_args() -> Args {
             // frame, as JSON lines (for visualization). Does not change scoring.
             "--dump" => a.dump = val,
             "--box-yaw-sys-deg" => a.box_yaw_sys_deg = val.parse().expect("--box-yaw-sys-deg"),
+            "--box-center-sys-frac" => a.box_center_sys_frac = val.parse().expect("--box-center-sys-frac"),
+            "--box-center-sys-z-m" => a.box_center_sys_z_m = val.parse().expect("--box-center-sys-z-m"),
             // Diagnostics only (world model): no-box-gate, no-size-gate, no-yaw-gate,
             // no-vel-gate, no-pos-gate.
             "--ablate" => a.ablate.push(val),
@@ -139,6 +159,13 @@ struct CarStats {
     /// and the norm of that relative translation (m).
     aligned_frames: usize,
     align_relative_m: Vec<f64>,
+    /// Attribution metrics (only with attribution.json).
+    wrong_merges: usize,
+    splits: usize,
+    split_extra_objects: usize,
+    false_from_sharing: usize,
+    unattributed_members: usize,
+    members: usize,
 }
 
 fn quantile(v: &[f64], q: f64) -> f64 {
@@ -182,6 +209,22 @@ fn main() {
         })
         .collect();
     let frames = truth["frames"].as_array().unwrap();
+    // Per car, obs id (as parse_line numbers them, from 1) -> attributed label.
+    let attribution: Option<[Vec<Option<String>>; 2]> =
+        std::fs::read_to_string(format!("{}/attribution.json", args.dir)).ok().map(|text| {
+            let a: Value = serde_json::from_str(&text).unwrap();
+            let fr = a["frames"].as_array().unwrap();
+            assert_eq!(fr.len(), frames.len(), "attribution frames");
+            let mut out: [Vec<Option<String>>; 2] = [vec![None], vec![None]];
+            for f in fr {
+                for (c, o) in out.iter_mut().enumerate() {
+                    for g in f[c].as_array().unwrap() {
+                        o.push(g.as_str().map(String::from));
+                    }
+                }
+            }
+            out
+        });
     assert_eq!(lines[0].len(), frames.len());
     assert_eq!(lines[1].len(), frames.len());
 
@@ -200,6 +243,8 @@ fn main() {
     let mut config = NodeConfig::default();
     config.tracker.box_size_sys_m = args.box_size_sys_m;
     config.tracker.box_yaw_sys_rad = args.box_yaw_sys_deg.to_radians();
+    config.tracker.box_center_sys_frac = args.box_center_sys_frac;
+    config.tracker.box_center_sys_z_m = args.box_center_sys_z_m;
     config.world.align.enabled = args.align;
     for a in &args.ablate {
         match a.as_str() {
@@ -215,7 +260,10 @@ fn main() {
         .map(|c| PerceptionNode::new(keys.agent_key(c), 1, config))
         .collect();
     let mut next_obs = [0u64; 2];
-    let mut queue: VecDeque<(i64, usize, Vec<u8>)> = VecDeque::new();
+    let mut queue: VecDeque<(i64, usize, Vec<u8>, Attr)> = VecDeque::new();
+    // Per car: report key -> (source car, latest obs id fused), from its own
+    // publishes and from the snapshots that came with delivered peer batches.
+    let mut known: [Attr; 2] = [Attr::new(), Attr::new()];
     let mut stats: Vec<CarStats> = (0..2).map(|_| CarStats::default()).collect();
     let mut detected_hist: VecDeque<BTreeSet<String>> = VecDeque::new();
     let mut ever_detected: [BTreeSet<String>; 2] = [BTreeSet::new(), BTreeSet::new()];
@@ -232,17 +280,23 @@ fn main() {
             .collect();
         assert!(parsed.iter().all(|p| p.t == t), "car files and truth disagree on time");
         for c in 0..2 {
-            deliver(&mut queue, &mut nodes, t, &mut rejected);
+            deliver(&mut queue, &mut nodes, t, &mut rejected, &mut known);
             nodes[c].ingest(&parsed[c].detections);
             nodes[c].maintain(t);
             if let Some(bytes) = nodes[c].publish(t, parsed[c].pose.as_ref()) {
+                let snap: Attr = nodes[c]
+                    .tracker()
+                    .tracks()
+                    .map(|tr| ((node_ids[c], tr.id), (c, tr.last_obs_id)))
+                    .collect();
+                known[c].extend(snap.iter().map(|(k, v)| (*k, *v)));
                 if args.no_sharing {
                     continue;
                 }
-                queue.push_back((t.as_nanos() + args.delay_ms * 1_000_000, 1 - c, bytes));
+                queue.push_back((t.as_nanos() + args.delay_ms * 1_000_000, 1 - c, bytes, snap));
             }
         }
-        deliver(&mut queue, &mut nodes, t, &mut rejected);
+        deliver(&mut queue, &mut nodes, t, &mut rejected, &mut known);
 
         // Truth for this frame, in ECEF through the shared anchor (no error).
         let pose_exact = parsed[0].pose.as_ref().expect("pose").ecef_from_odom.pose;
@@ -314,6 +368,35 @@ fn main() {
                 .collect();
             let sc = score(&est, &truth_ecef, args.cutoff_m);
             let st = &mut stats[c];
+            if let Some(attr) = &attribution {
+                let mut per_label: BTreeMap<&str, usize> = BTreeMap::new();
+                for w in &world.objects {
+                    let mut labels: BTreeSet<&str> = BTreeSet::new();
+                    for (key, _) in &w.members {
+                        st.members += 1;
+                        match known[c].get(key).and_then(|(src, obs)| attr[*src][*obs as usize].as_deref()) {
+                            Some(g) => {
+                                labels.insert(g);
+                            }
+                            None => {
+                                if !known[c].contains_key(key) {
+                                    st.unattributed_members += 1;
+                                }
+                            }
+                        }
+                    }
+                    if labels.len() >= 2 {
+                        st.wrong_merges += 1;
+                    }
+                    for g in labels {
+                        *per_label.entry(g).or_default() += 1;
+                    }
+                }
+                for n in per_label.values().filter(|n| **n >= 2) {
+                    st.splits += 1;
+                    st.split_extra_objects += n - 1;
+                }
+            }
             st.frames += 1;
             let mut f_matched = 0;
             let mut f_missed = 0;
@@ -413,6 +496,10 @@ fn main() {
                     }
                     None => {
                         f_false += 1;
+                        let srcs = world.objects[ei].sources();
+                        if srcs.len() == 1 && srcs.contains(&node_ids[1 - c]) {
+                            st.false_from_sharing += 1;
+                        }
                         if st.matched_world_ids.contains(&world.objects[ei].id) {
                             st.false_previously_matched += 1;
                         }
@@ -490,6 +577,15 @@ fn main() {
             "id_changes_total": total_changes,
             "id_changes_per_object": if objects > 0 { total_changes as f64 / objects as f64 } else { f64::NAN },
             "objects_with_id_change": changes.iter().filter(|c| **c > 0).count(),
+            "attribution": attribution.is_some(),
+            "wrong_merges_object_frames": st.wrong_merges,
+            "split_label_frames": st.splits,
+            "split_extra_objects": st.split_extra_objects,
+            "false_from_sharing_object_frames": st.false_from_sharing,
+            "false_from_sharing_per_frame": st.false_from_sharing as f64 / st.frames.max(1) as f64,
+            "gained_object_frames_per_frame": st.gained as f64 / st.frames.max(1) as f64,
+            "members_seen": st.members,
+            "members_without_attribution_snapshot": st.unattributed_members,
             "per_frame_matched_missed_dup_false": st.per_frame,
         }));
     }
@@ -502,6 +598,8 @@ fn main() {
         "align": args.align,
         "box_size_sys_m": args.box_size_sys_m,
         "box_yaw_sys_deg": args.box_yaw_sys_deg,
+        "box_center_sys_frac": args.box_center_sys_frac,
+        "box_center_sys_z_m": args.box_center_sys_z_m,
         "cutoff_m": args.cutoff_m,
         "expected_rule": format!("detected by at least one car in this and the previous {} frames", EXPECT_HISTORY - 1),
         "batches_rejected": rejected,
@@ -524,23 +622,36 @@ fn main() {
             c["detected_by_both_fused_into_one"], c["detected_by_both_matched"], c["objects_gained_only_through_sharing"],
             c["id_changes_total"], c["objects_with_id"], c["heading_err_deg_p95"].as_f64().unwrap_or(f64::NAN),
         );
+        if c["attribution"].as_bool() == Some(true) {
+            println!(
+                "    wrong merges {} splits {} false from sharing {} (per frame {:.2}) gained per frame {:.2}",
+                c["wrong_merges_object_frames"], c["split_label_frames"], c["false_from_sharing_object_frames"],
+                c["false_from_sharing_per_frame"].as_f64().unwrap(), c["gained_object_frames_per_frame"].as_f64().unwrap(),
+            );
+        }
     }
 }
 
+/// Report key -> (source car, obs id of the latest detection its track fused).
+type Attr = BTreeMap<ReportKey, (usize, u64)>;
+
 fn deliver(
-    queue: &mut VecDeque<(i64, usize, Vec<u8>)>,
+    queue: &mut VecDeque<(i64, usize, Vec<u8>, Attr)>,
     nodes: &mut [PerceptionNode],
     t: Timestamp,
     rejected: &mut [usize; 2],
+    known: &mut [Attr; 2],
 ) {
     let mut keep = VecDeque::new();
-    while let Some((at, to, bytes)) = queue.pop_front() {
+    while let Some((at, to, bytes, snap)) = queue.pop_front() {
         if at <= t.as_nanos() {
             if nodes[to].receive(&bytes, t).is_err() {
                 rejected[to] += 1;
+            } else {
+                known[to].extend(snap);
             }
         } else {
-            keep.push_back((at, to, bytes));
+            keep.push_back((at, to, bytes, snap));
         }
     }
     *queue = keep;

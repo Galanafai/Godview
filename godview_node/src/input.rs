@@ -76,8 +76,20 @@ pub struct InputDetection {
     pub y: f64,
     /// Odometry-frame z, up (m).
     pub z: f64,
-    /// Isotropic position standard deviation (m).
+    /// Isotropic position standard deviation (m). With `sigma_along_m` and
+    /// `sigma_across_m` it gives only the vertical part (unless `sigma_z_m`).
     pub sigma_m: f64,
+    /// Horizontal standard deviation along the box heading (m). Needs `box`
+    /// and `sigma_across_m`; the covariance is rotated by the box heading
+    /// (unchanged by a 180 degree flip, so `yaw_ambiguous` does not matter).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sigma_along_m: Option<f64>,
+    /// Horizontal standard deviation across the box heading (m).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sigma_across_m: Option<f64>,
+    /// Vertical standard deviation (m), with the along / across pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sigma_z_m: Option<f64>,
     /// Class id.
     pub class_id: u8,
     /// Class confidence in `[0, 1]`.
@@ -144,15 +156,17 @@ pub fn parse_line(line: &str, next_obs: &mut u64) -> Result<ParsedFrame, InputEr
         if !(d.sigma_m.is_finite() && d.sigma_m > 0.0) {
             return Err(InputError::Uncertainty("detection sigma_m"));
         }
+        let object_box = d.object_box.map(|b| b.to_box()).transpose()?;
+        let r = measurement_cov(d, object_box.as_ref())?;
         *next_obs += 1;
         detections.push(Detection {
             obs_id: *next_obs,
             t,
             z: Vector3::new(d.x, d.y, d.z),
-            r: Matrix3::identity() * d.sigma_m * d.sigma_m,
+            r,
             class_id: d.class_id,
             class_prob: d.class_prob.clamp(0.0, 1.0),
-            object_box: d.object_box.map(|b| b.to_box()).transpose()?,
+            object_box,
         });
     }
     Ok(ParsedFrame {
@@ -161,6 +175,31 @@ pub fn parse_line(line: &str, next_obs: &mut u64) -> Result<ParsedFrame, InputEr
         detections,
         agent_odom: Vector3::from(frame.agent_xyz),
     })
+}
+
+/// Position covariance of a detection: isotropic, or along / across its box.
+fn measurement_cov(d: &InputDetection, b: Option<&ObjectBox>) -> Result<Matrix3<f64>, InputError> {
+    let ok = |v: f64| v.is_finite() && v > 0.0;
+    match (d.sigma_along_m, d.sigma_across_m) {
+        (None, None) => {
+            if d.sigma_z_m.is_some() {
+                return Err(InputError::Uncertainty("sigma_z_m needs sigma_along_m and sigma_across_m"));
+            }
+            Ok(Matrix3::identity() * d.sigma_m * d.sigma_m)
+        }
+        (Some(sl), Some(sc)) => {
+            let sz = d.sigma_z_m.unwrap_or(d.sigma_m);
+            if !(ok(sl) && ok(sc) && ok(sz)) {
+                return Err(InputError::Uncertainty("detection sigma_along_m / sigma_across_m / sigma_z_m"));
+            }
+            let b = b.ok_or(InputError::Uncertainty("sigma_along_m needs a box"))?;
+            let (c, s) = (b.yaw.cos(), b.yaw.sin());
+            let rot = Matrix3::new(c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0);
+            let diag = Matrix3::from_diagonal(&Vector3::new(sl * sl, sc * sc, sz * sz));
+            Ok(rot * diag * rot.transpose())
+        }
+        _ => Err(InputError::Uncertainty("sigma_along_m and sigma_across_m go together")),
+    }
 }
 
 impl InputBox {
@@ -259,6 +298,33 @@ mod tests {
             parse_line(&bad, &mut next),
             Err(InputError::Uncertainty(_))
         ));
+    }
+
+    #[test]
+    fn anisotropic_covariance_follows_the_box_heading() {
+        let mut next = 0;
+        let line = LINE
+            .replace(
+                "\"class_prob\": 0.9}",
+                "\"class_prob\": 0.9, \"sigma_along_m\": 0.4, \"sigma_across_m\": 0.1, \"sigma_z_m\": 0.05, \"box\": {\"length_m\": 4.5, \"width_m\": 1.8, \"height_m\": 1.5, \"yaw_deg\": 90.0, \"sigma_size_m\": 0.2, \"sigma_yaw_deg\": 3.0, \"yaw_ambiguous\": true}}",
+            )
+            .replace('\n', " ");
+        let f = parse_line(&line, &mut next).unwrap();
+        let r = f.detections[0].r;
+        // Heading along odometry y: the large sigma is on y.
+        assert!((r[(1, 1)] - 0.16).abs() < 1e-12 && (r[(0, 0)] - 0.01).abs() < 1e-12);
+        assert!((r[(2, 2)] - 0.0025).abs() < 1e-12 && r[(0, 1)].abs() < 1e-12);
+        // A flipped heading gives the same covariance.
+        let flipped = line.replace("\"yaw_deg\": 90.0, \"sigma_size_m\"", "\"yaw_deg\": -90.0, \"sigma_size_m\"");
+        let g = parse_line(&flipped, &mut next).unwrap();
+        assert!((g.detections[0].r - r).norm() < 1e-12);
+        // Without a box, or with only one of the pair, the line is rejected.
+        let no_box = LINE
+            .replace("\"class_prob\": 0.9}", "\"class_prob\": 0.9, \"sigma_along_m\": 0.4, \"sigma_across_m\": 0.1}")
+            .replace('\n', " ");
+        assert!(matches!(parse_line(&no_box, &mut next), Err(InputError::Uncertainty(_))));
+        let half = line.replace("\"sigma_across_m\": 0.1, ", "");
+        assert!(matches!(parse_line(&half, &mut next), Err(InputError::Uncertainty(_))));
     }
 
     #[test]

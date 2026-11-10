@@ -43,8 +43,8 @@ Two things to keep in mind when reading the numbers:
 | R3 GodView, coasting kept, sharing | 57.13 / 30.11 | 72.04 / 41.48 |
 
 Boxes in range: NF 29,843 (0.2) / 21,857 (0.3); LF 42,536 / 32,269; R1 30,585;
-R2 21,694; R3 34,764. The standard-AP reproduces step 1's No Fusion and Late
-Fusion dataset numbers (39.85 / 22.05, 55.00 / 26.75) and the dataset AP of
+R2 21,694; R3 34,764. The dataset AP reproduces step 1's No Fusion and Late
+Fusion numbers (39.85 / 22.05, 55.00 / 26.75) and the dataset AP of
 every method equals the library's functions to 1e-9 (asserted in the run).
 
 ### The lead of R1 (primary), in points
@@ -106,11 +106,11 @@ every method equals the library's functions to 1e-9 (asserted in the run).
 | R2 | 75.1 / 50.7 | 45.1 / 28.8 | 6.9 / 3.1 |
 | R3 | 83.3 / 51.7 | 58.5 / 33.1 | 52.0 / 23.5 |
 
-* Near range (0 to 30 m) GodView's AP@0.7 is 5 points above Late Fusion under
-  both definitions (51.8 against 46.4 to 46.9 standard; 46.7 against 36.9 to 41.4
-  dataset), and level at AP@0.5 against Late Fusion @0.3.
+* Near range (0 to 30 m) GodView's AP@0.7 is at least 5 points above Late
+  Fusion under both definitions (51.8 against 46.4 to 46.9 standard; 46.7
+  against 36.9 to 41.4 dataset), and level at AP@0.5 against Late Fusion @0.3.
 * From 30 m on, Late Fusion is ahead under the standard AP (by 3.4 to 11.7 points
-  at AP@0.5, 6 to 11 at AP@0.7) and, at 0.3, under the dataset AP at 50 to 100 m.
+  at AP@0.5, 5 to 11 at AP@0.7) and, at 0.3, under the dataset AP at 50 to 100 m.
 * With each label's first 3 frames ignored (`excl_first_3` in the json), the
   ordering is unchanged (R1 64.2 / 35.5 dataset, 74.1 / 43.0 standard; Late
   Fusion @0.3 65.9 / 34.0 and 75.4 / 42.5).

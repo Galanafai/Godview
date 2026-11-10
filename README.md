@@ -40,7 +40,7 @@ Three things make this hard, and GodView handles each one:
 4. **Report store.** Received reports go into a last-writer-wins store keyed by source and track. Duplicated, reordered and relayed messages all converge to the same store.
 5. **World model.** Each agent computes the shared world from its store: predict to a common time, find candidates with an H3 index, gate on position and velocity, cluster with at most one track per source, and fuse by covariance intersection. Each report also carries the ID its track belongs to, so an object keeps its ID as it is handed from one agent's sensors to the next. The same store always gives a bit-identical world, IDs included.
 
-The full contract, frames, formats and parameters are in [docs/PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md).
+The full contract, frames, formats and parameters are in [docs/PERCEPTION_SHARING.md](docs/PERCEPTION_SHARING.md). The short version of the evidence, including where GodView fails, is [docs/WRITEUP.md](docs/WRITEUP.md).
 
 ## Quick start
 

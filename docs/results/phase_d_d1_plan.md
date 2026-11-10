@@ -256,9 +256,10 @@ on, mostly at IoU 0.7. Alignment shifts fused objects by a median of 0.62 m
 compared with alignment off. The dataset's ground truth is built from the same
 `lidar_pose` of both cars, without this correction. Whether the alignment
 corrects a real pose error that the dataset's evaluation ignores, or errs, is
-not decided by this. GodView's own metrics, which use the labels of both cars
-averaged, do not lose accuracy (RMS 0.84 to 1.27 m with alignment off, 0.84 to
-1.27 m on).
+not decided by this. GodView's own metrics, which score against the average of both cars'
+labels, change little: RMS per car and scenario is 0.82 to 1.25 m with
+alignment off and 0.84 to 1.27 m on, with the first scenario slightly worse
+on (0.84 / 0.82 to 0.92 / 0.88 m).
 
 ### AP on val (car 0's world; the AP script is validated)
 

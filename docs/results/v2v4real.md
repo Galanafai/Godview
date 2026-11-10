@@ -369,6 +369,193 @@ frozen result above is the one reported.
   real detector, which is more likely to be ambiguous (`yaw_ambiguous`)
   than confidently wrong; this replay declares headings as unambiguous.
 
+## Held-out runs with relative alignment (run A; run B not run)
+
+Measured 2026-11-10 on branch `feat/v2v4real-align`. This section is
+separate from the held-out confirmation above, which is unchanged. Script:
+`scripts/v2v4real/run_align.py`. Raw numbers:
+`docs/results/v2v4real_align_A_summary.json` (run A) and
+`docs/results/v2v4real_align_val_selection.json` (the val selection for
+run B).
+
+**Read this first: the alignment code has a numerical bug that these runs
+hit** (see "Alignment blow-ups" below). In 51 of the 2070 held-out
+car-frames where alignment fired, it moved a car by between 8.5 m and
+about 10^15 m. Run A measures alignment as implemented, bug included. It is
+not a fair measure of what alignment can do.
+
+### What was run
+
+* **Run A:** the frozen held-out settings (pose 1.27 m horizontal, 2.0 m
+  vertical, 0.1 deg yaw; box 0.18 m, 1.7 deg), unchanged, plus `--align`
+  (default `AlignConfig`: 8 m search, 1 m inlier tolerance, at least 3
+  shared objects, 0.1 m scatter floor), on test2 and test3, run once. Same
+  converter, replay, delay (100 ms) and scoring as the held-out table.
+* **Run B:** a smaller pose sigma chosen on the val split by a rule
+  committed and pushed before any val replay (commit 235f12f):
+  * candidates: sigma_h of 0.5, 0.3, 0.2 or 0.1 m, with vertical at the
+    frozen ratio (2.0 / 1.27);
+  * admissible: pooled merged % on val within 2 points of the frozen
+    settings plus `--align` on val;
+  * chosen: the admissible candidate whose position NEES on objects both
+    cars labeled is closest to 3;
+  * B is not run if no candidate is admissible, or if alignment fires in
+    fewer than 25% of val car-frames or in fewer than 2 of the 3 val
+    scenarios.
+* **Why not test1:** alignment never fires on test1 (next subsection).
+* **Val split:** 3 scenarios, 748 frames (`2022-03-15-15-20-01_0`,
+  `2022-03-21-09-35-07_0`, `2022-03-21-09-35-07_10`). It has no `gps`
+  field in any frame, so the converter anchors it at a fixed made-up point
+  near the test splits with the map x axis East (commit 40e3e69, before
+  any val replay). Only relative geometry is scored, so this should not
+  matter; the scores were not compared against a gps anchor, because val
+  has none. Car 1 has 18 more frames than car 0 in `15-20-01_0`, all at
+  the end, and they are dropped. The label frame and extent checks give
+  the same answers as on test1 (99% of boxes hold at least 5 points with
+  extent as half size; yaw in degrees, positive). Two of the three val
+  scenarios come from the same drive (`2022-03-21-09-35-07`) as test3's
+  `09-35-07_7`, so val is not fully independent of the held-out data.
+
+### Finding: test1 has too few shared objects for alignment
+
+Objects labeled by both cars, per frame (from `truth.json`), and the
+car-frames in which alignment estimated an offset (frozen settings plus
+`--align`):
+
+| scenario | frames | frames with 0 / 1 / 2 / 3 objects labeled by both cars | car-frames aligned |
+|---|---|---|---|
+| 09-54-40_0 | 147 | 0 / 4 / 143 / 0 | 0 of 294 |
+| 10-29-43_3 | 114 | 5 / 76 / 5 / 28 | 0 of 228 |
+| 10-29-43_4 | 144 | 82 / 62 / 0 / 0 | 0 of 288 |
+
+Alignment needs at least 3 shared objects (`min_pairs`). In 10-29-43_3, 28
+frames have 3 objects labeled by both cars, but alignment still did not
+fire; which condition failed (both cars detecting all 3, class and size
+compatibility, or agreement within 1 m) was not checked. With `--align`,
+the test1 replay reproduces the unaligned frozen test1 row exactly (merged
+89.8%, NEES 0.82, 1.24 ID changes per object).
+
+### Run A results (frozen settings plus `--align`, test2 and test3, run once)
+
+Each cell is run A, with the original held-out run (same settings, no
+alignment) in parentheses. Merged %: objects both cars detected that became
+one world object. Missed %: expected objects with no estimate. Sharing-only
+%: matched object-frames the car's own sensor had never detected. NEES is
+3D position NEES (3 expected), on objects both cars labeled and on objects
+only one car labeled. Relative offset: the norm of the difference between
+the two cars' estimated translations, over the car-frames where alignment
+fired. Blow-ups: car-frames with a relative offset above 8.5 m.
+
+| scenario | car-frames aligned | median relative offset m (p95) | blow-ups | merged % | missed % | sharing-only % | ID changes / object | NEES, both labeled | NEES, one car labeled |
+|---|---|---|---|---|---|---|---|---|---|
+| 10-50-46_0 | 211 of 396 (53%) | 2.15 (7.8) | 11 | 89.8 (90.4) | 2.4 (0.2) | 17.5 (17.3) | 2.11 (0.50) | 0.63 (0.72) | 0.76 (0.16) |
+| 10-50-46_1 | 354 of 360 (98%) | 0.25 (0.81) | 0 | 92.0 (92.1) | 1.3 (1.3) | 15.0 (15.0) | 2.54 (2.55) | 0.12 (0.12) | 0.21 (0.21) |
+| 11-02-23_1 | 463 of 620 (75%) | 1.25 (3.6) | 15 | 83.6 (84.9) | 3.4 (1.3) | 26.1 (26.1) | 1.99 (1.70) | 0.58 (0.51) | 0.49 (0.15) |
+| 11-02-23_2 | 298 of 608 (49%) | 0.78 (6.5e12) | 25 | 93.2 (93.7) | 4.9 (2.3) | 7.2 (7.1) | 1.80 (1.54) | 0.39 (0.29) | 0.21 (0.13) |
+| 11-51-42_0 | 0 of 442 (0%) | none | 0 | 95.2 (95.2) | 0.0 (0.0) | 46.2 (46.2) | 0.23 (0.23) | 0.74 (0.74) | 0.05 (0.05) |
+| 09-35-07_7 | 744 of 750 (99%) | 0.27 (0.43) | 0 | 99.6 (99.6) | 0.1 (0.1) | 15.9 (15.9) | 0.56 (1.15) | 0.08 (0.09) | 0.07 (0.06) |
+| **total** | 2070 of 3176 (65%) | **0.39** (3.1) | 51 | **93.3** (93.6) | **1.8** (0.8) | **22.8** (22.7) | **1.77** (1.42) | **0.27** (0.25) | 0.27 (0.11) |
+
+Totals as counts: merged 24477 of 26247 (original 24794 of 26490); missed
+1105 of 62601 (original 502); sharing-only 14025 of 61496 matched
+object-frames (original 14127 of 62099); ID changes 1238 over 698 objects
+(original 987 over 697).
+
+### Run B: not run (no admissible sigma on val)
+
+Alignment fired in 840 of 1496 val car-frames (56%) and in all 3 val
+scenarios, so the rule was meaningful by its own test. Pooled over val:
+
+| pose sigma h / v m | merged % | change from reference (points) | missed % | ID changes / object | NEES, both labeled | admissible |
+|---|---|---|---|---|---|---|
+| 1.27 / 2.0 (reference: frozen plus `--align`) | 94.2 | | 5.6 | 2.36 | 0.66 | reference |
+| 0.5 / 0.79 | 86.8 | -7.4 | 5.3 | 4.42 | 3.42 | no |
+| 0.3 / 0.47 | 76.5 | -17.7 | 4.9 | 6.52 | 7.07 | no |
+| 0.2 / 0.31 | 66.7 | -27.4 | 4.8 | 8.53 | 11.00 | no |
+| 0.1 / 0.16 | 53.2 | -40.9 | 4.8 | 10.92 | 17.49 | no |
+
+No candidate keeps merged % within 2 points, so by the committed rule run
+B was not run on test2 or test3. Alignment's median relative offset on val
+is 1.70 m, against 0.39 m on the held-out scenarios, and 79 of the 840
+aligned val car-frames are blow-ups. Val is therefore a harder and less
+representative set than the held-out one, and the result may change once
+the bug below is fixed. It has not been rerun.
+
+### Alignment blow-ups (a bug, found by these runs)
+
+* **Measured:** in 51 of 2070 aligned held-out car-frames and 79 of 840
+  aligned val car-frames, the relative translation is above 8.5 m, up to
+  about 4.8e15 m. By construction it should not exceed about 8 m: each pair
+  offset is a mean of candidate differences within `max_offset_m`. The three
+  held-out scenarios with blow-ups (10-50-46_0, 11-02-23_1, 11-02-23_2;
+  11, 15 and 25 car-frames) are the ones where misses rose (from 10, 188
+  and 148 to 114, 512 and 324). The two scenarios without blow-ups are
+  unchanged (10-50-46_1) or have fewer ID changes (09-35-07_7: 0.56 per
+  object against 1.15). That a blown-up frame causes the misses was not
+  checked frame by frame.
+* **Likely cause (from reading `godview_core/src/alignment.rs`, `pair_offset`
+  and `estimate`):** the offset covariance is the scatter of the inlier
+  differences. With exactly 3 inliers the deviations sum to zero, so the
+  3x3 scatter has rank at most 2 and is singular. The 0.1 m floor is
+  applied only to the diagonal, which does not repair a singular matrix
+  whose null direction is off the axes. Its inverse then has an enormous
+  weight, the gauge eigenvalue of the least squares system is no longer
+  below the absolute 1e-9 cutoff of `pseudo_inverse`, and the solve returns
+  a huge translation.
+* **Checked in a NumPy copy of those steps** (not the Rust code): with 3
+  random inlier differences, 197 of 2000 trials give a relative translation
+  above 8.5 m; with the floor added as `floor * I` instead, 0 of 2000. A
+  fix is not made on this branch; it would change `alignment.rs` and needs
+  a decision on rerunning A.
+
+### What run A shows
+
+1. **With the frozen pose sigma, alignment changes the totals little.**
+   Merged 93.3% against 93.6%, sharing-only 22.8% against 22.7%, NEES on
+   objects both cars labeled 0.27 against 0.25. The frozen sigma already
+   covers the offsets, so alignment cannot gain much here.
+2. **Where alignment fires in nearly every frame and the offsets are small**
+   (10-50-46_1, 09-35-07_7), results are equal or better: ID changes in
+   09-35-07_7 fall from 1.15 to 0.56 per object.
+3. **Misses roughly double (0.8% to 1.8%) and ID changes rise (1.42 to 1.77
+   per object)**, all in the scenarios with blow-ups.
+4. **NEES on objects only one car labeled rises from 0.11 to 0.27** (in
+   10-50-46_0, from 0.16 to 0.76). This is what the two-car anchoring
+   predicts. With two sources the median anchor is the midpoint, so
+   alignment moves each car by half the offset between them. For an object
+   only one car labeled, the truth is that car's own label, so the aligned
+   estimate moves away from the truth by about half the offset. That this
+   is the whole cause was not separated from the blow-ups.
+
+### Not proven by these runs
+
+* **The truth is the mean of the two cars' labels.** With alignment this
+  matters more than before. For objects both cars labeled, alignment moves
+  both cars toward their midpoint, which is how the truth is defined, so
+  error and NEES there flatter alignment. For objects one car labeled, the
+  truth follows that car's pose, which alignment moves away from. Neither
+  says where the objects really are. Error the two cars share is invisible
+  to both alignment and this truth.
+* Run A includes the blow-up bug; it does not show what correct alignment
+  does on real data.
+* Run B was not run. That alignment cannot support a smaller sigma on this
+  data is not shown either, because the val selection includes the same
+  bug, and val's offsets are larger than the held-out ones.
+* Alignment settings (`min_pairs` 3, 1 m inlier tolerance, 8 m search) are
+  the defaults and were not tuned. Translation only; no heading offset.
+* Still version 1 detections (labels plus noise), not a real detector.
+
+Reproduce (about 4 minutes; needs test2, test3 and val under
+`$V2V4REAL_DIR`; val is Box file `f_1619910191481`):
+
+```sh
+cargo build --release -p godview_sim --bin v2v4real-replay
+/workspace/venv/bin/python -I scripts/v2v4real/run_align.py a $V2V4REAL_DIR \
+    $V2V4REAL_DIR/converted_align docs/results/v2v4real_align_A_summary.json
+/workspace/venv/bin/python -I scripts/v2v4real/run_align.py select $V2V4REAL_DIR \
+    $V2V4REAL_DIR/converted_align docs/results/v2v4real_align_val_selection.json
+```
+
 ## Demo video
 
 ![Car A alone, Car B alone and the shared view, V2V4Real test3 scenario 2022-03-17-11-51-42_0, frame 101](../media/v2v4real_shared_view_still.png)

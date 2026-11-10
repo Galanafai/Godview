@@ -1,0 +1,65 @@
+{
+ "ego_speed_values": {
+  "min": 0.0,
+  "median": 0.0,
+  "max": 0.0,
+  "share_zero": 1.0
+ },
+ "ego_speed_vs_displacement_per_frame": {
+  "n_frames_with_speed_over_0.5": 0,
+  "speed_over_displacement_median": null,
+  "displacement_m_median": null
+ },
+ "labels_per_frame_per_agent": {
+  "vehicle": {
+   "median": 34.0,
+   "max": 114
+  },
+  "infra": {
+   "median": 33.0,
+   "max": 58
+  }
+ },
+ "classes_by_agent_kind": {
+  "vehicle": {
+   "Car": 9808,
+   "Bus": 1203,
+   "ConcreteTruck": 815,
+   "BicycleRider": 169,
+   "Pedestrian": 16013,
+   "Van": 403,
+   "Truck": 551,
+   "Scooter": 1,
+   "TrashCan": 243,
+   "ScooterRider": 224
+  },
+  "infra": {
+   "Car": 6258,
+   "Bus": 402,
+   "TrashCan": 601,
+   "Pedestrian": 15804,
+   "Scooter": 12,
+   "Van": 429,
+   "ScooterRider": 265,
+   "Truck": 256
+  }
+ },
+ "same_id_in_two_agents": {
+  "pairs_identical_location_lt_0.01m": 7860,
+  "pairs_different": 20176,
+  "different_distance_m_p50_p90_max": [
+   0.292432654540821,
+   0.6659121610913923,
+   40.06402554493279
+  ]
+ },
+ "label_id_in_one_agent_only": {
+  "labels": 42679,
+  "with_same_class_label_within_1m_in_the_other_agent": 1260
+ },
+ "agent_to_nearest_label_xy_m": {
+  "vehicles_median": 0.7308982537329034,
+  "vehicles_p10": 0.34183996042416415,
+  "infra_median": 2.9407561203274426
+ }
+}

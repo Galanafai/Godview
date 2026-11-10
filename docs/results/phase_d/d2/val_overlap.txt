@@ -1,0 +1,40 @@
+Per scenario: median distance between agent pairs (m), and median number of label ids present in both agents of a pair (labels of both agents within 1 m of each other, same id)
+2023-03-17-16-03-02_11_1 104 frames
+   agents  -2, -1: distance median   37.9 (min  37.9 max   37.9); shared label ids per frame median 22 max 31
+   agents  -2,  1: distance median  149.2 (min 112.1 max  160.1); shared label ids per frame median 0 max 2
+   agents  -2,  2: distance median  166.7 (min 164.7 max  171.9); shared label ids per frame median 0 max 0
+   agents  -1,  1: distance median  163.7 (min 126.4 max  175.0); shared label ids per frame median 0 max 2
+   agents  -1,  2: distance median  199.1 (min 198.0 max  203.2); shared label ids per frame median 0 max 0
+   agents   1,  2: distance median  256.0 (min 226.0 max  272.9); shared label ids per frame median 0 max 0
+2023-03-17-16-10-12_1_1 131 frames
+   agents  -2, -1: distance median   37.9 (min  37.9 max   37.9); shared label ids per frame median 21 max 24
+   agents  -2,  1: distance median   11.3 (min  11.3 max   27.3); shared label ids per frame median 33 max 40
+   agents  -2,  2: distance median   32.1 (min  26.5 max   58.7); shared label ids per frame median 24 max 30
+   agents  -1,  1: distance median   34.7 (min  34.7 max   48.5); shared label ids per frame median 21 max 27
+   agents  -1,  2: distance median   55.2 (min  50.6 max   78.9); shared label ids per frame median 15 max 18
+   agents   1,  2: distance median   24.3 (min  18.7 max   32.6); shared label ids per frame median 45 max 47
+2023-04-04-14-28-53_45_0 98 frames
+   agents  -2, -1: distance median   37.9 (min  37.9 max   37.9); shared label ids per frame median 24 max 28
+   agents  -2,  2: distance median   19.9 (min  19.9 max   19.9); shared label ids per frame median 20 max 26
+   agents  -1,  2: distance median   47.5 (min  47.5 max   47.5); shared label ids per frame median 22 max 28
+2023-04-04-15-43-17_15_0 140 frames
+   agents  -2, -1: distance median   37.9 (min  37.9 max   37.9); shared label ids per frame median 24 max 32
+   agents  -2,  1: distance median  120.5 (min 117.8 max  120.5); shared label ids per frame median 1 max 2
+   agents  -2,  2: distance median  112.6 (min 101.7 max  112.6); shared label ids per frame median 6 max 11
+   agents  -1,  1: distance median   87.9 (min  85.2 max   87.9); shared label ids per frame median 5 max 6
+   agents  -1,  2: distance median   80.0 (min  69.1 max   80.0); shared label ids per frame median 9 max 11
+   agents   1,  2: distance median    8.0 (min   7.9 max   16.2); shared label ids per frame median 22 max 25
+2023-04-04-16-01-17_33_0 128 frames
+   agents  -2, -1: distance median   37.9 (min  37.9 max   37.9); shared label ids per frame median 20 max 25
+   agents  -2,  1: distance median   77.8 (min  26.1 max  133.1); shared label ids per frame median 5 max 10
+   agents  -2,  2: distance median   40.6 (min  13.8 max   90.2); shared label ids per frame median 12 max 18
+   agents  -1,  1: distance median   91.8 (min  38.4 max  147.5); shared label ids per frame median 6 max 11
+   agents  -1,  2: distance median   54.2 (min  24.2 max  104.4); shared label ids per frame median 16 max 26
+   agents   1,  2: distance median   39.0 (min  23.3 max   43.5); shared label ids per frame median 26 max 46
+2023-04-05-16-09-26_6_1 116 frames
+   agents  -2, -1: distance median   37.9 (min  37.9 max   37.9); shared label ids per frame median 20 max 25
+   agents  -2,  1: distance median   87.7 (min  56.1 max  119.9); shared label ids per frame median 3 max 5
+   agents  -2,  2: distance median  106.2 (min  81.5 max  126.4); shared label ids per frame median 2 max 4
+   agents  -1,  1: distance median  120.7 (min  87.9 max  153.3); shared label ids per frame median 2 max 4
+   agents  -1,  2: distance median   75.0 (min  51.5 max   94.5); shared label ids per frame median 3 max 5
+   agents   1,  2: distance median  193.6 (min 136.6 max  246.1); shared label ids per frame median 1 max 3

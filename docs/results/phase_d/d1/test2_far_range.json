@@ -1,0 +1,158 @@
+{
+ "localization_cases": {
+  "n": 1940,
+  "median_abs_offset_along_m": 0.3156645263312439,
+  "median_abs_offset_across_m": 0.8423194429984369,
+  "share_shape_alone_iou_ge_0.5": 0.9664948453608248,
+  "by_speed": {
+   "over 10 m/s": 198,
+   "3 to 10 m/s": 237,
+   "under 3 m/s": 1477,
+   "unknown": 28
+  },
+  "by_number_of_source_cars_in_the_object": {
+   "1": 829,
+   "2": 1111
+  }
+ },
+ "far_ground_truth_by_speed": {
+  "unknown": {
+   "n": 319,
+   "LF@0.2": 191,
+   "LF@0.3": 176,
+   "R1": 112,
+   "R3": 121
+  },
+  "over 10 m/s": {
+   "n": 3099,
+   "LF@0.2": 2542,
+   "LF@0.3": 2438,
+   "R1": 2464,
+   "R3": 2517
+  },
+  "3 to 10 m/s": {
+   "n": 2089,
+   "LF@0.2": 1530,
+   "LF@0.3": 1431,
+   "R1": 1453,
+   "R3": 1497
+  },
+  "under 3 m/s": {
+   "n": 9232,
+   "LF@0.2": 7517,
+   "LF@0.3": 6882,
+   "R1": 6375,
+   "R3": 6591
+  }
+ },
+ "ground_truth_boxes_by_band": {
+  "30_50": 8575,
+  "50_100": 6164
+ },
+ "covered_by_method": {
+  "30_50": {
+   "LF@0.2": {
+    "covered": 6736
+   },
+   "LF@0.3": {
+    "covered": 6238
+   },
+   "R1": {
+    "covered": 5984
+   },
+   "R3": {
+    "covered": 6122
+   }
+  },
+  "50_100": {
+   "LF@0.2": {
+    "covered": 5044
+   },
+   "LF@0.3": {
+    "covered": 4689
+   },
+   "R1": {
+    "covered": 4420
+   },
+   "R3": {
+    "covered": 4604
+   }
+  }
+ },
+ "reasons": {
+  "30_50": {
+   "R1 uncovered": {
+    "localization (box near, IoU < 0.5)": 1222,
+    "not detected": 793,
+    "no track (confirmation / gating / pruning)": 250,
+    "below 0.3 threshold": 275,
+    "wrong merge": 34,
+    "fresh-only (coasting kept it)": 17
+   },
+   "LF@0.3 covers, R1 does not": {
+    "localization (box near, IoU < 0.5)": 638,
+    "no track (confirmation / gating / pruning)": 192,
+    "below 0.3 threshold": 24,
+    "not detected": 32,
+    "fresh-only (coasting kept it)": 9,
+    "wrong merge": 5
+   }
+  },
+  "50_100": {
+   "R1 uncovered": {
+    "not detected": 588,
+    "no track (confirmation / gating / pruning)": 237,
+    "below 0.3 threshold": 189,
+    "localization (box near, IoU < 0.5)": 718,
+    "fresh-only (coasting kept it)": 8,
+    "wrong merge": 4
+   },
+   "LF@0.3 covers, R1 does not": {
+    "not detected": 61,
+    "no track (confirmation / gating / pruning)": 150,
+    "localization (box near, IoU < 0.5)": 500,
+    "fresh-only (coasting kept it)": 5,
+    "below 0.3 threshold": 29,
+    "wrong merge": 3
+   }
+  }
+ },
+ "boxes_in_band": {
+  "30_50": {
+   "LF@0.2": {
+    "boxes": 11785,
+    "cover_a_gt": 6716
+   },
+   "LF@0.3": {
+    "boxes": 8265,
+    "cover_a_gt": 6219
+   },
+   "R1": {
+    "boxes": 8012,
+    "cover_a_gt": 5980
+   },
+   "R3": {
+    "boxes": 9332,
+    "cover_a_gt": 6121
+   }
+  },
+  "50_100": {
+   "LF@0.2": {
+    "boxes": 11523,
+    "cover_a_gt": 5043
+   },
+   "LF@0.3": {
+    "boxes": 7235,
+    "cover_a_gt": 4688
+   },
+   "R1": {
+    "boxes": 7103,
+    "cover_a_gt": 4464
+   },
+   "R3": {
+    "boxes": 9288,
+    "cover_a_gt": 4671
+   }
+  }
+ }
+}

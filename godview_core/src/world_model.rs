@@ -51,9 +51,9 @@
 
 use crate::alignment::{AlignConfig, AlignItem, SourceOffset};
 use crate::extent::{fuse_boxes, BoxGate, BoxModel, ObjectBox};
-use crate::frames::{cv_process_noise, cv_transition, ecef_from_enu_rotation, symmetrize, Ecef};
+use crate::frames::{cv_process_noise, cv_transition, ecef_from_enu_rotation, symmetrize, Ecef, PoseWithCov};
 use crate::godview_space::Entity;
-use crate::report::{AgentId, FrameRef, ReportKey, TrackLifecycle};
+use crate::report::{AgentId, FrameRef, ReportKey, TrackLifecycle, TrackReport, SELF_TRACK};
 use crate::report_store::{Fnv, ReportStore};
 use crate::spatial_index::SpatialIndex;
 use godview_env::Timestamp;
@@ -92,6 +92,39 @@ pub struct WorldModelConfig {
     /// Relative alignment of sources from shared objects (off by default;
     /// see [`crate::alignment`]).
     pub align: AlignConfig,
+    /// Treat reports with the reserved track id [`SELF_TRACK`] as their
+    /// source's own position and footprint (off by default). Each becomes its
+    /// own world object, named by the source, whose state is fused from the
+    /// self report and the reports assigned to it (covariance intersection, as
+    /// for any cluster), and any other report whose
+    /// centre lies within `self_gate_sigma` combined standard deviations of
+    /// a self footprint (same class, compatible box) is assigned to that
+    /// agent: a member of that agent's object, never clustered with another
+    /// object.
+    pub self_reports: bool,
+    /// How many combined standard deviations (the two reports' position
+    /// covariances added, taken along and across the self box and vertically)
+    /// a report's centre may lie outside a self footprint and still be assigned
+    /// to that agent.
+    pub self_gate_sigma: f64,
+    /// For a report from the agent itself, use only the part of its position
+    /// covariance that the self report does not share (the pose error is common
+    /// to both, so it does not widen the test). Off by default; with it off the
+    /// test uses the two covariances added, as for reports of other sources.
+    pub self_same_source_exact: bool,
+    /// Do not assign a report of another source to an agent if that agent's own
+    /// (non-self) reports contain one that passes the world model's gates against
+    /// it at a smaller normalized distance than the report lies from the
+    /// footprint: the agent cannot see itself, so such a report is the agent's
+    /// neighbour. Off by default.
+    pub self_compete: bool,
+    /// A self object absorbs at most one report per source: the one closest to its
+    /// footprint, and only if no other confirmed (published) track of that source, of
+    /// any class, lies closer to the footprint. A unit that sees a neighbour but not
+    /// the agent itself can then no longer have the neighbour taken for the agent when
+    /// the unit's own track of the agent exists, and several neighbours are never all
+    /// absorbed. Off by default.
+    pub self_single_per_source: bool,
 }
 
 /// How a fused object's ID is chosen.
@@ -121,6 +154,11 @@ impl Default for WorldModelConfig {
             box_model: BoxModel::default(),
             id_rule: IdRule::default(),
             align: AlignConfig::default(),
+            self_reports: false,
+            self_gate_sigma: 2.0,
+            self_same_source_exact: false,
+            self_compete: false,
+            self_single_per_source: false,
         }
     }
 }
@@ -158,6 +196,9 @@ pub struct WorldObject {
     pub p_exist: f32,
     /// Fused box, heading counterclockwise from local East at the object.
     pub object_box: Option<ObjectBox>,
+    /// Set when this object is an agent's own position and footprint (its self
+    /// report); the other members are reports assigned to it, fused into its state.
+    pub self_agent: Option<AgentId>,
 }
 
 impl WorldObject {
@@ -236,6 +277,9 @@ pub struct WorldSnapshot {
     /// Translation applied to each source's reports before association
     /// (empty unless alignment is enabled and sources share objects).
     pub alignment: Vec<SourceOffset>,
+    /// Reports assigned to an agent's self report (see
+    /// [`WorldModelConfig::self_reports`]).
+    pub assigned_to_self: usize,
 }
 
 impl WorldSnapshot {
@@ -258,6 +302,90 @@ impl WorldSnapshot {
             }
         }
         h.finish()
+    }
+}
+
+/// One agent's own view: who it is, its current pose with covariance, and the
+/// sensor-only covariance of its own published reports (see
+/// [`WorldModel::snapshot_ego`]).
+pub struct EgoContext<'a> {
+    /// The agent whose view this is.
+    pub agent: AgentId,
+    /// Its current odometry-to-ECEF pose with covariance.
+    pub pose: &'a PoseWithCov,
+    /// Packed sensor-only covariance of its own reports, by report key.
+    pub own_sensor_cov: &'a BTreeMap<ReportKey, [f32; 21]>,
+    /// Agents whose frame is held fixed (for example roadside units with a surveyed
+    /// pose). With an anchor that has an estimate, every offset is taken relative to
+    /// it, so the agent's own frame is corrected into the anchor's; with none the agent's
+    /// own translation is held at zero.
+    pub anchors: &'a [AgentId],
+}
+
+impl EgoContext<'_> {
+    /// The covariance an error in the agent's pose induces on a state in ECEF,
+    /// at that state (lever arm included).
+    pub(crate) fn pose_induced_cov(&self, x: &Vector6<f64>) -> Matrix6<f64> {
+        let inv = self.pose.pose.inverse();
+        let p = inv.transform_point(&Vector3::new(x[0], x[1], x[2]));
+        let v = inv.transform_vector(&Vector3::new(x[3], x[4], x[5]));
+        let x_odom = Vector6::new(p.x, p.y, p.z, v.x, v.y, v.z);
+        let zero = PoseWithCov {
+            pose: self.pose.pose,
+            cov: self.pose.cov,
+        };
+        zero.transform_state(&x_odom, &Matrix6::zeros()).1
+    }
+}
+
+/// The self reports of a snapshot and the reports assigned to them.
+struct SelfPlan {
+    /// Indices of the self reports.
+    selfs: Vec<usize>,
+    /// Self reports and assigned reports (not clustered).
+    taken: Vec<bool>,
+    /// Assigned report indices by self report index.
+    assigned: BTreeMap<usize, Vec<usize>>,
+}
+
+impl SelfPlan {
+    fn default_for(n: usize) -> Self {
+        Self {
+            selfs: Vec::new(),
+            taken: vec![false; n],
+            assigned: BTreeMap::new(),
+        }
+    }
+}
+
+/// Re-expresses alignment offsets with `agent` held at zero: every other source's
+/// translation is taken relative to the agent's, its covariance widened by the
+/// agent's. If the agent is in no group of sources connected by shared objects, no
+/// offset is defined relative to it and none is kept.
+fn fix_gauge(offsets: &mut Vec<SourceOffset>, agent: AgentId, anchors: &[AgentId]) {
+    let Some(own) = offsets.iter().find(|o| o.source == agent).copied() else {
+        offsets.clear();
+        return;
+    };
+    // An anchor in the agent's group with an estimate becomes the reference (the one
+    // with the smallest covariance); otherwise the agent itself is.
+    let anchor = anchors
+        .iter()
+        .filter(|a| **a != agent)
+        .filter_map(|a| offsets.iter().find(|o| o.source == *a && o.group == own.group))
+        .min_by(|a, b| a.cov.trace().total_cmp(&b.cov.trace()))
+        .copied();
+    let f = anchor.unwrap_or(own);
+    // Only the agent's own connected group is defined relative to it.
+    offsets.retain(|o| o.group == f.group);
+    for o in offsets.iter_mut() {
+        if o.source == f.source {
+            o.translation = Vector3::zeros();
+            o.cov = Matrix3::zeros();
+        } else {
+            o.translation -= f.translation;
+            o.cov += f.cov;
+        }
     }
 }
 
@@ -302,6 +430,21 @@ impl WorldModel {
         t: Timestamp,
         trust: &TrustView,
     ) -> (Vec<Prepared>, WorldSnapshot) {
+        self.prepare_with(store, t, trust, None)
+    }
+
+    /// [`WorldModel::prepare`], optionally for one agent's own view: that agent's
+    /// own reports use their sensor-only covariance (no pose error: in its own
+    /// frame its pose is exact), and every other source's reports gain the
+    /// pose-induced covariance of the agent's pose at the object, since what
+    /// matters is the uncertainty relative to the agent.
+    pub(crate) fn prepare_with(
+        &self,
+        store: &ReportStore,
+        t: Timestamp,
+        trust: &TrustView,
+        ego: Option<&EgoContext>,
+    ) -> (Vec<Prepared>, WorldSnapshot) {
         let mut snap = WorldSnapshot {
             t,
             ..Default::default()
@@ -328,9 +471,16 @@ impl WorldModel {
                 continue;
             }
             let dt = t.secs_since(r.t_valid);
-            let (x, mut p) = self.predict(&r.state(), &r.covariance(), dt);
+            let own_cov = ego
+                .filter(|e| r.source == e.agent)
+                .and_then(|e| e.own_sensor_cov.get(&r.key()))
+                .map(|c| TrackReport { cov: *c, ..*r }.covariance());
+            let (x, mut p) = self.predict(&r.state(), &own_cov.unwrap_or_else(|| r.covariance()), dt);
             if let Some(f) = trust.inflate.get(&r.source) {
                 p *= f.max(1.0);
+            }
+            if let Some(e) = ego.filter(|e| r.source != e.agent) {
+                p += e.pose_induced_cov(&x);
             }
             items.push(Prepared {
                 key: r.key(),
@@ -393,6 +543,11 @@ impl WorldModel {
     /// Computes the shared world state at `t` (see the module documentation).
     pub fn snapshot(&self, store: &ReportStore, t: Timestamp, trust: &TrustView) -> WorldSnapshot {
         let (mut items, mut snap) = self.prepare(store, t, trust);
+        let self_objects = if self.config.self_reports {
+            self.assign_self_reports(&mut items, &mut snap, t)
+        } else {
+            Vec::new()
+        };
         if self.config.align.enabled {
             snap.alignment = self.align(&mut items);
         }
@@ -403,8 +558,277 @@ impl WorldModel {
             .zip(ids)
             .filter_map(|(members, id)| fuse_cluster(&items, members, t, id))
             .collect();
+        snap.objects.extend(self_objects);
         snap.objects.sort_by_key(|o| o.id);
         snap
+    }
+
+    /// Splits the prepared reports into self reports (each its own world
+    /// object), reports assigned to a self report (members of that object, not
+    /// clustered), and the rest, which stay in `items`.
+    fn assign_self_reports(
+        &self,
+        items: &mut Vec<Prepared>,
+        snap: &mut WorldSnapshot,
+        t: Timestamp,
+    ) -> Vec<WorldObject> {
+        let plan = self.plan_self(items, snap);
+        if plan.selfs.is_empty() {
+            return Vec::new();
+        }
+        let objects = Self::fuse_self_objects(items, &plan, t);
+        let rest: Vec<Prepared> = (0..items.len())
+            .filter(|i| !plan.taken[*i])
+            .map(|i| items[i])
+            .collect();
+        *items = rest;
+        objects
+    }
+
+    /// Which prepared reports are self reports and which are assigned to which.
+    fn plan_self(&self, items: &[Prepared], snap: &mut WorldSnapshot) -> SelfPlan {
+        let selfs: Vec<usize> = (0..items.len())
+            .filter(|i| items[*i].key.1 == SELF_TRACK)
+            .collect();
+        let mut taken = vec![false; items.len()];
+        let mut assigned: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        let mut candidates: Vec<(usize, usize, f64)> = Vec::new();
+        if selfs.is_empty() {
+            return SelfPlan { selfs, taken, assigned };
+        }
+        for s in &selfs {
+            taken[*s] = true;
+        }
+        for j in 0..items.len() {
+            if taken[j] {
+                continue;
+            }
+            let best = selfs
+                .iter()
+                .filter_map(|s| {
+                    self.self_excess(&items[*s], &items[j])
+                        .map(|e| (e, items[*s].key, *s))
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            if let Some((e, _, s)) = best {
+                if self.config.self_compete && items[j].key.0 != items[s].key.0 {
+                    let agent = items[s].key.0;
+                    let rival = (0..items.len())
+                        .filter(|i| *i != j && items[*i].key.0 == agent && items[*i].key.1 != SELF_TRACK)
+                        .filter_map(|i| self.gates(&items[i], &items[j]))
+                        .map(f64::sqrt)
+                        .fold(f64::INFINITY, f64::min);
+                    if rival <= e {
+                        continue;
+                    }
+                }
+                if self.config.self_single_per_source {
+                    candidates.push((s, j, e));
+                    continue;
+                }
+                taken[j] = true;
+                assigned.entry(s).or_default().push(j);
+                snap.assigned_to_self += 1;
+            }
+        }
+        if self.config.self_single_per_source {
+            // Per self object and source: the candidate closest to the footprint, if it is also
+            // the source's nearest report of any class (no box or class gate).
+            let mut by_pair: BTreeMap<(usize, AgentId), Vec<(f64, ReportKey, usize)>> = BTreeMap::new();
+            for (s, j, e) in candidates {
+                by_pair.entry((s, items[j].key.0)).or_default().push((e, items[j].key, j));
+            }
+            for ((s, src), mut v) in by_pair {
+                v.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                let (_, key_best, j) = v[0];
+                let nearest_any = (0..items.len())
+                    .filter(|i| items[*i].key.0 == src && items[*i].key.1 != SELF_TRACK)
+                    .filter_map(|i| self.footprint_excess(&items[s], &items[i]).map(|x| (x, items[i].key)))
+                    .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                if nearest_any.map_or(true, |(_, k)| k == key_best) {
+                    taken[j] = true;
+                    assigned.entry(s).or_default().push(j);
+                    snap.assigned_to_self += 1;
+                }
+            }
+        }
+        SelfPlan { selfs, taken, assigned }
+    }
+
+    /// The self objects of a plan: identity from the self report, state fused
+    /// from the self report and its assigned reports (covariance intersection in
+    /// key order), so a precise detection pulls the position.
+    fn fuse_self_objects(items: &[Prepared], plan: &SelfPlan, t: Timestamp) -> Vec<WorldObject> {
+        let mut objects = Vec::with_capacity(plan.selfs.len());
+        for s in &plan.selfs {
+            let key = items[*s].key;
+            let mut members: Vec<usize> = std::iter::once(*s)
+                .chain(plan.assigned.get(s).into_iter().flatten().copied())
+                .collect();
+            members.sort_by_key(|m| items[*m].key);
+            if let Some(mut o) = fuse_cluster(items, &members, t, key) {
+                o.self_agent = Some(key.0);
+                objects.push(o);
+            }
+        }
+        objects
+    }
+
+    /// Computes one agent's own view of the world at `t`, from the store, its own
+    /// sensor-only covariances and its current pose (see [`EgoContext`]).
+    ///
+    /// Differences from [`WorldModel::snapshot`], which is not touched: the agent's
+    /// own reports carry only sensor covariance, every other source's reports carry
+    /// their covariance plus the agent's pose-induced covariance, and with
+    /// alignment on the agent's own translation is held at zero (the ego-fixed
+    /// gauge: other sources are moved into the agent's frame, never the reverse).
+    /// Self objects use the same fusion, so the agent's own precise detection of
+    /// another agent dominates that agent's position. With all pose covariances
+    /// zero the result equals the shared snapshot.
+    pub fn snapshot_ego(
+        &self,
+        store: &ReportStore,
+        t: Timestamp,
+        trust: &TrustView,
+        ego: &EgoContext,
+        bank: Option<&mut crate::alignment::OffsetBank>,
+    ) -> WorldSnapshot {
+        let (mut items, mut snap) = self.prepare_with(store, t, trust, Some(ego));
+        let plan = if self.config.self_reports {
+            self.plan_self(&items, &mut snap)
+        } else {
+            SelfPlan::default_for(items.len())
+        };
+        if let Some(bank) = bank {
+            // The per-pair filter replaces the per-frame estimate: shared objects of
+            // the unassigned reports, and the agent-agent links of the self plan.
+            let item_of = |i: &Prepared| crate::alignment::FilterItem {
+                source: i.key.0,
+                position: i.x.fixed_rows::<3>(0).into_owned(),
+                class_id: i.class_id,
+                size: i.object_box.map(|b| [b.size[0], b.size[1]]),
+            };
+            let free: Vec<&Prepared> = (0..items.len()).filter(|i| !plan.taken[*i]).map(|i| &items[i]).collect();
+            let ego_items: Vec<_> = free.iter().filter(|i| i.key.0 == ego.agent).map(|i| item_of(i)).collect();
+            let other_items: Vec<_> = free.iter().filter(|i| i.key.0 != ego.agent).map(|i| item_of(i)).collect();
+            let mut links = Vec::new();
+            for (s, js) in &plan.assigned {
+                let x_self = items[*s].x.fixed_rows::<3>(0).into_owned();
+                let owner = items[*s].key.0;
+                for j in js {
+                    let (src, x_j) = (items[*j].key.0, items[*j].x.fixed_rows::<3>(0).into_owned());
+                    if owner == ego.agent && src != ego.agent {
+                        links.push(crate::alignment::LinkMeasurement { other: src, z: x_self - x_j });
+                    } else if owner != ego.agent && src == ego.agent {
+                        links.push(crate::alignment::LinkMeasurement { other: owner, z: x_j - x_self });
+                    }
+                }
+            }
+            let mut offsets = bank.update(t, ego.agent, ego.pose.pose.translation, &ego_items, &other_items, &links);
+            fix_gauge(&mut offsets, ego.agent, ego.anchors);
+            for o in &offsets {
+                for it in items.iter_mut().filter(|i| i.key.0 == o.source) {
+                    let moved = it.x.fixed_rows::<3>(0) + o.translation;
+                    it.x.fixed_rows_mut::<3>(0).copy_from(&moved);
+                    let widened = it.p.fixed_view::<3, 3>(0, 0) + o.cov;
+                    it.p.fixed_view_mut::<3, 3>(0, 0).copy_from(&widened);
+                }
+            }
+            snap.alignment = offsets;
+        } else if self.config.align.enabled {
+            let rest: Vec<Prepared> = (0..items.len())
+                .filter(|i| !plan.taken[*i])
+                .map(|i| items[i])
+                .collect();
+            let view: Vec<AlignItem> = rest
+                .iter()
+                .map(|i| AlignItem {
+                    source: i.key.0,
+                    position: i.x.fixed_rows::<3>(0).into_owned(),
+                    class_id: i.class_id,
+                    size: i.object_box.map(|b| [b.size[0], b.size[1]]),
+                })
+                .collect();
+            let mut offsets = crate::alignment::estimate(&view, &self.config.align);
+            fix_gauge(&mut offsets, ego.agent, ego.anchors);
+            // Every report of a moved source moves, self and assigned reports included.
+            for o in &offsets {
+                for it in items.iter_mut().filter(|i| i.key.0 == o.source) {
+                    let moved = it.x.fixed_rows::<3>(0) + o.translation;
+                    it.x.fixed_rows_mut::<3>(0).copy_from(&moved);
+                    let widened = it.p.fixed_view::<3, 3>(0, 0) + o.cov;
+                    it.p.fixed_view_mut::<3, 3>(0, 0).copy_from(&widened);
+                }
+            }
+            snap.alignment = offsets;
+        }
+        let mut objects = if plan.selfs.is_empty() {
+            Vec::new()
+        } else {
+            Self::fuse_self_objects(&items, &plan, t)
+        };
+        let rest: Vec<Prepared> = (0..items.len())
+            .filter(|i| !plan.taken[*i])
+            .map(|i| items[i])
+            .collect();
+        let clusters = self.cluster(&rest);
+        let ids = name_clusters(&rest, &clusters, self.config.id_rule);
+        objects.extend(
+            clusters
+                .iter()
+                .zip(ids)
+                .filter_map(|(members, id)| fuse_cluster(&rest, members, t, id)),
+        );
+        objects.sort_by_key(|o| o.id);
+        snap.objects = objects;
+        snap
+    }
+
+    /// How far, in combined standard deviations, the centre of report `c` lies
+    /// outside the footprint of self report `s` (zero inside), or `None` if
+    /// `c` cannot be that agent: different class, a box inconsistent with the
+    /// self box (the box gate), or farther than `self_gate_sigma`.
+    ///
+    /// The footprint is the self box rotated by its heading. The combined
+    /// covariance is the two reports' position covariances added (so it
+    /// includes both sources' pose uncertainty), read along the box, across
+    /// it and vertically, in local East-North-Up at the self position.
+    pub(crate) fn self_excess(&self, s: &Prepared, c: &Prepared) -> Option<f64> {
+        let sb = s.object_box.as_ref()?;
+        if c.class_id != s.class_id || !self.config.box_gate.passes(Some(sb), c.object_box.as_ref()) {
+            return None;
+        }
+        self.footprint_excess(s, c).filter(|e| *e <= self.config.self_gate_sigma)
+    }
+
+    /// The excess of [`WorldModel::self_excess`] without its class, box or distance gates.
+    pub(crate) fn footprint_excess(&self, s: &Prepared, c: &Prepared) -> Option<f64> {
+        let sb = s.object_box.as_ref()?;
+        let at = Ecef(s.x.fixed_rows::<3>(0).into_owned());
+        let g = at.to_geodetic();
+        let r = ecef_from_enu_rotation(g.lat_deg, g.lon_deg);
+        let d: Vector3<f64> = r.transpose() * (c.x.fixed_rows::<3>(0) - s.x.fixed_rows::<3>(0));
+        let ps: Matrix3<f64> = s.p.fixed_view::<3, 3>(0, 0).into_owned();
+        let pc: Matrix3<f64> = c.p.fixed_view::<3, 3>(0, 0).into_owned();
+        let combined = if self.config.self_same_source_exact && c.key.0 == s.key.0 {
+            // The pose error is common to the agent's reports: keep what is not.
+            let diff = pc - ps;
+            let eig = diff.symmetric_eigen();
+            let clamped = eig.eigenvalues.map(|v| v.max(0.1 * 0.1));
+            eig.eigenvectors * Matrix3::from_diagonal(&clamped) * eig.eigenvectors.transpose()
+        } else {
+            ps + pc
+        };
+        let cov: Matrix3<f64> = r.transpose() * combined * r;
+        let (cy, sy) = (sb.yaw.cos(), sb.yaw.sin());
+        let along = Vector3::new(cy, sy, 0.0);
+        let across = Vector3::new(-sy, cy, 0.0);
+        let sd = |u: &Vector3<f64>| u.dot(&(cov * u)).max(1e-6).sqrt();
+        let out = |dist: f64, half: f64, sigma: f64| ((dist.abs() - half).max(0.0)) / sigma;
+        let ea = out(d.dot(&along), sb.size[0] / 2.0, sd(&along));
+        let ec = out(d.dot(&across), sb.size[1] / 2.0, sd(&across));
+        let ez = out(d.z, sb.size[2] / 2.0, sd(&Vector3::z()));
+        Some((ea * ea + ec * ec + ez * ez).sqrt())
     }
 
     /// Whether two prepared reports may describe the same object.
@@ -614,6 +1038,7 @@ fn fuse_cluster(
             .map(|m| items[*m].p_exist)
             .fold(0.0, f32::max),
         object_box,
+        self_agent: None,
     })
 }
 
@@ -753,6 +1178,269 @@ mod tests {
             yaw_ambiguous: true,
         });
         r
+    }
+
+    /// An agent's self report (source 1) at the ENU origin, a 4.5 m car heading East.
+    fn self_report(src: u8, enu: Vector3<f64>) -> TrackReport {
+        self_report_var(src, enu, 0.01)
+    }
+
+    fn self_report_var(src: u8, enu: Vector3<f64>, var: f64) -> TrackReport {
+        let mut r = boxed(report(src, 0, 1, enu, var, 1000), 4.5, 0.0);
+        r.track = SELF_TRACK;
+        r.class_prob = 1.0;
+        r.p_exist = 1.0;
+        if let Some(b) = r.object_box.as_mut() {
+            b.size = [4.5, 2.0, 2.0];
+            b.yaw_ambiguous = false;
+        }
+        r
+    }
+
+    fn self_model() -> WorldModel {
+        WorldModel::new(WorldModelConfig {
+            self_reports: true,
+            ..WorldModelConfig::default()
+        })
+    }
+
+    #[test]
+    fn self_reports_take_reports_on_the_footprint_and_never_merge_them() {
+        let selfr = self_report(1, Vector3::new(0.0, 0.0, 0.0));
+        // Source 2's detection of that agent, 1 m ahead and 0.5 m aside with a
+        // poor pose (variance 2): inside the footprint's reach.
+        let seen = boxed(report(2, 1, 1, Vector3::new(1.0, 0.5, 0.0), 2.0, 1000), 4.5, 0.0);
+        // A neighbouring car 3.4 m aside with a good pose: not the agent.
+        let neighbour = boxed(report(3, 1, 1, Vector3::new(0.0, 3.4, 0.0), 0.01, 1000), 4.5, 0.0);
+        // A pedestrian-sized box on the footprint: refused by the box gate.
+        let ped = boxed(report(3, 2, 1, Vector3::new(0.0, 0.0, 0.0), 0.01, 1000), 0.8, 0.0);
+        // A different class on the footprint.
+        let mut other_class = boxed(report(3, 3, 1, Vector3::new(0.5, 0.0, 0.0), 0.01, 1000), 4.5, 0.0);
+        other_class.class_id = 2;
+        let st = store(&[selfr, seen, neighbour, ped, other_class]);
+        let t = Timestamp::from_millis(1000);
+        let snap = self_model().snapshot(&st, t, &TrustView::default());
+        assert_eq!(snap.assigned_to_self, 1);
+        let me = snap.objects.iter().find(|o| o.self_agent.is_some()).expect("self object");
+        assert_eq!(me.self_agent, Some(AgentId([1; 32])));
+        assert_eq!(me.id, (AgentId([1; 32]), SELF_TRACK));
+        let sources: Vec<u8> = me.members.iter().map(|((a, _), _)| a.0[0]).collect();
+        assert_eq!(sources, vec![1, 2], "the self report and the assigned detection");
+        // The self object keeps the self report's position, not the noisy detection's.
+        let enu = site().from_ecef(&me.position());
+        assert!(enu.norm() < 0.05, "{enu:?}");
+        // The other three stay separate objects.
+        assert_eq!(snap.objects.len(), 4);
+        assert!(snap.objects.iter().filter(|o| o.self_agent.is_none()).all(|o| o.members.len() == 1));
+        // Off: the self report is an ordinary report and no assignment happens.
+        let off = WorldModel::default().snapshot(&st, t, &TrustView::default());
+        assert_eq!(off.assigned_to_self, 0);
+        assert!(off.objects.iter().all(|o| o.self_agent.is_none()));
+    }
+
+    #[test]
+    fn a_precise_detection_pulls_the_self_objects_position_but_not_its_identity() {
+        // The agent's self report carries its pose uncertainty (variance 4); a
+        // neighbouring agent's lidar detection of it is precise (variance 0.01),
+        // 1.2 m away. The fused position follows the detection; the object is
+        // still the agent's (id, self_agent) and keeps both members. A car 3.4 m
+        // aside, which the agent itself also sees, is neither pulled in nor merged.
+        let selfr = self_report_var(1, Vector3::new(0.0, 0.0, 0.0), 4.0);
+        let seen = boxed(report(2, 1, 1, Vector3::new(1.2, 0.0, 0.0), 0.01, 1000), 4.5, 0.0);
+        let nbr_own = boxed(report(1, 1, 1, Vector3::new(0.1, 3.5, 0.0), 4.0, 1000), 4.5, 0.0);
+        let nbr_other = boxed(report(3, 1, 1, Vector3::new(0.0, 3.4, 0.0), 0.01, 1000), 4.5, 0.0);
+        let t = Timestamp::from_millis(1000);
+        // Both refinements on, as run on V2X-Real.
+        let model = WorldModel::new(WorldModelConfig {
+            self_reports: true,
+            self_same_source_exact: true,
+            self_compete: true,
+            ..WorldModelConfig::default()
+        });
+        let snap = model.snapshot(&store(&[selfr, seen, nbr_own, nbr_other]), t, &TrustView::default());
+        let me = snap.objects.iter().find(|o| o.self_agent.is_some()).expect("self object");
+        assert_eq!(me.id, (AgentId([1; 32]), SELF_TRACK));
+        let sources: Vec<u8> = me.members.iter().map(|((a, _), _)| a.0[0]).collect();
+        assert_eq!(sources, vec![1, 2]);
+        let enu = site().from_ecef(&me.position());
+        assert!((enu.x - 1.2).abs() < 0.1 && enu.y.abs() < 0.1, "pulled to the precise detection: {enu:?}");
+        // The neighbour stays its own object with its two views, untouched by the self object.
+        assert_eq!(snap.objects.len(), 2);
+        let other = snap.objects.iter().find(|o| o.self_agent.is_none()).unwrap();
+        assert_eq!(other.sources().len(), 2);
+        let nb = site().from_ecef(&other.position());
+        assert!((nb - Vector3::new(0.0, 3.45, 0.0)).norm() < 0.2, "{nb:?}");
+        // With the detection absent the self object sits at the self report.
+        let alone = model.snapshot(&store(&[selfr]), t, &TrustView::default());
+        let at = site().from_ecef(&alone.objects[0].position());
+        assert!(at.norm() < 1e-3, "{at:?}");
+    }
+
+    #[test]
+    fn the_gauge_holds_the_ego_or_an_anchor_at_zero() {
+        let id = |b: u8| AgentId([b; 32]);
+        let off = |s: u8, x: f64, tr: f64| SourceOffset {
+            source: id(s),
+            translation: Vector3::new(x, 0.0, 0.0),
+            cov: Matrix3::identity() * tr,
+            shared_objects: 3,
+            group: 0,
+        };
+        // Ego 1 at 0.5 (an arbitrary gauge), vehicle 2 at 1.5, unit 3 at 2.5.
+        let base = vec![off(1, 0.5, 0.1), off(2, 1.5, 0.1), off(3, 2.5, 0.05)];
+        // Ego-fixed: the ego is zero, the others relative to it.
+        let mut e = base.clone();
+        fix_gauge(&mut e, id(1), &[]);
+        assert_eq!(e[0].translation.x, 0.0);
+        assert!((e[1].translation.x - 1.0).abs() < 1e-12 && (e[2].translation.x - 2.0).abs() < 1e-12);
+        // Anchored on unit 3: the unit is zero and the ego's own frame moves by -2.
+        let mut a = base.clone();
+        fix_gauge(&mut a, id(1), &[id(3)]);
+        assert_eq!(a[2].translation.x, 0.0);
+        assert!((a[0].translation.x + 2.0).abs() < 1e-12 && (a[1].translation.x + 1.0).abs() < 1e-12);
+        assert!(a[0].cov[(0, 0)] > 0.0, "the ego inherits the anchor's uncertainty");
+        // An anchor that is the ego itself, or absent, leaves the ego-fixed gauge.
+        let mut b = base.clone();
+        fix_gauge(&mut b, id(3), &[id(3)]);
+        assert_eq!(b[2].translation.x, 0.0);
+        let mut c = base;
+        fix_gauge(&mut c, id(1), &[id(9)]);
+        assert_eq!(c[0].translation.x, 0.0);
+    }
+
+    #[test]
+    fn a_self_object_absorbs_at_most_one_report_per_source_the_nearest() {
+        // Four agents: 1 = the vehicle with the self report (pose variance 2), 2 = a second
+        // vehicle, 3 and 4 = units. A neighbouring vehicle N, 3.4 m aside, is seen only by unit 3
+        // (which also sees agent 1 on its footprint); unit 4 sees a pedestrian 0.5 m from the
+        // footprint and N, but not agent 1; agent 2 sees agent 1.
+        let selfr = self_report_var(1, Vector3::new(0.0, 0.0, 0.0), 2.0);
+        let u3_agent = boxed(report(3, 1, 1, Vector3::new(0.8, 0.2, 0.0), 2.0, 1000), 4.5, 0.0);
+        let u3_nbr = boxed(report(3, 2, 1, Vector3::new(0.0, 3.4, 0.0), 2.0, 1000), 4.5, 0.0);
+        let u4_nbr = boxed(report(4, 1, 1, Vector3::new(0.1, 3.5, 0.0), 2.0, 1000), 4.5, 0.0);
+        let mut u4_ped = boxed(report(4, 2, 1, Vector3::new(0.5, 0.0, 0.0), 2.0, 1000), 0.8, 0.0);
+        u4_ped.class_id = 2;
+        let v2_agent = boxed(report(2, 1, 1, Vector3::new(-0.6, 0.1, 0.0), 2.0, 1000), 4.5, 0.0);
+        let t = Timestamp::from_millis(1000);
+        let run = |single: bool| {
+            let m = WorldModel::new(WorldModelConfig {
+                self_reports: true,
+                self_same_source_exact: true,
+                self_compete: true,
+                self_single_per_source: single,
+                ..WorldModelConfig::default()
+            });
+            m.snapshot(&store(&[selfr, u3_agent, u3_nbr, u4_nbr, u4_ped, v2_agent]), t, &TrustView::default())
+        };
+        // Without the rule, the neighbour is absorbed with the agent's own detections (twice, from
+        // units 3 and 4: nothing of agent 1 sees it, so there is no rival).
+        let loose = run(false);
+        let abs = |s: &WorldSnapshot| s.objects.iter().find(|o| o.self_agent.is_some()).unwrap().members.clone();
+        let src_tracks = |m: &Vec<(ReportKey, (u32, u64))>| m.iter().map(|((a, tr), _)| (a.0[0], tr.0)).collect::<Vec<_>>();
+        assert!(src_tracks(&abs(&loose)).contains(&(3, 2)), "the neighbour is taken without the rule: {:?}", src_tracks(&abs(&loose)));
+        // With it: one report per source. Unit 3: its detection of agent 1 (nearest). Unit 4: its nearest
+        // report overall is the pedestrian, so its vehicle-class neighbour is not taken. Agent 2: its detection.
+        let strict = run(true);
+        let members = src_tracks(&abs(&strict));
+        assert!(members.contains(&(3, 1)) && !members.contains(&(3, 2)), "{members:?}");
+        assert!(!members.contains(&(4, 1)), "unit 4's nearest report is the pedestrian: {members:?}");
+        assert!(members.contains(&(2, 1)) && members.contains(&(1, SELF_TRACK.0)), "{members:?}");
+        assert_eq!(members.iter().filter(|(a, _)| *a == 3).count(), 1);
+        // The neighbour stays its own object with its two views.
+        let nbr = strict.objects.iter().find(|o| o.self_agent.is_none() && o.sources().len() == 2);
+        assert!(nbr.is_some(), "the neighbour keeps units 3 and 4's views");
+    }
+
+    #[test]
+    fn the_self_gate_scales_with_the_combined_uncertainty() {
+        // A detection 3 m beyond the front edge (2.25 m from the centre: 0.75 m
+        // past it plus 2.25) along the heading: out of reach with a good pose, in
+        // reach with a poor one.
+        let selfr = self_report(1, Vector3::new(0.0, 0.0, 0.0));
+        let t = Timestamp::from_millis(1000);
+        let at = |var: f64| {
+            let d = boxed(report(2, 1, 1, Vector3::new(5.25, 0.0, 0.0), var, 1000), 4.5, 0.0);
+            self_model().snapshot(&store(&[selfr, d]), t, &TrustView::default()).assigned_to_self
+        };
+        assert_eq!(at(0.04), 0, "3 m past the edge with 0.3 m combined sigma");
+        assert_eq!(at(4.0), 1, "3 m past the edge with 2 m combined sigma");
+    }
+
+    #[test]
+    fn a_report_from_the_agent_itself_ignores_the_shared_pose_error_when_asked() {
+        // The agent's pose error (variance 2 here, common to its self report and
+        // its detections) widens the test for its own detection of a neighbour
+        // 3.2 m aside; with the option only the unshared part counts.
+        let selfr = self_report_var(1, Vector3::new(0.0, 0.0, 0.0), 2.0);
+        let neighbour = boxed(report(1, 1, 1, Vector3::new(0.0, 3.2, 0.0), 2.0, 1000), 4.5, 0.0);
+        let on_body = boxed(report(1, 2, 1, Vector3::new(0.4, 0.2, 0.0), 2.0, 1000), 4.5, 0.0);
+        let t = Timestamp::from_millis(1000);
+        let run = |exact: bool| {
+            let m = WorldModel::new(WorldModelConfig {
+                self_reports: true,
+                self_same_source_exact: exact,
+                ..WorldModelConfig::default()
+            });
+            m.snapshot(&store(&[selfr, neighbour, on_body]), t, &TrustView::default())
+        };
+        let literal = run(false);
+        assert_eq!(literal.assigned_to_self, 2, "the neighbour is reached by the shared pose error");
+        let exact = run(true);
+        assert_eq!(exact.assigned_to_self, 1, "only the detection on the body is the agent");
+        let me = exact.objects.iter().find(|o| o.self_agent.is_some()).unwrap();
+        assert!(me.members.iter().any(|(k, _)| *k == (AgentId([1; 32]), LocalTrackId(2))));
+        assert_eq!(exact.objects.len(), 2, "the neighbour stays its own object");
+    }
+
+    #[test]
+    fn another_sources_report_of_the_agents_neighbour_is_not_taken_when_the_agent_sees_it() {
+        // Agent 1 (variance 2) at the origin sees a neighbour 3.4 m aside; agent 2
+        // sees the same neighbour 0.3 m from it, and also sees agent 1 itself.
+        let selfr = self_report_var(1, Vector3::new(0.0, 0.0, 0.0), 2.0);
+        let own_view = boxed(report(1, 1, 1, Vector3::new(0.0, 3.4, 0.0), 2.0, 1000), 4.5, 0.0);
+        let other_view = boxed(report(2, 1, 1, Vector3::new(0.3, 3.5, 0.0), 2.0, 1000), 4.5, 0.0);
+        let sees_agent = boxed(report(2, 2, 1, Vector3::new(1.0, 0.5, 0.0), 2.0, 1000), 4.5, 0.0);
+        let t = Timestamp::from_millis(1000);
+        let run = |compete: bool| {
+            // The same-source option is on in both runs, so that the agent's own
+            // detection of the neighbour stays out and only the competition differs.
+            let m = WorldModel::new(WorldModelConfig {
+                self_reports: true,
+                self_same_source_exact: true,
+                self_compete: compete,
+                ..WorldModelConfig::default()
+            });
+            m.snapshot(&store(&[selfr, own_view, other_view, sees_agent]), t, &TrustView::default())
+        };
+        let literal = run(false);
+        assert_eq!(literal.assigned_to_self, 2, "literal rule takes agent 2's view of the neighbour too");
+        let compete = run(true);
+        assert_eq!(compete.assigned_to_self, 1, "only agent 2's detection of the agent itself");
+        let nbr = compete.objects.iter().find(|o| o.self_agent.is_none()).unwrap();
+        assert_eq!(nbr.sources().len(), 2, "the neighbour keeps both views");
+    }
+
+    #[test]
+    fn self_report_snapshots_do_not_depend_on_arrival_order() {
+        let rs = vec![
+            self_report(1, Vector3::new(0.0, 0.0, 0.0)),
+            self_report(2, Vector3::new(40.0, 0.0, 0.0)),
+            boxed(report(2, 1, 1, Vector3::new(1.0, 0.5, 0.0), 2.0, 1000), 4.5, 0.0),
+            boxed(report(1, 1, 1, Vector3::new(41.0, -0.5, 0.0), 2.0, 1000), 4.5, 0.0),
+            boxed(report(1, 2, 1, Vector3::new(20.0, 10.0, 0.0), 0.5, 1000), 4.5, 0.0),
+            boxed(report(2, 2, 1, Vector3::new(20.3, 10.2, 0.0), 0.5, 1000), 4.5, 0.0),
+        ];
+        let t = Timestamp::from_millis(1000);
+        let reference = self_model().snapshot(&store(&rs), t, &TrustView::default());
+        assert_eq!(reference.objects.iter().filter(|o| o.self_agent.is_some()).count(), 2);
+        assert_eq!(reference.assigned_to_self, 2);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(9);
+        for _ in 0..20 {
+            let mut shuffled = rs.clone();
+            shuffled.shuffle(&mut rng);
+            let snap = self_model().snapshot(&store(&shuffled), t, &TrustView::default());
+            assert_eq!(snap.digest(), reference.digest());
+        }
     }
 
     #[test]

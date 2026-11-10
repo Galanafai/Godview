@@ -20,14 +20,14 @@
 //!   it can touch state; rejections are counted by reason, never silent.
 
 use crate::consistency::{ConsistencyConfig, ConsistencyMonitor};
-use crate::extent::{box_to_enu, center_sys_cov, with_systematic};
+use crate::extent::{box_to_enu, center_sys_cov, with_systematic, wrap_pi, ObjectBox};
 use crate::filter::CvState;
-use crate::frames::{add_clock_uncertainty, Ecef};
+use crate::frames::{add_clock_uncertainty, Ecef, PoseWithCov};
 use crate::local_tracker::{Detection, LocalTrack, LocalTracker, LocalTrackerConfig, ScanOutcome};
 use crate::localization::{LocalizationStatus, PoseEstimate};
 use crate::report::{
     quantize_covariance, AgentId, FrameRef, LocalTrackId, ReportBatch, ReportError, ReportKey,
-    TrackLifecycle, TrackReport,
+    TrackLifecycle, TrackReport, SELF_TRACK,
 };
 use crate::report_store::{InsertOutcome, ReportStore};
 use crate::topics::topic_cell;
@@ -45,6 +45,13 @@ pub struct PublishConfig {
     pub clock_sigma_s: f64,
     /// Id of this agent's odometry frame, used when publishing without a global pose.
     pub local_frame_id: u64,
+    /// Publish only tracks updated by a detection at the publish time; a track
+    /// that was published and no longer qualifies gets one tombstone-form report,
+    /// so it leaves the world at once instead of coasting there.
+    pub fresh_only: bool,
+    /// Publish only tracks whose score is at least this (0 publishes all);
+    /// handled like `fresh_only` for a track that was published and falls below.
+    pub min_score: f32,
 }
 
 impl Default for PublishConfig {
@@ -52,8 +59,37 @@ impl Default for PublishConfig {
         Self {
             clock_sigma_s: 0.002,
             local_frame_id: 1,
+            fresh_only: false,
+            min_score: 0.0,
         }
     }
+}
+
+/// An agent's own state in its odometry frame, for the self report.
+///
+/// The position is the footprint's centre; its uncertainty here is only the
+/// agent's own estimate inside the odometry frame (the placement of that
+/// frame on the Earth carries the pose uncertainty, as for detections).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SelfState {
+    /// Footprint centre in the odometry frame (m).
+    pub position: Vector3<f64>,
+    /// Velocity in the odometry frame (m/s).
+    pub velocity: Vector3<f64>,
+    /// Heading of the footprint's length axis in the odometry frame (rad).
+    pub yaw: f64,
+    /// Footprint length, width and height (m).
+    pub size: [f64; 3],
+    /// Class id of the agent as other agents' detections report it.
+    pub class_id: u8,
+    /// Position standard deviation within the odometry frame (m).
+    pub sigma_pos_m: f64,
+    /// Velocity standard deviation (m/s).
+    pub sigma_vel_mps: f64,
+    /// Heading standard deviation (rad).
+    pub sigma_yaw_rad: f64,
+    /// Footprint size standard deviation, each dimension (m).
+    pub sigma_size_m: f64,
 }
 
 /// Receiving parameters.
@@ -87,6 +123,20 @@ pub struct NodeConfig {
     pub publish: PublishConfig,
     /// Receiving.
     pub receive: ReceiveConfig,
+    /// Publish a self report (the agent's own pose and footprint, see
+    /// [`SelfState`]) and let the world model assign reports that fall on a
+    /// known agent's footprint to that agent, whose position is then fused from
+    /// the self report and those reports. Off by default; sets
+    /// `world.self_reports`.
+    pub self_reports: bool,
+    /// Make [`PerceptionNode::ego_world`] available: the agent's own view of the
+    /// world (see `WorldModel::snapshot_ego`). Off by default; it records the
+    /// sensor-only covariance of each published report and changes nothing in
+    /// the reports or in the shared world.
+    pub ego_view: bool,
+    /// The per-pair offset filter used by the ego view when enabled (see
+    /// `alignment::OffsetBank`); instead of the world model's per-frame alignment.
+    pub offset_filter: crate::alignment::OffsetFilterConfig,
     /// Apply the consistency monitor's trust view in fusion.
     pub disable_trust: bool,
 }
@@ -170,6 +220,18 @@ pub struct PerceptionNode {
     revoked: BTreeSet<AgentId>,
     /// Terminated tracks and the time until which their tombstone is re-published.
     tombstones: Vec<(LocalTrack, Timestamp)>,
+    /// The agent's own state for the next self report, and when it first set one.
+    self_state: Option<SelfState>,
+    self_born: Option<Timestamp>,
+    /// Sensor-only covariance (no pose error) of each of this node's published
+    /// reports, packed like the report's own, for the ego view.
+    own_sensor_cov: BTreeMap<ReportKey, [f32; 21]>,
+    /// Translation estimates of the other agents for the ego view.
+    offset_bank: crate::alignment::OffsetBank,
+    /// Agents whose frame is held fixed in the ego view's alignment.
+    anchors: Vec<AgentId>,
+    /// Tracks whose latest report was live (for `publish` suppression).
+    live_sent: BTreeSet<LocalTrackId>,
     /// For each own track, the world-object ID it belonged to in this node's
     /// latest world when that ID is another track's key; published as the
     /// report's `name` so the ID can outlive the track that started it.
@@ -180,7 +242,9 @@ pub struct PerceptionNode {
 impl PerceptionNode {
     /// Creates a node. `epoch` must increase across restarts of the same key.
     pub fn new(key: SigningKey, epoch: u32, config: NodeConfig) -> Self {
-        let world = WorldModel::new(config.world);
+        let mut world_config = config.world;
+        world_config.self_reports = config.self_reports;
+        let world = WorldModel::new(world_config);
         Self {
             id: AgentId::from_signing_key(&key),
             key,
@@ -193,6 +257,12 @@ impl PerceptionNode {
             config,
             revoked: BTreeSet::new(),
             tombstones: Vec::new(),
+            self_state: None,
+            self_born: None,
+            own_sensor_cov: BTreeMap::new(),
+            offset_bank: crate::alignment::OffsetBank::new(config.offset_filter),
+            anchors: Vec::new(),
+            live_sent: BTreeSet::new(),
             names: BTreeMap::new(),
             stats: NodeStats::default(),
         }
@@ -233,6 +303,18 @@ impl PerceptionNode {
         &self.stats
     }
 
+    /// Sets the agents whose frame the ego view's alignment holds fixed (anchors, for
+    /// example roadside units): offsets are then taken relative to them.
+    pub fn set_anchors(&mut self, anchors: Vec<AgentId>) {
+        self.anchors = anchors;
+    }
+
+    /// Sets the agent's own state for the self report published with the next
+    /// batch (only with `NodeConfig::self_reports`, and a global pose).
+    pub fn set_self_state(&mut self, state: Option<SelfState>) {
+        self.self_state = state;
+    }
+
     /// Feeds one scan of the agent's own detections into the local tracker.
     pub fn ingest(&mut self, detections: &[Detection]) -> ScanOutcome {
         self.tracker.process_scan(detections)
@@ -258,6 +340,8 @@ impl PerceptionNode {
         self.tracker = LocalTracker::new(self.config.tracker);
         self.tombstones.clear();
         self.names.clear();
+        self.own_sensor_cov.clear();
+        self.offset_bank = crate::alignment::OffsetBank::new(self.config.offset_filter);
     }
 
     /// Builds, signs and returns a batch reporting every published track at `t_valid`.
@@ -315,12 +399,21 @@ impl PerceptionNode {
     ) -> Vec<TrackReport> {
         let global = pose.filter(|p| p.status == LocalizationStatus::Global);
         let valid_for_ms = (self.config.tracker.terminate_after_s * 1000.0) as u32;
-        let mut entries: Vec<(LocalTrack, CvState)> = self
-            .tracker
-            .tracks()
-            .filter(|t| t.is_published())
-            .map(|t| (t.clone(), t.predicted(t_valid)))
-            .collect();
+        let pc = self.config.publish;
+        let mut entries: Vec<(LocalTrack, CvState)> = Vec::new();
+        let mut live_now = BTreeSet::new();
+        for t in self.tracker.tracks().filter(|t| t.is_published()) {
+            let qualifies = (!pc.fresh_only || t.last_update >= t_valid) && t.class_prob >= pc.min_score;
+            if qualifies {
+                live_now.insert(t.id);
+                entries.push((t.clone(), t.predicted(t_valid)));
+            } else if self.live_sent.contains(&t.id) {
+                let mut dead = t.clone();
+                dead.lifecycle = TrackLifecycle::Terminated;
+                entries.push((dead, t.predicted(t_valid)));
+            }
+        }
+        self.live_sent = live_now;
         for t in self.tracker.drain_terminated() {
             // A receiver's last live report of this track expires by
             // termination time + valid_for; keep the tombstone flowing until then.
@@ -334,7 +427,8 @@ impl PerceptionNode {
         for (t, _) in &self.tombstones {
             entries.push((t.clone(), t.predicted(t_valid)));
         }
-        if entries.is_empty() {
+        let want_self = self.config.self_reports && self.self_state.is_some() && global.is_some();
+        if entries.is_empty() && !want_self {
             return Vec::new();
         }
         entries.sort_by_key(|(t, _)| t.id);
@@ -343,7 +437,7 @@ impl PerceptionNode {
         for (track, state) in entries {
             let tc = &self.config.tracker;
             let odom_box = track
-                .predicted_box(t_valid)
+                .published_box(t_valid, tc.publish_raw_box)
                 .map(|b| with_systematic(&b, tc.box_size_sys_m, tc.box_yaw_sys_rad));
             let mut state = state;
             if let Some(b) = odom_box {
@@ -351,9 +445,15 @@ impl PerceptionNode {
                 let mut pp = state.p.fixed_view_mut::<3, 3>(0, 0);
                 pp += sys;
             }
+            state.p[(2, 2)] += tc.box_center_sys_z_m * tc.box_center_sys_z_m;
+            let mut sensor_p: Option<Matrix6<f64>> = None;
             let (frame, x, mut p) = match global {
                 Some(g) => {
                     let (x, p) = g.ecef_from_odom.transform_state(&state.x, &state.p);
+                    if self.config.ego_view {
+                        // The same state with the pose taken as exact: sensor noise only.
+                        sensor_p = Some(PoseWithCov::exact(g.ecef_from_odom.pose).transform_state(&state.x, &state.p).1);
+                    }
                     (FrameRef::Ecef, x, p)
                 }
                 None => (
@@ -366,6 +466,9 @@ impl PerceptionNode {
             };
             let vel = Vector3::new(x[3], x[4], x[5]);
             add_clock_uncertainty(&mut p, &vel, self.config.publish.clock_sigma_s);
+            if let Some(sp) = sensor_p.as_mut() {
+                add_clock_uncertainty(sp, &vel, self.config.publish.clock_sigma_s);
+            }
             if !finite(&x, &p) {
                 continue;
             }
@@ -406,9 +509,99 @@ impl PerceptionNode {
             if frame != FrameRef::Ecef {
                 self.stats.reports_published_local += 1;
             }
+            if let Some(sp) = sensor_p {
+                self.own_sensor_cov.insert((self.id, track.id), quantize_covariance(&sp));
+            }
             reports.push(report);
         }
+        if self.config.ego_view {
+            let live: BTreeSet<LocalTrackId> = self
+                .tracker
+                .tracks()
+                .map(|t| t.id)
+                .chain(self.tombstones.iter().map(|(t, _)| t.id))
+                .collect();
+            self.own_sensor_cov
+                .retain(|k, _| k.1 == SELF_TRACK || live.contains(&k.1));
+        }
+        if let (true, Some(s), Some(g)) = (want_self, self.self_state, global) {
+            if let Some(r) = self.self_report(t_valid, &s, g, valid_for_ms) {
+                reports.push(r);
+            }
+        }
         reports
+    }
+
+    /// The self report: the agent's own pose and footprint as a report with
+    /// the reserved track id, placed on the Earth like any other state.
+    fn self_report(
+        &mut self,
+        t_valid: Timestamp,
+        s: &SelfState,
+        pose: &PoseEstimate,
+        valid_for_ms: u32,
+    ) -> Option<TrackReport> {
+        let x_odom = Vector6::new(
+            s.position.x,
+            s.position.y,
+            s.position.z,
+            s.velocity.x,
+            s.velocity.y,
+            s.velocity.z,
+        );
+        let mut p_odom = Matrix6::zeros();
+        for k in 0..3 {
+            p_odom[(k, k)] = s.sigma_pos_m.powi(2);
+            p_odom[(k + 3, k + 3)] = s.sigma_vel_mps.powi(2);
+        }
+        let (x, mut p) = pose.ecef_from_odom.transform_state(&x_odom, &p_odom);
+        let vel = Vector3::new(x[3], x[4], x[5]);
+        add_clock_uncertainty(&mut p, &vel, self.config.publish.clock_sigma_s);
+        if !finite(&x, &p) {
+            return None;
+        }
+        let sensor_p = self.config.ego_view.then(|| {
+            let mut sp = PoseWithCov::exact(pose.ecef_from_odom.pose).transform_state(&x_odom, &p_odom).1;
+            add_clock_uncertainty(&mut sp, &vel, self.config.publish.clock_sigma_s);
+            sp
+        });
+        let footprint = ObjectBox {
+            size: s.size,
+            size_var: [s.sigma_size_m.powi(2); 3],
+            yaw: wrap_pi(s.yaw),
+            yaw_var: s.sigma_yaw_rad.powi(2),
+            yaw_ambiguous: false,
+        };
+        let object_box = Some(box_to_enu(&footprint, &pose.ecef_from_odom, &Ecef::new(x[0], x[1], x[2])).quantized())
+            .filter(|b| b.is_valid());
+        let born = *self.self_born.get_or_insert(t_valid);
+        let report = TrackReport {
+            source: self.id,
+            epoch: self.epoch,
+            seq: self.next_seq,
+            track: SELF_TRACK,
+            t_valid,
+            frame: FrameRef::Ecef,
+            pos: [x[0], x[1], x[2]],
+            vel: [x[3] as f32, x[4] as f32, x[5] as f32],
+            cov: quantize_covariance(&p),
+            class_id: s.class_id,
+            class_prob: 1.0,
+            p_exist: 1.0,
+            lifecycle: TrackLifecycle::Confirmed,
+            valid_for_ms,
+            born,
+            name: None,
+            object_box,
+        };
+        if report.validate().is_err() {
+            return None;
+        }
+        self.next_seq += 1;
+        if let Some(sp) = sensor_p {
+            self.own_sensor_cov.insert((self.id, SELF_TRACK), quantize_covariance(&sp));
+        }
+        Some(report)
     }
 
     /// Signs `reports` as one batch, inserts them into the own store exactly
@@ -508,11 +701,38 @@ impl PerceptionNode {
             .flat_map(|o| {
                 o.members
                     .iter()
-                    .filter(|((src, tr), _)| *src == self.id && (*src, *tr) != o.id)
+                    .filter(|((src, tr), _)| {
+                        *src == self.id && (*src, *tr) != o.id && o.self_agent.is_none()
+                    })
                     .map(|((_, tr), _)| (*tr, o.id))
             })
             .collect();
         snap
+    }
+
+    /// This agent's own view of the world at `t` (see `WorldModel::snapshot_ego`),
+    /// given its current pose; `None` unless `NodeConfig::ego_view` is on and the
+    /// pose is global. A function of the received reports, this node's own
+    /// published sensor covariances, the pose and, with `offset_filter` enabled, the
+    /// filter's state, which it advances; nothing else in the node changes (the
+    /// consistency monitor is read, not fed).
+    pub fn ego_world(&mut self, t: Timestamp, pose: &PoseEstimate) -> Option<WorldSnapshot> {
+        if !self.config.ego_view || pose.status != LocalizationStatus::Global {
+            return None;
+        }
+        let view = if self.config.disable_trust {
+            TrustView::default()
+        } else {
+            self.monitor.trust_view()
+        };
+        let ego = crate::world_model::EgoContext {
+            agent: self.id,
+            pose: &pose.ecef_from_odom,
+            own_sensor_cov: &self.own_sensor_cov,
+            anchors: &self.anchors,
+        };
+        let bank = self.config.offset_filter.enabled.then_some(&mut self.offset_bank);
+        Some(self.world.snapshot_ego(&self.store, t, &view, &ego, bank))
     }
 
     /// The shared world state at `t` with no trust adjustments.
@@ -688,6 +908,7 @@ mod tests {
         cfg.tracker.box_center_sys_frac = 0.25;
         cfg.tracker.box_size_sys_m = 0.4;
         cfg.tracker.box_yaw_sys_rad = 0.05;
+        cfg.tracker.box_center_sys_z_m = 0.3;
         let mut plain = Rig::new(8, Vector3::zeros(), 0.7);
         let mut rig = Rig::new(8, Vector3::zeros(), 0.7);
         rig.node = PerceptionNode::new(SigningKey::from_bytes(&[8; 32]), 1, cfg);
@@ -747,6 +968,338 @@ mod tests {
             var(&s),
             var(&p)
         );
+        let up = site().ecef_from_enu() * Vector3::z();
+        let var_up = |r: &TrackReport| {
+            let c = r.covariance();
+            let pp: Matrix3<f64> = c.fixed_view::<3, 3>(0, 0).into_owned();
+            up.dot(&(pp * up))
+        };
+        let added = var_up(&s) - var_up(&p);
+        assert!(
+            (added - 0.09).abs() < 1e-6,
+            "vertical systematic variance added {added}"
+        );
+    }
+
+    fn footprint() -> SelfState {
+        SelfState {
+            position: Vector3::zeros(),
+            velocity: Vector3::zeros(),
+            yaw: 0.0,
+            size: [4.5, 2.0, 1.6],
+            class_id: 1,
+            sigma_pos_m: 0.1,
+            sigma_vel_mps: 0.5,
+            sigma_yaw_rad: 0.03,
+            sigma_size_m: 0.2,
+        }
+    }
+
+    /// A pose with a horizontal position uncertainty of `sigma_h` (m) per axis.
+    fn uncertain_pose(rig: &Rig, t: Timestamp, sigma_h: f64) -> PoseEstimate {
+        let link = site().ecef_from_enu_pose().compose(&rig.odom);
+        if sigma_h <= 0.0 {
+            return PoseEstimate {
+                t,
+                ecef_from_odom: PoseWithCov::exact(link),
+                status: LocalizationStatus::Global,
+            };
+        }
+        let mut cov_enu = nalgebra::Matrix6::zeros();
+        cov_enu[(0, 0)] = sigma_h * sigma_h;
+        cov_enu[(1, 1)] = sigma_h * sigma_h;
+        cov_enu[(2, 2)] = 0.01;
+        cov_enu[(3, 3)] = 1e-6;
+        cov_enu[(4, 4)] = 1e-6;
+        cov_enu[(5, 5)] = 1e-6;
+        PoseEstimate {
+            t,
+            ecef_from_odom: PoseWithCov {
+                pose: link,
+                cov: crate::frames::rotate_state_cov(&site().ecef_from_enu(), &cov_enu),
+            },
+            status: LocalizationStatus::Global,
+        }
+    }
+
+    #[test]
+    fn self_report_is_published_only_when_on_and_decodes_as_the_footprint() {
+        let decode = |b: Option<Vec<u8>>| -> Vec<TrackReport> {
+            b.map(|b| ReportBatch::verify_and_decode(&b).unwrap().reports.to_vec()).unwrap_or_default()
+        };
+        let t = Timestamp::from_millis(100);
+        // Off by default: nothing is published even with a self state.
+        let mut rig = Rig::new(31, Vector3::new(5.0, 7.0, 0.0), 0.4);
+        rig.node.set_self_state(Some(footprint()));
+        assert!(decode(rig.node.publish(t, Some(&rig.pose(t)))).is_empty());
+        // On: one self report with the reserved id, at the agent, with the footprint.
+        let mut cfg = NodeConfig::default();
+        cfg.self_reports = true;
+        let mut rig = Rig::new(32, Vector3::new(5.0, 7.0, 0.0), 0.4);
+        rig.node = PerceptionNode::new(SigningKey::from_bytes(&[32; 32]), 1, cfg);
+        let pose = rig.pose(t);
+        // No self state, or no global pose: nothing.
+        assert!(decode(rig.node.publish(t, Some(&pose))).is_empty());
+        rig.node.set_self_state(Some(footprint()));
+        let local = PoseEstimate { status: LocalizationStatus::LocalOnly, ..pose };
+        assert!(decode(rig.node.publish(t, Some(&local))).is_empty());
+        let reports = decode(rig.node.publish(t, Some(&pose)));
+        assert_eq!(reports.len(), 1);
+        let r = &reports[0];
+        assert_eq!(r.track, SELF_TRACK);
+        let enu = site().from_ecef(&crate::frames::Ecef::new(r.pos[0], r.pos[1], r.pos[2]));
+        assert!((enu - Vector3::new(5.0, 7.0, 0.0)).norm() < 1e-6, "{enu:?}");
+        let b = r.object_box.expect("footprint box");
+        assert!(b.size.iter().zip([4.5, 2.0, 1.6]).all(|(a, e)| (a - e).abs() < 1e-6), "{:?}", b.size);
+        // The heading (0 in the odometry frame, which is rotated 0.4 rad) is 0.4 from East.
+        assert!((b.yaw - 0.4).abs() < 1e-3, "{}", b.yaw);
+        // The world model of the same node holds it as a self object.
+        let w = rig.node.world(t);
+        assert_eq!(w.objects.len(), 1);
+        assert_eq!(w.objects[0].self_agent, Some(rig.node.id()));
+    }
+
+    #[test]
+    fn two_agents_seeing_each_other_never_merge_with_self_reports_and_do_without() {
+        // A at the origin, B 6 m East, both with a 1.5 m horizontal pose
+        // uncertainty. Each detects the other with an error (as a pose offset
+        // would cause) and both detect a car C 15 m aside.
+        let run = |self_reports: bool| -> (usize, usize, Vec<Vec<u8>>) {
+            let mut cfg = NodeConfig::default();
+            cfg.self_reports = self_reports;
+            let mut a = Rig::new(41, Vector3::new(0.0, 0.0, 0.0), 0.0);
+            let mut b = Rig::new(42, Vector3::new(6.0, 0.0, 0.0), 0.0);
+            a.node = PerceptionNode::new(SigningKey::from_bytes(&[41; 32]), 1, cfg);
+            b.node = PerceptionNode::new(SigningKey::from_bytes(&[42; 32]), 1, cfg);
+            let det = |r: &mut Rig, t: Timestamp, enu: Vector3<f64>| {
+                r.next_obs += 1;
+                Detection {
+                    obs_id: r.next_obs,
+                    t,
+                    z: r.odom.inverse().transform_point(&enu),
+                    r: Matrix3::identity() * 0.04,
+                    class_id: 1,
+                    class_prob: 0.9,
+                    object_box: Some(crate::extent::ObjectBox {
+                        size: [4.5, 2.0, 1.6],
+                        size_var: [0.04; 3],
+                        yaw: 0.0,
+                        yaw_var: 0.0025,
+                        yaw_ambiguous: true,
+                    }),
+                }
+            };
+            let mut last = Timestamp::from_millis(0);
+            for k in 0..6 {
+                let t = Timestamp::from_millis(k * 100);
+                last = t;
+                let (ca, cb) = (Vector3::new(7.5, 0.6, 0.0), Vector3::new(-1.1, -0.4, 0.0));
+                let c = Vector3::new(3.0, 15.0, 0.0);
+                let da = vec![det(&mut a, t, ca), det(&mut a, t, c)];
+                let db = vec![det(&mut b, t, cb), det(&mut b, t, c)];
+                a.node.ingest(&da);
+                b.node.ingest(&db);
+                a.node.maintain(t);
+                b.node.maintain(t);
+                a.node.set_self_state(Some(footprint()));
+                let mut sb = footprint();
+                sb.position = b.odom.inverse().transform_point(&Vector3::new(6.0, 0.0, 0.0));
+                b.node.set_self_state(Some(sb));
+                let (pa, pb) = (uncertain_pose(&a, t, 1.5), uncertain_pose(&b, t, 1.5));
+                let ba = a.node.publish(t, Some(&pa));
+                let bb = b.node.publish(t, Some(&pb));
+                if let Some(x) = ba {
+                    b.node.receive(&x, t).ok();
+                }
+                if let Some(x) = bb {
+                    a.node.receive(&x, t).ok();
+                }
+            }
+            let w = a.node.world(last);
+            let selfs = w.objects.iter().filter(|o| o.self_agent.is_some()).count();
+            let kinds = w
+                .objects
+                .iter()
+                .map(|o| o.members.iter().map(|((s, _), _)| s.0[0]).collect::<Vec<u8>>())
+                .collect();
+            (w.objects.len(), selfs, kinds)
+        };
+        let (off_objects, off_selfs, off_kinds) = run(false);
+        assert_eq!(off_selfs, 0);
+        assert_eq!(off_objects, 2, "without self reports the two detections of the agents merge: {off_kinds:?}");
+        let (on_objects, on_selfs, on_kinds) = run(true);
+        assert_eq!(on_selfs, 2, "{on_kinds:?}");
+        assert_eq!(on_objects, 3, "two agents and the common car: {on_kinds:?}");
+    }
+
+    /// Two agents A (origin) and B (6 m East) that each see a common car C 15 m
+    /// aside and each other; returns the nodes after six frames of exchange and
+    /// the last pose of A. `sigma_h` is each agent's pose uncertainty; B's self
+    /// report is offset by `b_self_error` from where B really is (its pose error).
+    fn two_agents(
+        cfg: NodeConfig,
+        sigma_h: f64,
+        b_self_error: Vector3<f64>,
+        a_sees_b_at: Vector3<f64>,
+    ) -> (Rig, Rig, PoseEstimate, Vec<Vec<u8>>) {
+        let mut a = Rig::new(51, Vector3::new(0.0, 0.0, 0.0), 0.0);
+        let mut b = Rig::new(52, Vector3::new(6.0, 0.0, 0.0), 0.0);
+        a.node = PerceptionNode::new(SigningKey::from_bytes(&[51; 32]), 1, cfg);
+        b.node = PerceptionNode::new(SigningKey::from_bytes(&[52; 32]), 1, cfg);
+        let det = |r: &mut Rig, t: Timestamp, enu: Vector3<f64>, var: f64| {
+            r.next_obs += 1;
+            Detection {
+                obs_id: r.next_obs,
+                t,
+                z: r.odom.inverse().transform_point(&enu),
+                r: Matrix3::identity() * var,
+                class_id: 1,
+                class_prob: 0.9,
+                object_box: Some(crate::extent::ObjectBox {
+                    size: [4.5, 2.0, 1.6],
+                    size_var: [0.04; 3],
+                    yaw: 0.0,
+                    yaw_var: 0.0025,
+                    yaw_ambiguous: true,
+                }),
+            }
+        };
+        let mut bytes = Vec::new();
+        let mut pose_a = uncertain_pose(&a, Timestamp::from_millis(0), sigma_h);
+        for k in 0..6 {
+            let t = Timestamp::from_millis(k * 100);
+            let c = Vector3::new(3.0, 15.0, 0.0);
+            let da = vec![det(&mut a, t, a_sees_b_at, 0.04), det(&mut a, t, c, 0.04)];
+            let db = vec![det(&mut b, t, c, 0.04)];
+            a.node.ingest(&da);
+            b.node.ingest(&db);
+            a.node.maintain(t);
+            b.node.maintain(t);
+            a.node.set_self_state(Some(footprint()));
+            let mut sb = footprint();
+            sb.position = b_self_error;
+            b.node.set_self_state(Some(sb));
+            pose_a = uncertain_pose(&a, t, sigma_h);
+            let pose_b = uncertain_pose(&b, t, sigma_h);
+            let ba = a.node.publish(t, Some(&pose_a));
+            let bb = b.node.publish(t, Some(&pose_b));
+            if let Some(x) = ba {
+                bytes.push(x.clone());
+                b.node.receive(&x, t).ok();
+            }
+            if let Some(x) = bb {
+                bytes.push(x.clone());
+                a.node.receive(&x, t).ok();
+            }
+        }
+        (a, b, pose_a, bytes)
+    }
+
+    #[test]
+    fn the_ego_view_equals_the_shared_world_with_all_pose_sigmas_zero() {
+        for self_reports in [false, true] {
+            let mut cfg = NodeConfig::default();
+            cfg.ego_view = true;
+            cfg.self_reports = self_reports;
+            let (mut a, _b, pose_a, _) = two_agents(cfg, 0.0, Vector3::new(1.0, 0.4, 0.0), Vector3::new(6.05, 0.02, 0.0));
+            let t = Timestamp::from_millis(500);
+            let shared = a.node.world(t);
+            let ego = a.node.ego_world(t, &pose_a).expect("ego view");
+            assert_eq!(ego.digest(), shared.digest(), "self_reports {self_reports}");
+            assert_eq!(ego.objects.len(), shared.objects.len());
+        }
+    }
+
+    #[test]
+    fn the_ego_view_flag_changes_nothing_in_the_published_bytes_or_the_shared_world() {
+        let run = |ego_view: bool| {
+            let mut cfg = NodeConfig::default();
+            cfg.self_reports = true;
+            cfg.ego_view = ego_view;
+            let (mut a, mut b, _pose, bytes) = two_agents(cfg, 1.5, Vector3::new(1.0, 0.4, 0.0), Vector3::new(6.05, 0.02, 0.0));
+            let t = Timestamp::from_millis(500);
+            (bytes, a.node.world(t).digest(), b.node.world(t).digest())
+        };
+        let off = run(false);
+        let on = run(true);
+        assert_eq!(off.0, on.0, "the same signed batches");
+        assert_eq!(off.1, on.1);
+        assert_eq!(off.2, on.2);
+        // And the view is unavailable without the flag.
+        let mut cfg = NodeConfig::default();
+        cfg.self_reports = true;
+        let (mut a, _b, pose_a, _) = two_agents(cfg, 1.5, Vector3::zeros(), Vector3::new(6.05, 0.02, 0.0));
+        assert!(a.node.ego_world(Timestamp::from_millis(500), &pose_a).is_none());
+    }
+
+    #[test]
+    fn an_own_precise_detection_dominates_a_self_objects_position_in_the_ego_view() {
+        // B's pose is 1 m / 0.4 m off, so its self report says (7.0, 0.4) while B is
+        // really at (6, 0). A sees B precisely, at (6.05, 0.02), in its own frame.
+        // Both agents have a 1.5 m pose uncertainty.
+        let mut cfg = NodeConfig::default();
+        cfg.self_reports = true;
+        cfg.ego_view = true;
+        cfg.world.self_same_source_exact = true;
+        cfg.world.self_compete = true;
+        let (mut a, _b, pose_a, _) = two_agents(cfg, 1.5, Vector3::new(1.0, 0.4, 0.0), Vector3::new(6.05, 0.02, 0.0));
+        let t = Timestamp::from_millis(500);
+        let b_id = _b.node.id();
+        let find = |w: &crate::world_model::WorldSnapshot, who| {
+            w.objects.iter().find(|o| o.self_agent == Some(who)).map(|o| (site().from_ecef(&o.position()), o.members.len()))
+        };
+        let ego = a.node.ego_world(t, &pose_a).expect("ego view");
+        let (at_b, members) = find(&ego, b_id).expect("B's self object in A's ego view");
+        assert!(members >= 2, "B's self report and A's detection of B");
+        assert!((at_b - Vector3::new(6.05, 0.02, 0.0)).norm() < 0.15, "A's precise detection dominates: {at_b:?}");
+        // A's own self object sits at its own position, tight.
+        let (at_a, _) = find(&ego, a.node.id()).expect("A's self object");
+        assert!(at_a.norm() < 0.05, "{at_a:?}");
+        // In the shared world the two carry comparable covariances (each has its
+        // sender's pose uncertainty): covariance intersection keeps the one with the
+        // smaller trace, B's self report, and A's precise detection is not preferred.
+        let shared = a.node.world(t);
+        let (sh_b, _) = find(&shared, b_id).expect("B's self object in the shared world");
+        assert!((sh_b - Vector3::new(7.0, 0.4, 0.0)).norm() < 0.5, "{sh_b:?}");
+        assert!((sh_b - at_b).norm() > 0.8, "the views differ: {sh_b:?} against {at_b:?}");
+    }
+
+    #[test]
+    fn publish_suppression_sends_one_tombstone_and_nothing_below_the_score() {
+        let reports = |b: Option<Vec<u8>>| -> Vec<TrackReport> {
+            b.map(|b| ReportBatch::verify_and_decode(&b).unwrap().reports.to_vec()).unwrap_or_default()
+        };
+        // fresh_only: a track without a detection this frame leaves the world once.
+        let mut cfg = NodeConfig::default();
+        cfg.publish.fresh_only = true;
+        let mut rig = Rig::new(21, Vector3::zeros(), 0.0);
+        rig.node = PerceptionNode::new(SigningKey::from_bytes(&[21; 32]), 1, cfg);
+        let p = Vector3::new(5.0, 5.0, 0.0);
+        let mut live = 0;
+        for k in 0..5 {
+            let t = Timestamp::from_millis(k * 100);
+            rig.see(t, &[p]);
+            live = reports(rig.node.publish(t, Some(&rig.pose(t)))).iter().filter(|r| r.lifecycle == TrackLifecycle::Confirmed).count();
+        }
+        assert_eq!(live, 1);
+        let t = Timestamp::from_millis(500);
+        rig.node.maintain(t);
+        let r = reports(rig.node.publish(t, Some(&rig.pose(t))));
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].lifecycle, TrackLifecycle::Terminated);
+        let t = Timestamp::from_millis(600);
+        rig.node.maintain(t);
+        assert!(reports(rig.node.publish(t, Some(&rig.pose(t)))).is_empty());
+        // min_score above the detections' 0.9: nothing is ever published.
+        let mut cfg = NodeConfig::default();
+        cfg.publish.min_score = 0.95;
+        let mut rig = Rig::new(22, Vector3::zeros(), 0.0);
+        rig.node = PerceptionNode::new(SigningKey::from_bytes(&[22; 32]), 1, cfg);
+        for k in 0..5 {
+            let t = Timestamp::from_millis(k * 100);
+            rig.see(t, &[p]);
+            assert!(rig.node.publish(t, Some(&rig.pose(t))).is_none());
+        }
     }
 
     #[test]

@@ -1,0 +1,45 @@
+{
+ "rule": "docs/results/phase_d_d1_plan.md \"Offset filter and ego view: rule and expectations\"",
+ "q_h_m2_per_s": 0.02343237230157251,
+ "q_v_m2_per_s": 0.06631811744806224,
+ "q_by_axis": [
+  0.012007758530317117,
+  0.0348569860728279,
+  0.06631811744806224
+ ],
+ "lagged_mean_square_by_axis": [
+  0.22502385437896597,
+  0.10806423507152944,
+  0.5262528944555142
+ ],
+ "label_noise_variance_of_the_frame_offset_by_axis": [
+  0.10050416865916587,
+  0.019175131462936822,
+  0.19680832977969484
+ ],
+ "lag_s": 2.0,
+ "frames_with_label_offset": 690,
+ "lagged_pairs": 603,
+ "sigma_obj_h_m": 0.37249797001525964,
+ "sigma_obj_v_m": 0.5655565386649781,
+ "object_offset_residuals": 3657,
+ "sigma_link_h_m": 0.3320020699456351,
+ "link_measurements": 1305,
+ "link_residual_median_east_north_m": [
+  0.10965481838708513,
+  0.08418963608212504
+ ],
+ "gate_chi2_3dof_99.9": 16.27,
+ "init_sigma_m": 2.6666666666666665,
+ "max_age_s": 10.0,
+ "footprint_centre_offset_lidar_frame_m_forward_left": [
+  0.098204865167372,
+  0.16625213825802426
+ ],
+ "footprint_size_lwh_m_median": [
+  4.728940006014688,
+  2.2549707654257647,
+  2.338141785512939
+ ],
+ "footprint_frames": 1540
+}

@@ -1,0 +1,20 @@
+{
+ "frames": 1806,
+ "checkpoint_epoch": 60,
+ "score_threshold": 0.2,
+ "nms_thresh": 0.15,
+ "detections_per_cav": {
+  "0": 9788,
+  "1": 11669
+ },
+ "library_decode_mismatches": 0,
+ "library_decode_frames_checked": 50,
+ "nofusion": {
+  "ap_50": 0.41218192864480735,
+  "ap_70": 0.347615647965787
+ },
+ "late_from_export": {
+  "ap_50": 0.5760722525226358,
+  "ap_70": 0.40237574139406845
+ }
+}

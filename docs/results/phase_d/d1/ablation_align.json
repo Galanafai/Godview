@@ -1,0 +1,82 @@
+{
+ "base": {
+  "flags": "",
+  "replay": {
+   "frames": 1496,
+   "matched": 15901,
+   "missed": 64,
+   "duplicates": 1933,
+   "false_estimates": 9996,
+   "split_label_frames": 1801,
+   "wrong_merges_object_frames": 199,
+   "coasting_object_frames": 7070,
+   "false_from_sharing_object_frames": 4264,
+   "matched_never_detected_by_own_sensor": 2185,
+   "world_objects_per_car_frame": 21.183823529411764,
+   "false_from_sharing_per_car_frame": 2.8502673796791442,
+   "gained_per_car_frame": 1.460561497326203
+  },
+  "ap": {
+   "base:class_prob": {
+    "all_frames": [
+     39.58,
+     9.13
+    ],
+    "excl_first_3": [
+     40.37,
+     9.27
+    ]
+   },
+   "base:shift": {
+    "all_frames": [
+     39.0,
+     20.12
+    ],
+    "excl_first_3": [
+     39.8,
+     20.53
+    ]
+   }
+  }
+ },
+ "win": {
+  "flags": "--fresh-only --overlap-iou 0.3 --overlap-keep recent --pub-min-score 0.3",
+  "replay": {
+   "frames": 1496,
+   "matched": 15301,
+   "missed": 664,
+   "duplicates": 35,
+   "false_estimates": 1348,
+   "split_label_frames": 14,
+   "wrong_merges_object_frames": 183,
+   "coasting_object_frames": 0,
+   "false_from_sharing_object_frames": 648,
+   "matched_never_detected_by_own_sensor": 2037,
+   "world_objects_per_car_frame": 12.522058823529411,
+   "false_from_sharing_per_car_frame": 0.43315508021390375,
+   "gained_per_car_frame": 1.3616310160427807
+  },
+  "ap": {
+   "win:class_prob": {
+    "all_frames": [
+     56.04,
+     15.96
+    ],
+    "excl_first_3": [
+     57.3,
+     16.24
+    ]
+   },
+   "win:shift": {
+    "all_frames": [
+     53.57,
+     29.8
+    ],
+    "excl_first_3": [
+     54.82,
+     30.45
+    ]
+   }
+  }
+ }
+}

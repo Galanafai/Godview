@@ -1,0 +1,73 @@
+{
+ "scene": "2023-04-03-18-19-32_13_0",
+ "frames": [
+  100,
+  239
+ ],
+ "rate_hz": 10,
+ "frame_note": "frame numbers are dataset frame indices; t_s counts from frame 100",
+ "frame_of_reference": "odom: east north up metres, map frame minus origin_map",
+ "origin_map": [
+  43.74902145366648,
+  -165.61866822221188,
+  2.875804051100158
+ ],
+ "agents": [
+  {
+   "folder": "-2",
+   "kind": "rsu",
+   "index": 0
+  },
+  {
+   "folder": "-1",
+   "kind": "rsu",
+   "index": 1
+  },
+  {
+   "folder": "1",
+   "kind": "vehicle",
+   "index": 2
+  },
+  {
+   "folder": "2",
+   "kind": "vehicle",
+   "index": 3
+  }
+ ],
+ "vehicle_of_interest": {
+  "folder": "1",
+  "index": 2
+ },
+ "pedestrian_labels": [
+  "43",
+  "58",
+  "30",
+  "46"
+ ],
+ "cameras": {
+  "-2": [
+   "cam1",
+   "cam2"
+  ],
+  "-1": [
+   "cam1",
+   "cam2"
+  ],
+  "1": [
+   "cam1",
+   "cam2",
+   "cam3",
+   "cam4"
+  ],
+  "2": [
+   "cam1"
+  ]
+ },
+ "detections": "dataset annotations with noise (labels plus noise), not a trained detector; sigma 0.3 m, size 0.2 m, yaw 3 deg, class_prob 0.9, at least 5 own lidar points, within 100 m",
+ "ego_view": "GodView snapshot_ego of vehicle 1 per frame; status solid when vehicle 1 itself contributes (its own sensor is among contributing_agents), ghost when only other agents do",
+ "points": {
+  "static_odom.npy": "N x 3 float32, every 5th frame of all four lidars, points outside label boxes, voxel 0.2 m",
+  "moving_odom.npz": "per frame key (6 digit frame) M x 3 float32, points inside label boxes (+0.15 m) of all four lidars, voxel 0.08 m"
+ },
+ "settings": "selected tracker, self reports, single per source, ego view, offset filter off, no anchors, no injected pose error"
+}

@@ -89,6 +89,13 @@ impl std::fmt::Display for AgentId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LocalTrackId(pub u64);
 
+/// The reserved local track id of an agent's self report: its own pose and
+/// footprint box, published as an ordinary report (no change to the wire
+/// format). Local trackers never issue this id. A world model with
+/// `self_reports` on treats a report with this id as its source's own
+/// position; one with it off treats it like any other track.
+pub const SELF_TRACK: LocalTrackId = LocalTrackId(u64::MAX);
+
 /// Globally unique key of a shared track: `(source, local track id)`.
 pub type ReportKey = (AgentId, LocalTrackId);
 

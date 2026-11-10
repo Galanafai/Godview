@@ -1,0 +1,427 @@
+{
+ "per_person": {
+  "43": {
+   "frames": [
+    133,
+    197
+   ],
+   "n": 65,
+   "median_m": 4.80244763695751,
+   "max_m": 12.829781336192564,
+   "frames_with_no_ghost_within_1m": 65,
+   "stretches_over_1s_no_ghost_within_1m": [
+    [
+     133,
+     197
+    ]
+   ]
+  },
+  "58": {
+   "frames": [
+    125,
+    153
+   ],
+   "n": 29,
+   "median_m": 0.14414042269898697,
+   "max_m": 0.4042536991692652,
+   "frames_with_no_ghost_within_1m": 0,
+   "stretches_over_1s_no_ghost_within_1m": []
+  },
+  "30": {
+   "frames": [
+    129,
+    153
+   ],
+   "n": 25,
+   "median_m": 0.1703680319946361,
+   "max_m": 0.4032461683608628,
+   "frames_with_no_ghost_within_1m": 0,
+   "stretches_over_1s_no_ghost_within_1m": []
+  },
+  "46": {
+   "frames": [
+    154,
+    177
+   ],
+   "n": 24,
+   "median_m": 0.21395547346143481,
+   "max_m": 0.5240806263428003,
+   "frames_with_no_ghost_within_1m": 0,
+   "stretches_over_1s_no_ghost_within_1m": []
+  }
+ },
+ "per_frame": [
+  {
+   "frame": 125,
+   "people_hidden": 1,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 126,
+   "people_hidden": 1,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 127,
+   "people_hidden": 1,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 128,
+   "people_hidden": 1,
+   "ghosts_within_2m": 2
+  },
+  {
+   "frame": 129,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 130,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 131,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 132,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 133,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 134,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 135,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 136,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 137,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 138,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 139,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 140,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 141,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 142,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 143,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 144,
+   "people_hidden": 3,
+   "ghosts_within_2m": 2
+  },
+  {
+   "frame": 145,
+   "people_hidden": 3,
+   "ghosts_within_2m": 2
+  },
+  {
+   "frame": 146,
+   "people_hidden": 3,
+   "ghosts_within_2m": 2
+  },
+  {
+   "frame": 147,
+   "people_hidden": 3,
+   "ghosts_within_2m": 2
+  },
+  {
+   "frame": 148,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 149,
+   "people_hidden": 3,
+   "ghosts_within_2m": 2
+  },
+  {
+   "frame": 150,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 151,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 152,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 153,
+   "people_hidden": 3,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 154,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 155,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 156,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 157,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 158,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 159,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 160,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 161,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 162,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 163,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 164,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 165,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 166,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 167,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 168,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 169,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 170,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 171,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 172,
+   "people_hidden": 2,
+   "ghosts_within_2m": 2
+  },
+  {
+   "frame": 173,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 174,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 175,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 176,
+   "people_hidden": 2,
+   "ghosts_within_2m": 1
+  },
+  {
+   "frame": 177,
+   "people_hidden": 2,
+   "ghosts_within_2m": 2
+  },
+  {
+   "frame": 178,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 179,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 180,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 181,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 182,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 183,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 184,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 185,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 186,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 187,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 188,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 189,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 190,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 191,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 192,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 193,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 194,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 195,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 196,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  },
+  {
+   "frame": 197,
+   "people_hidden": 1,
+   "ghosts_within_2m": 0
+  }
+ ],
+ "summary": {
+  "frames_with_hidden_people": 73,
+  "mean_people": 1.9589041095890412,
+  "mean_ghosts_within_2m": 0.8356164383561644,
+  "frames_ghosts_less_than_people": 67,
+  "frames_ghosts_more_than_people": 1
+ }
+}

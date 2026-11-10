@@ -1,0 +1,502 @@
+{
+ "base": {
+  "flags": "",
+  "replay": {
+   "frames": 1496,
+   "matched": 13177,
+   "missed": 2788,
+   "duplicates": 914,
+   "false_estimates": 5864,
+   "split_label_frames": 886,
+   "wrong_merges_object_frames": 0,
+   "coasting_object_frames": 4884,
+   "false_from_sharing_object_frames": 0,
+   "matched_never_detected_by_own_sensor": 126,
+   "world_objects_per_car_frame": 14.383021390374331,
+   "false_from_sharing_per_car_frame": 0.0,
+   "gained_per_car_frame": 0.08422459893048129
+  },
+  "ap": {
+   "nofusion": {
+    "all_frames": [
+     45.95,
+     25.73
+    ],
+    "excl_first_3": [
+     46.14,
+     25.83
+    ]
+   },
+   "late": {
+    "all_frames": [
+     52.01,
+     28.8
+    ],
+    "excl_first_3": [
+     52.3,
+     28.99
+    ]
+   },
+   "base:class_prob": {
+    "all_frames": [
+     41.95,
+     24.08
+    ],
+    "excl_first_3": [
+     42.83,
+     24.59
+    ]
+   },
+   "base:pass": {
+    "all_frames": [
+     38.28,
+     20.69
+    ],
+    "excl_first_3": [
+     39.05,
+     21.11
+    ]
+   },
+   "base:rawscore": {
+    "all_frames": [
+     41.95,
+     24.09
+    ],
+    "excl_first_3": [
+     42.83,
+     24.59
+    ]
+   },
+   "base:rawbox": {
+    "all_frames": [
+     38.28,
+     20.69
+    ],
+    "excl_first_3": [
+     39.05,
+     21.11
+    ]
+   }
+  }
+ },
+ "a_fresh": {
+  "flags": "--fresh-only",
+  "replay": {
+   "frames": 1496,
+   "matched": 12204,
+   "missed": 3761,
+   "duplicates": 13,
+   "false_estimates": 1462,
+   "split_label_frames": 0,
+   "wrong_merges_object_frames": 0,
+   "coasting_object_frames": 0,
+   "false_from_sharing_object_frames": 0,
+   "matched_never_detected_by_own_sensor": 72,
+   "world_objects_per_car_frame": 9.505347593582888,
+   "false_from_sharing_per_car_frame": 0.0,
+   "gained_per_car_frame": 0.0481283422459893
+  },
+  "ap": {
+   "a_fresh:class_prob": {
+    "all_frames": [
+     50.49,
+     31.05
+    ],
+    "excl_first_3": [
+     51.62,
+     31.73
+    ]
+   },
+   "a_fresh:pass": {
+    "all_frames": [
+     49.28,
+     27.45
+    ],
+    "excl_first_3": [
+     50.37,
+     28.03
+    ]
+   },
+   "a_fresh:rawscore": {
+    "all_frames": [
+     50.49,
+     31.05
+    ],
+    "excl_first_3": [
+     51.62,
+     31.72
+    ]
+   },
+   "a_fresh:rawbox": {
+    "all_frames": [
+     49.28,
+     27.45
+    ],
+    "excl_first_3": [
+     50.37,
+     28.03
+    ]
+   }
+  }
+ },
+ "b_older": {
+  "flags": "--overlap-iou 0.3 --overlap-keep older",
+  "replay": {
+   "frames": 1496,
+   "matched": 13166,
+   "missed": 2799,
+   "duplicates": 302,
+   "false_estimates": 5552,
+   "split_label_frames": 248,
+   "wrong_merges_object_frames": 0,
+   "coasting_object_frames": 4306,
+   "false_from_sharing_object_frames": 0,
+   "matched_never_detected_by_own_sensor": 122,
+   "world_objects_per_car_frame": 13.725935828877006,
+   "false_from_sharing_per_car_frame": 0.0,
+   "gained_per_car_frame": 0.08155080213903744
+  },
+  "ap": {
+   "b_older:class_prob": {
+    "all_frames": [
+     42.31,
+     24.23
+    ],
+    "excl_first_3": [
+     43.2,
+     24.73
+    ]
+   },
+   "b_older:pass": {
+    "all_frames": [
+     38.67,
+     20.88
+    ],
+    "excl_first_3": [
+     39.45,
+     21.3
+    ]
+   },
+   "b_older:rawscore": {
+    "all_frames": [
+     42.31,
+     24.23
+    ],
+    "excl_first_3": [
+     43.2,
+     24.73
+    ]
+   },
+   "b_older:rawbox": {
+    "all_frames": [
+     38.67,
+     20.88
+    ],
+    "excl_first_3": [
+     39.45,
+     21.3
+    ]
+   }
+  }
+ },
+ "b2_recent": {
+  "flags": "--overlap-iou 0.3 --overlap-keep recent",
+  "replay": {
+   "frames": 1496,
+   "matched": 12877,
+   "missed": 3088,
+   "duplicates": 176,
+   "false_estimates": 5244,
+   "split_label_frames": 123,
+   "wrong_merges_object_frames": 0,
+   "coasting_object_frames": 3742,
+   "false_from_sharing_object_frames": 0,
+   "matched_never_detected_by_own_sensor": 122,
+   "world_objects_per_car_frame": 13.171791443850267,
+   "false_from_sharing_per_car_frame": 0.0,
+   "gained_per_car_frame": 0.08155080213903744
+  },
+  "ap": {
+   "b2_recent:class_prob": {
+    "all_frames": [
+     42.96,
+     24.87
+    ],
+    "excl_first_3": [
+     43.88,
+     25.38
+    ]
+   },
+   "b2_recent:pass": {
+    "all_frames": [
+     39.54,
+     21.41
+    ],
+    "excl_first_3": [
+     40.35,
+     21.83
+    ]
+   },
+   "b2_recent:rawscore": {
+    "all_frames": [
+     42.96,
+     24.87
+    ],
+    "excl_first_3": [
+     43.88,
+     25.38
+    ]
+   },
+   "b2_recent:rawbox": {
+    "all_frames": [
+     39.54,
+     21.4
+    ],
+    "excl_first_3": [
+     40.34,
+     21.83
+    ]
+   }
+  }
+ },
+ "c_latest": {
+  "flags": "--score-mode latest",
+  "replay": {
+   "frames": 1496,
+   "matched": 13177,
+   "missed": 2788,
+   "duplicates": 914,
+   "false_estimates": 5864,
+   "split_label_frames": 886,
+   "wrong_merges_object_frames": 0,
+   "coasting_object_frames": 4884,
+   "false_from_sharing_object_frames": 0,
+   "matched_never_detected_by_own_sensor": 126,
+   "world_objects_per_car_frame": 14.383021390374331,
+   "false_from_sharing_per_car_frame": 0.0,
+   "gained_per_car_frame": 0.08422459893048129
+  },
+  "ap": {
+   "c_latest:class_prob": {
+    "all_frames": [
+     41.95,
+     24.09
+    ],
+    "excl_first_3": [
+     42.83,
+     24.59
+    ]
+   },
+   "c_latest:pass": {
+    "all_frames": [
+     38.28,
+     20.69
+    ],
+    "excl_first_3": [
+     39.05,
+     21.11
+    ]
+   },
+   "c_latest:rawscore": {
+    "all_frames": [
+     41.95,
+     24.09
+    ],
+    "excl_first_3": [
+     42.83,
+     24.59
+    ]
+   },
+   "c_latest:rawbox": {
+    "all_frames": [
+     38.28,
+     20.69
+    ],
+    "excl_first_3": [
+     39.05,
+     21.11
+    ]
+   }
+  }
+ },
+ "c_max": {
+  "flags": "--score-mode max",
+  "replay": {
+   "frames": 1496,
+   "matched": 13177,
+   "missed": 2788,
+   "duplicates": 914,
+   "false_estimates": 5864,
+   "split_label_frames": 886,
+   "wrong_merges_object_frames": 0,
+   "coasting_object_frames": 4884,
+   "false_from_sharing_object_frames": 0,
+   "matched_never_detected_by_own_sensor": 126,
+   "world_objects_per_car_frame": 14.383021390374331,
+   "false_from_sharing_per_car_frame": 0.0,
+   "gained_per_car_frame": 0.08422459893048129
+  },
+  "ap": {
+   "c_max:class_prob": {
+    "all_frames": [
+     41.95,
+     24.08
+    ],
+    "excl_first_3": [
+     42.83,
+     24.58
+    ]
+   },
+   "c_max:pass": {
+    "all_frames": [
+     38.28,
+     20.69
+    ],
+    "excl_first_3": [
+     39.05,
+     21.11
+    ]
+   },
+   "c_max:rawscore": {
+    "all_frames": [
+     41.95,
+     24.09
+    ],
+    "excl_first_3": [
+     42.83,
+     24.59
+    ]
+   },
+   "c_max:rawbox": {
+    "all_frames": [
+     38.28,
+     20.69
+    ],
+    "excl_first_3": [
+     39.05,
+     21.11
+    ]
+   }
+  }
+ },
+ "d_rawbox": {
+  "flags": "--raw-box",
+  "replay": {
+   "frames": 1496,
+   "matched": 13177,
+   "missed": 2788,
+   "duplicates": 914,
+   "false_estimates": 5864,
+   "split_label_frames": 886,
+   "wrong_merges_object_frames": 0,
+   "coasting_object_frames": 4884,
+   "false_from_sharing_object_frames": 0,
+   "matched_never_detected_by_own_sensor": 126,
+   "world_objects_per_car_frame": 14.383021390374331,
+   "false_from_sharing_per_car_frame": 0.0,
+   "gained_per_car_frame": 0.08422459893048129
+  },
+  "ap": {
+   "d_rawbox:class_prob": {
+    "all_frames": [
+     41.41,
+     22.41
+    ],
+    "excl_first_3": [
+     42.28,
+     22.87
+    ]
+   },
+   "d_rawbox:pass": {
+    "all_frames": [
+     38.28,
+     20.69
+    ],
+    "excl_first_3": [
+     39.05,
+     21.11
+    ]
+   },
+   "d_rawbox:rawscore": {
+    "all_frames": [
+     41.41,
+     22.41
+    ],
+    "excl_first_3": [
+     42.28,
+     22.87
+    ]
+   },
+   "d_rawbox:rawbox": {
+    "all_frames": [
+     38.28,
+     20.69
+    ],
+    "excl_first_3": [
+     39.05,
+     21.11
+    ]
+   }
+  }
+ },
+ "e_confirm1": {
+  "flags": "--confirm-hits 1",
+  "replay": {
+   "frames": 1496,
+   "matched": 13318,
+   "missed": 2647,
+   "duplicates": 1645,
+   "false_estimates": 13471,
+   "split_label_frames": 1612,
+   "wrong_merges_object_frames": 0,
+   "coasting_object_frames": 8966,
+   "false_from_sharing_object_frames": 0,
+   "matched_never_detected_by_own_sensor": 165,
+   "world_objects_per_car_frame": 20.36898395721925,
+   "false_from_sharing_per_car_frame": 0.0,
+   "gained_per_car_frame": 0.11029411764705882
+  },
+  "ap": {
+   "e_confirm1:class_prob": {
+    "all_frames": [
+     30.89,
+     17.29
+    ],
+    "excl_first_3": [
+     30.75,
+     17.28
+    ]
+   },
+   "e_confirm1:pass": {
+    "all_frames": [
+     27.91,
+     14.82
+    ],
+    "excl_first_3": [
+     27.72,
+     14.78
+    ]
+   },
+   "e_confirm1:rawscore": {
+    "all_frames": [
+     30.89,
+     17.29
+    ],
+    "excl_first_3": [
+     30.75,
+     17.28
+    ]
+   },
+   "e_confirm1:rawbox": {
+    "all_frames": [
+     27.91,
+     14.82
+    ],
+    "excl_first_3": [
+     27.72,
+     14.77
+    ]
+   }
+  }
+ }
+}

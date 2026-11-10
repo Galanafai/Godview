@@ -1,0 +1,1626 @@
+{
+ "metrics": {
+  "noself_alignoff": {
+   "frames": 1496,
+   "matched": 15289,
+   "missed": 676,
+   "duplicates": 50,
+   "duplicates_split_across_cars": 33,
+   "false_estimates": 1354,
+   "detected_by_both_matched": 7429,
+   "detected_by_both_fused_into_one": 6683,
+   "matched_never_detected_by_own_sensor": 2020,
+   "id_changes_total": 215,
+   "objects_with_id": 174,
+   "wrong_merges_object_frames": 202,
+   "split_label_frames": 52,
+   "false_from_sharing_object_frames": 651,
+   "objects_gained_only_through_sharing": 41,
+   "n_both_labeled": 8783,
+   "n_box": 15289,
+   "coasting_object_frames": 0,
+   "self_objects": 0,
+   "self_assigned_reports": 0,
+   "self_assigned_to_the_recording_car_label": 0,
+   "self_assigned_to_another_label": 0,
+   "self_assigned_to_no_label": 0,
+   "self_in_own_world": 1488,
+   "self_assigned_from_the_agent_itself": 0,
+   "self_assigned_from_the_agent_itself_to_another_label": 0,
+   "offset_estimate_car_frames": 0,
+   "share_car_frames": 1496,
+   "share_car_frames_with_estimate": 0,
+   "rms_m": 0.9330534905758723,
+   "rms_m_both_labeled": 1.136648041906658,
+   "nees3d_both_labeled": 12.498250822411425,
+   "size_nees": 1.7184155910119037,
+   "world_objects_per_car_frame": 12.536096256684491,
+   "false_from_sharing_per_car_frame": 0.43516042780748665,
+   "gained_object_frames_per_car_frame": 1.3502673796791445,
+   "id_changes_per_object": 1.235632183908046
+  },
+  "noself_perframe": {
+   "frames": 1496,
+   "matched": 15285,
+   "missed": 680,
+   "duplicates": 35,
+   "duplicates_split_across_cars": 18,
+   "false_estimates": 1357,
+   "detected_by_both_matched": 7430,
+   "detected_by_both_fused_into_one": 6696,
+   "matched_never_detected_by_own_sensor": 2018,
+   "id_changes_total": 214,
+   "objects_with_id": 174,
+   "wrong_merges_object_frames": 183,
+   "split_label_frames": 14,
+   "false_from_sharing_object_frames": 654,
+   "objects_gained_only_through_sharing": 41,
+   "n_both_labeled": 8786,
+   "n_box": 15285,
+   "coasting_object_frames": 0,
+   "self_objects": 0,
+   "self_assigned_reports": 0,
+   "self_assigned_to_the_recording_car_label": 0,
+   "self_assigned_to_another_label": 0,
+   "self_assigned_to_no_label": 0,
+   "self_in_own_world": 1485,
+   "self_assigned_from_the_agent_itself": 0,
+   "self_assigned_from_the_agent_itself_to_another_label": 0,
+   "offset_estimate_car_frames": 933,
+   "share_car_frames": 1496,
+   "share_car_frames_with_estimate": 933,
+   "rms_m": 1.102705829633933,
+   "rms_m_both_labeled": 1.1701552712092176,
+   "nees3d_both_labeled": 12.485041769255389,
+   "size_nees": 1.720218992150764,
+   "world_objects_per_car_frame": 12.522058823529411,
+   "false_from_sharing_per_car_frame": 0.43716577540106955,
+   "gained_object_frames_per_car_frame": 1.3489304812834224,
+   "id_changes_per_object": 1.2298850574712643
+  },
+  "noself_filter": {
+   "frames": 1496,
+   "matched": 15102,
+   "missed": 863,
+   "duplicates": 46,
+   "duplicates_split_across_cars": 22,
+   "false_estimates": 1614,
+   "detected_by_both_matched": 7430,
+   "detected_by_both_fused_into_one": 6698,
+   "matched_never_detected_by_own_sensor": 1939,
+   "id_changes_total": 221,
+   "objects_with_id": 173,
+   "wrong_merges_object_frames": 217,
+   "split_label_frames": 17,
+   "false_from_sharing_object_frames": 911,
+   "objects_gained_only_through_sharing": 40,
+   "n_both_labeled": 8747,
+   "n_box": 15102,
+   "coasting_object_frames": 0,
+   "self_objects": 0,
+   "self_assigned_reports": 0,
+   "self_assigned_to_the_recording_car_label": 0,
+   "self_assigned_to_another_label": 0,
+   "self_assigned_to_no_label": 0,
+   "self_in_own_world": 1380,
+   "self_assigned_from_the_agent_itself": 0,
+   "self_assigned_from_the_agent_itself_to_another_label": 0,
+   "offset_estimate_car_frames": 1478,
+   "share_car_frames": 1496,
+   "share_car_frames_with_estimate": 1478,
+   "rms_m": 1.3629962497005261,
+   "rms_m_both_labeled": 1.2854285369564582,
+   "nees3d_both_labeled": 12.62889978765624,
+   "size_nees": 1.7295089890161153,
+   "world_objects_per_car_frame": 12.501336898395722,
+   "false_from_sharing_per_car_frame": 0.608957219251337,
+   "gained_object_frames_per_car_frame": 1.2961229946524064,
+   "id_changes_per_object": 1.277456647398844
+  },
+  "self_alignoff": {
+   "frames": 1496,
+   "matched": 15319,
+   "missed": 646,
+   "duplicates": 47,
+   "duplicates_split_across_cars": 33,
+   "false_estimates": 1356,
+   "detected_by_both_matched": 7432,
+   "detected_by_both_fused_into_one": 6650,
+   "matched_never_detected_by_own_sensor": 2021,
+   "id_changes_total": 207,
+   "objects_with_id": 174,
+   "wrong_merges_object_frames": 225,
+   "split_label_frames": 83,
+   "false_from_sharing_object_frames": 654,
+   "objects_gained_only_through_sharing": 41,
+   "n_both_labeled": 8786,
+   "n_box": 15319,
+   "coasting_object_frames": 0,
+   "self_objects": 2986,
+   "self_assigned_reports": 2933,
+   "self_assigned_to_the_recording_car_label": 2891,
+   "self_assigned_to_another_label": 38,
+   "self_assigned_to_no_label": 4,
+   "self_in_own_world": 1540,
+   "self_assigned_from_the_agent_itself": 0,
+   "self_assigned_from_the_agent_itself_to_another_label": 0,
+   "offset_estimate_car_frames": 0,
+   "share_car_frames": 1496,
+   "share_car_frames_with_estimate": 0,
+   "rms_m": 0.9409349403353607,
+   "rms_m_both_labeled": 1.136234732127163,
+   "nees3d_both_labeled": 12.46597534597919,
+   "size_nees": 1.7492787552421656,
+   "world_objects_per_car_frame": 12.5975935828877,
+   "false_from_sharing_per_car_frame": 0.43716577540106955,
+   "gained_object_frames_per_car_frame": 1.3509358288770053,
+   "id_changes_per_object": 1.1896551724137931
+  },
+  "self_perframe": {
+   "frames": 1496,
+   "matched": 15320,
+   "missed": 645,
+   "duplicates": 32,
+   "duplicates_split_across_cars": 18,
+   "false_estimates": 1359,
+   "detected_by_both_matched": 7434,
+   "detected_by_both_fused_into_one": 6663,
+   "matched_never_detected_by_own_sensor": 2019,
+   "id_changes_total": 202,
+   "objects_with_id": 174,
+   "wrong_merges_object_frames": 198,
+   "split_label_frames": 45,
+   "false_from_sharing_object_frames": 657,
+   "objects_gained_only_through_sharing": 41,
+   "n_both_labeled": 8790,
+   "n_box": 15320,
+   "coasting_object_frames": 0,
+   "self_objects": 2986,
+   "self_assigned_reports": 2933,
+   "self_assigned_to_the_recording_car_label": 2891,
+   "self_assigned_to_another_label": 38,
+   "self_assigned_to_no_label": 4,
+   "self_in_own_world": 1540,
+   "self_assigned_from_the_agent_itself": 0,
+   "self_assigned_from_the_agent_itself_to_another_label": 0,
+   "offset_estimate_car_frames": 933,
+   "share_car_frames": 1496,
+   "share_car_frames_with_estimate": 933,
+   "rms_m": 1.1099177959906026,
+   "rms_m_both_labeled": 1.1709912609712843,
+   "nees3d_both_labeled": 12.4512983795573,
+   "size_nees": 1.7496373100448959,
+   "world_objects_per_car_frame": 12.588903743315509,
+   "false_from_sharing_per_car_frame": 0.4391711229946524,
+   "gained_object_frames_per_car_frame": 1.3495989304812834,
+   "id_changes_per_object": 1.160919540229885
+  },
+  "self_filter": {
+   "frames": 1496,
+   "matched": 15325,
+   "missed": 640,
+   "duplicates": 42,
+   "duplicates_split_across_cars": 28,
+   "false_estimates": 1353,
+   "detected_by_both_matched": 7435,
+   "detected_by_both_fused_into_one": 6653,
+   "matched_never_detected_by_own_sensor": 2022,
+   "id_changes_total": 202,
+   "objects_with_id": 174,
+   "wrong_merges_object_frames": 215,
+   "split_label_frames": 71,
+   "false_from_sharing_object_frames": 651,
+   "objects_gained_only_through_sharing": 41,
+   "n_both_labeled": 8791,
+   "n_box": 15325,
+   "coasting_object_frames": 0,
+   "self_objects": 2986,
+   "self_assigned_reports": 2933,
+   "self_assigned_to_the_recording_car_label": 2891,
+   "self_assigned_to_another_label": 38,
+   "self_assigned_to_no_label": 4,
+   "self_in_own_world": 1540,
+   "self_assigned_from_the_agent_itself": 0,
+   "self_assigned_from_the_agent_itself_to_another_label": 0,
+   "offset_estimate_car_frames": 1484,
+   "share_car_frames": 1496,
+   "share_car_frames_with_estimate": 1484,
+   "rms_m": 1.1624330305549957,
+   "rms_m_both_labeled": 1.1371547593701448,
+   "nees3d_both_labeled": 12.46593371462692,
+   "size_nees": 1.7496818103122755,
+   "world_objects_per_car_frame": 12.596256684491978,
+   "false_from_sharing_per_car_frame": 0.43516042780748665,
+   "gained_object_frames_per_car_frame": 1.3516042780748663,
+   "id_changes_per_object": 1.160919540229885
+  }
+ },
+ "ap": {
+  "noself_alignoff": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.6837520569372226,
+      "ap_70": 0.42910327779438934
+     },
+     "standard": {
+      "ap_50": 0.725468520470776,
+      "ap_70": 0.5033774935693336
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.8084571669791821,
+      "ap_70": 0.6728564427241498
+     },
+     "standard": {
+      "ap_50": 0.8448865285398225,
+      "ap_70": 0.719530719948886
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6507645690623319,
+      "ap_70": 0.3583870445002849
+     },
+     "standard": {
+      "ap_50": 0.6910924006232506,
+      "ap_70": 0.4039890732876682
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.5768677192914038,
+      "ap_70": 0.2925286811030451
+     },
+     "standard": {
+      "ap_50": 0.5897976466188554,
+      "ap_70": 0.33420242765775854
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.7002177765316387,
+      "ap_70": 0.4393259468209076
+     },
+     "standard": {
+      "ap_50": 0.7433108850885505,
+      "ap_70": 0.5158584013645253
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.8217140536275996,
+      "ap_70": 0.6840936666736465
+     },
+     "standard": {
+      "ap_50": 0.8590345570402106,
+      "ap_70": 0.7317082229933283
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6712380347199456,
+      "ap_70": 0.3687486183158636
+     },
+     "standard": {
+      "ap_50": 0.7132209630612449,
+      "ap_70": 0.41626970988560597
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.5920982498511115,
+      "ap_70": 0.3013534395908605
+     },
+     "standard": {
+      "ap_50": 0.6058409862352266,
+      "ap_70": 0.3443646466464992
+     }
+    }
+   }
+  },
+  "noself_alignoff_shared": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.6716812947817451,
+      "ap_70": 0.4205858300958917
+     },
+     "standard": {
+      "ap_50": 0.7072326292485105,
+      "ap_70": 0.4897689098801134
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.8060494940210298,
+      "ap_70": 0.6721944992984344
+     },
+     "standard": {
+      "ap_50": 0.8426901372819516,
+      "ap_70": 0.7184252943308904
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6355419681980145,
+      "ap_70": 0.34916405221104424
+     },
+     "standard": {
+      "ap_50": 0.6700608693323113,
+      "ap_70": 0.39015830778112354
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.5558907000714048,
+      "ap_70": 0.27669707162237644
+     },
+     "standard": {
+      "ap_50": 0.5608201304883663,
+      "ap_70": 0.30970946837672336
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.6877946298882553,
+      "ap_70": 0.4306496824710393
+     },
+     "standard": {
+      "ap_50": 0.7245418260750054,
+      "ap_70": 0.5018548256316598
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.819251717429431,
+      "ap_70": 0.6834153988540131
+     },
+     "standard": {
+      "ap_50": 0.8567881509105228,
+      "ap_70": 0.7305772536002929
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6554394084550135,
+      "ap_70": 0.35918719108658786
+     },
+     "standard": {
+      "ap_50": 0.6914375843032311,
+      "ap_70": 0.4019554032356095
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.5704690641818834,
+      "ap_70": 0.2850360959717927
+     },
+     "standard": {
+      "ap_50": 0.5760131736796384,
+      "ap_70": 0.31911182765925317
+     }
+    }
+   }
+  },
+  "noself_perframe": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.5434029021707221,
+      "ap_70": 0.30456022168064284
+     },
+     "standard": {
+      "ap_50": 0.5851183956770896,
+      "ap_70": 0.36785177149978165
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6877525976331051,
+      "ap_70": 0.4881366489046821
+     },
+     "standard": {
+      "ap_50": 0.7050526962899242,
+      "ap_70": 0.5325767423155566
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6435701992106143,
+      "ap_70": 0.35222747400168675
+     },
+     "standard": {
+      "ap_50": 0.6829653641844587,
+      "ap_70": 0.3975759351544227
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.32474579526090136,
+      "ap_70": 0.13645448858176634
+     },
+     "standard": {
+      "ap_50": 0.37136481788296705,
+      "ap_70": 0.1738993754600506
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.5560515580959936,
+      "ap_70": 0.3112705178917877
+     },
+     "standard": {
+      "ap_50": 0.5991968182920151,
+      "ap_70": 0.37643382022314753
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.698332652017822,
+      "ap_70": 0.49543009378021
+     },
+     "standard": {
+      "ap_50": 0.7160232755393012,
+      "ap_70": 0.5405826843937723
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6637671841881431,
+      "ap_70": 0.3623862967774072
+     },
+     "standard": {
+      "ap_50": 0.7048103372922646,
+      "ap_70": 0.4096389102934293
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.3333593004347383,
+      "ap_70": 0.14045447517292778
+     },
+     "standard": {
+      "ap_50": 0.3817601767495193,
+      "ap_70": 0.179118826322783
+     }
+    }
+   }
+  },
+  "noself_perframe_shared": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.5603523289420081,
+      "ap_70": 0.15957079368886629
+     },
+     "standard": {
+      "ap_50": 0.5699428726328813,
+      "ap_70": 0.1579763983836348
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.675009631138914,
+      "ap_70": 0.23636539238569748
+     },
+     "standard": {
+      "ap_50": 0.6660907496979173,
+      "ap_70": 0.23291495541679105
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.5096062947908373,
+      "ap_70": 0.13524951033674412
+     },
+     "standard": {
+      "ap_50": 0.5282290816843405,
+      "ap_70": 0.12886380673202144
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.4636761649265112,
+      "ap_70": 0.10811296938561206
+     },
+     "standard": {
+      "ap_50": 0.4788791104840583,
+      "ap_70": 0.12166478254920413
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.573011119843644,
+      "ap_70": 0.1623763965230994
+     },
+     "standard": {
+      "ap_50": 0.5830888815817205,
+      "ap_70": 0.16074897312372827
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6852750026301478,
+      "ap_70": 0.23859622555340915
+     },
+     "standard": {
+      "ap_50": 0.6763001568494864,
+      "ap_70": 0.23501913541683456
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.5242548014403363,
+      "ap_70": 0.13807156190164543
+     },
+     "standard": {
+      "ap_50": 0.5437549864446414,
+      "ap_70": 0.13198766863998154
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.4753886471401863,
+      "ap_70": 0.11095456239045541
+     },
+     "standard": {
+      "ap_50": 0.4916899498304453,
+      "ap_70": 0.12503005289503577
+     }
+    }
+   }
+  },
+  "noself_filter": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.43218337832396153,
+      "ap_70": 0.22489955737196438
+     },
+     "standard": {
+      "ap_50": 0.4637697146825397,
+      "ap_70": 0.2735807049948243
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.5986433789806117,
+      "ap_70": 0.39462006853192727
+     },
+     "standard": {
+      "ap_50": 0.6093512343387651,
+      "ap_70": 0.44982688205163746
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6456677524422474,
+      "ap_70": 0.3495145825537082
+     },
+     "standard": {
+      "ap_50": 0.6835928325979124,
+      "ap_70": 0.3939381161452307
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.16413009880298768,
+      "ap_70": 0.04867869277950047
+     },
+     "standard": {
+      "ap_50": 0.19160959325041252,
+      "ap_70": 0.06452744182390996
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.44135362332864414,
+      "ap_70": 0.22937802002151683
+     },
+     "standard": {
+      "ap_50": 0.4743442481362206,
+      "ap_70": 0.279558188507753
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6069271874412383,
+      "ap_70": 0.39987274593487904
+     },
+     "standard": {
+      "ap_50": 0.6182077377313493,
+      "ap_70": 0.45607915549319866
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6659386840921997,
+      "ap_70": 0.3595671443211633
+     },
+     "standard": {
+      "ap_50": 0.7054631292434637,
+      "ap_70": 0.4058787568960075
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.16749459066547479,
+      "ap_70": 0.04993492561858055
+     },
+     "standard": {
+      "ap_50": 0.19654533252533776,
+      "ap_70": 0.06640022254477117
+     }
+    }
+   }
+  },
+  "noself_filter_shared": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.6716812947817451,
+      "ap_70": 0.4205858300958917
+     },
+     "standard": {
+      "ap_50": 0.7072326292485105,
+      "ap_70": 0.4897689098801134
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.8060494940210298,
+      "ap_70": 0.6721944992984344
+     },
+     "standard": {
+      "ap_50": 0.8426901372819516,
+      "ap_70": 0.7184252943308904
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6355419681980145,
+      "ap_70": 0.34916405221104424
+     },
+     "standard": {
+      "ap_50": 0.6700608693323113,
+      "ap_70": 0.39015830778112354
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.5558907000714048,
+      "ap_70": 0.27669707162237644
+     },
+     "standard": {
+      "ap_50": 0.5608201304883663,
+      "ap_70": 0.30970946837672336
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.6877946298882553,
+      "ap_70": 0.4306496824710393
+     },
+     "standard": {
+      "ap_50": 0.7245418260750054,
+      "ap_70": 0.5018548256316598
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.819251717429431,
+      "ap_70": 0.6834153988540131
+     },
+     "standard": {
+      "ap_50": 0.8567881509105228,
+      "ap_70": 0.7305772536002929
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6554394084550135,
+      "ap_70": 0.35918719108658786
+     },
+     "standard": {
+      "ap_50": 0.6914375843032311,
+      "ap_70": 0.4019554032356095
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.5704690641818834,
+      "ap_70": 0.2850360959717927
+     },
+     "standard": {
+      "ap_50": 0.5760131736796384,
+      "ap_70": 0.31911182765925317
+     }
+    }
+   }
+  },
+  "self_alignoff": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.6113864208122655,
+      "ap_70": 0.3505051872157921
+     },
+     "standard": {
+      "ap_50": 0.630203296418077,
+      "ap_70": 0.39370796807825315
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6323631759125592,
+      "ap_70": 0.4153774807948502
+     },
+     "standard": {
+      "ap_50": 0.6323089178043061,
+      "ap_70": 0.42547440425625616
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6481630850465901,
+      "ap_70": 0.3642455512851775
+     },
+     "standard": {
+      "ap_50": 0.6906844573035907,
+      "ap_70": 0.44612057204323496
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.5732892911749717,
+      "ap_70": 0.29419117737989753
+     },
+     "standard": {
+      "ap_50": 0.6017661557120155,
+      "ap_70": 0.37376704825565454
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.6249957709014972,
+      "ap_70": 0.3582375513919656
+     },
+     "standard": {
+      "ap_50": 0.6445072262410985,
+      "ap_70": 0.4027237145209761
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6392668439709777,
+      "ap_70": 0.41987899286387376
+     },
+     "standard": {
+      "ap_50": 0.6393957754810778,
+      "ap_70": 0.43020116987829193
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6689731540579918,
+      "ap_70": 0.37531238137193024
+     },
+     "standard": {
+      "ap_50": 0.7131732855570502,
+      "ap_70": 0.4602876275977231
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.5884111127456902,
+      "ap_70": 0.3030677088388502
+     },
+     "standard": {
+      "ap_50": 0.6181947397491646,
+      "ap_70": 0.38517243569315057
+     }
+    }
+   }
+  },
+  "self_alignoff_shared": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.5728333386972797,
+      "ap_70": 0.285570544365599
+     },
+     "standard": {
+      "ap_50": 0.5865351790662782,
+      "ap_70": 0.312190906658605
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6293274426586682,
+      "ap_70": 0.4130129088906279
+     },
+     "standard": {
+      "ap_50": 0.6283912754735748,
+      "ap_70": 0.42219004751982464
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6047333598420422,
+      "ap_70": 0.23998244491319115
+     },
+     "standard": {
+      "ap_50": 0.6424345274402619,
+      "ap_70": 0.28803025696544443
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.4983388383990843,
+      "ap_70": 0.20080998073204953
+     },
+     "standard": {
+      "ap_50": 0.4860111250064778,
+      "ap_70": 0.21493129232273495
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.585414507672419,
+      "ap_70": 0.2916285625118585
+     },
+     "standard": {
+      "ap_50": 0.5995941624755021,
+      "ap_70": 0.3190141691512876
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6361924454246298,
+      "ap_70": 0.4178928385931714
+     },
+     "standard": {
+      "ap_50": 0.6354099974447649,
+      "ap_70": 0.42712024039859275
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6239167888391901,
+      "ap_70": 0.24649900335095887
+     },
+     "standard": {
+      "ap_50": 0.6631805165725068,
+      "ap_70": 0.29647362933741855
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.5111061821180459,
+      "ap_70": 0.2068047326492968
+     },
+     "standard": {
+      "ap_50": 0.498980413973906,
+      "ap_70": 0.22139481555583687
+     }
+    }
+   }
+  },
+  "self_perframe": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.5204085976113791,
+      "ap_70": 0.28615944674203275
+     },
+     "standard": {
+      "ap_50": 0.558111941304518,
+      "ap_70": 0.3403222754147611
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6348595346937954,
+      "ap_70": 0.4087802076963967
+     },
+     "standard": {
+      "ap_50": 0.6347069225393558,
+      "ap_70": 0.4193509900297301
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.640942205962846,
+      "ap_70": 0.3579831839707469
+     },
+     "standard": {
+      "ap_50": 0.6829044865654137,
+      "ap_70": 0.44018125063422425
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.3224033685595256,
+      "ap_70": 0.13788919099106306
+     },
+     "standard": {
+      "ap_50": 0.4083849003750927,
+      "ap_70": 0.23886226530352667
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.5317546723864026,
+      "ap_70": 0.29214676010474466
+     },
+     "standard": {
+      "ap_50": 0.5706088719743648,
+      "ap_70": 0.34784884302330804
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6418190275235757,
+      "ap_70": 0.413165518397343
+     },
+     "standard": {
+      "ap_50": 0.641862452271291,
+      "ap_70": 0.42395303053129735
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6614735025346374,
+      "ap_70": 0.3688438971191316
+     },
+     "standard": {
+      "ap_50": 0.7051241175137843,
+      "ap_70": 0.45414643902838214
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.330947118629387,
+      "ap_70": 0.14193144166325974
+     },
+     "standard": {
+      "ap_50": 0.41994993537938174,
+      "ap_70": 0.24612377632315927
+     }
+    }
+   }
+  },
+  "self_perframe_shared": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.48556916937031236,
+      "ap_70": 0.1126429383322337
+     },
+     "standard": {
+      "ap_50": 0.4877950125269986,
+      "ap_70": 0.11855406286393164
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.5382145499903691,
+      "ap_70": 0.16509223740213164
+     },
+     "standard": {
+      "ap_50": 0.528099430728414,
+      "ap_70": 0.1612737256035262
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.48634510096136274,
+      "ap_70": 0.09637585790473309
+     },
+     "standard": {
+      "ap_50": 0.5266910675793991,
+      "ap_70": 0.11288108227497241
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.4190082709592585,
+      "ap_70": 0.0764838173474151
+     },
+     "standard": {
+      "ap_50": 0.4150948250700254,
+      "ap_70": 0.09180769062051704
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.4955458700458065,
+      "ap_70": 0.1140706567720879
+     },
+     "standard": {
+      "ap_50": 0.4978165865521685,
+      "ap_70": 0.12025578519147356
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.543076533001384,
+      "ap_70": 0.1652157879928265
+     },
+     "standard": {
+      "ap_50": 0.5330221520693981,
+      "ap_70": 0.16137736423566743
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.5006732623580027,
+      "ap_70": 0.09841249882096116
+     },
+     "standard": {
+      "ap_50": 0.5426476054523803,
+      "ap_70": 0.11580549475012573
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.4293548831213034,
+      "ap_70": 0.07840408956031412
+     },
+     "standard": {
+      "ap_50": 0.426021823715037,
+      "ap_70": 0.09428999737903367
+     }
+    }
+   }
+  },
+  "self_filter": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.47306917113699054,
+      "ap_70": 0.2353330517316215
+     },
+     "standard": {
+      "ap_50": 0.5150697523627012,
+      "ap_70": 0.29235405415131804
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6349419534812318,
+      "ap_70": 0.4102482211055133
+     },
+     "standard": {
+      "ap_50": 0.6349466859187877,
+      "ap_70": 0.42106479093247484
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6533220454707641,
+      "ap_70": 0.35772816757257436
+     },
+     "standard": {
+      "ap_50": 0.6954522720472794,
+      "ap_70": 0.43909574046258104
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.2194578581981946,
+      "ap_70": 0.05390257307265736
+     },
+     "standard": {
+      "ap_50": 0.2981226066537931,
+      "ap_70": 0.13936250247939297
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.48288241056008857,
+      "ap_70": 0.23995929680389144
+     },
+     "standard": {
+      "ap_50": 0.526202792292387,
+      "ap_70": 0.2985575220273075
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6419041316296469,
+      "ap_70": 0.4146621063877358
+     },
+     "standard": {
+      "ap_50": 0.6421071656790565,
+      "ap_70": 0.4257018774757395
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6739180875256763,
+      "ap_70": 0.36856773640146634
+     },
+     "standard": {
+      "ap_50": 0.7177350133405087,
+      "ap_70": 0.45302172728576484
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.2246874677511466,
+      "ap_70": 0.055310444661233214
+     },
+     "standard": {
+      "ap_50": 0.30642793121391565,
+      "ap_70": 0.1435813918127565
+     }
+    }
+   }
+  },
+  "self_filter_shared": {
+   "all_frames": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.5728333386972797,
+      "ap_70": 0.285570544365599
+     },
+     "standard": {
+      "ap_50": 0.5865351790662782,
+      "ap_70": 0.312190906658605
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6293274426586682,
+      "ap_70": 0.4130129088906279
+     },
+     "standard": {
+      "ap_50": 0.6283912754735748,
+      "ap_70": 0.42219004751982464
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6047333598420422,
+      "ap_70": 0.23998244491319115
+     },
+     "standard": {
+      "ap_50": 0.6424345274402619,
+      "ap_70": 0.28803025696544443
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.4983388383990843,
+      "ap_70": 0.20080998073204953
+     },
+     "standard": {
+      "ap_50": 0.4860111250064778,
+      "ap_70": 0.21493129232273495
+     }
+    }
+   },
+   "excl_first_3": {
+    "all": {
+     "dataset": {
+      "ap_50": 0.585414507672419,
+      "ap_70": 0.2916285625118585
+     },
+     "standard": {
+      "ap_50": 0.5995941624755021,
+      "ap_70": 0.3190141691512876
+     }
+    },
+    "0_30": {
+     "dataset": {
+      "ap_50": 0.6361924454246298,
+      "ap_70": 0.4178928385931714
+     },
+     "standard": {
+      "ap_50": 0.6354099974447649,
+      "ap_70": 0.42712024039859275
+     }
+    },
+    "30_50": {
+     "dataset": {
+      "ap_50": 0.6239167888391901,
+      "ap_70": 0.24649900335095887
+     },
+     "standard": {
+      "ap_50": 0.6631805165725068,
+      "ap_70": 0.29647362933741855
+     }
+    },
+    "50_100": {
+     "dataset": {
+      "ap_50": 0.5111061821180459,
+      "ap_70": 0.2068047326492968
+     },
+     "standard": {
+      "ap_50": 0.498980413973906,
+      "ap_70": 0.22139481555583687
+     }
+    }
+   }
+  }
+ },
+ "coverage": {
+  "coverage": {
+   "noself_alignoff | other": {
+    "gt_boxes": 7907,
+    "covered": 5696,
+    "share": 0.7203743518401416
+   },
+   "noself_alignoff | recording car": {
+    "gt_boxes": 1540,
+    "covered": 1483,
+    "share": 0.962987012987013
+   },
+   "noself_alignoff@shared | other": {
+    "gt_boxes": 7907,
+    "covered": 5610,
+    "share": 0.7094979132414316
+   },
+   "noself_alignoff@shared | recording car": {
+    "gt_boxes": 1540,
+    "covered": 1482,
+    "share": 0.9623376623376624
+   },
+   "noself_perframe | other": {
+    "gt_boxes": 7907,
+    "covered": 5251,
+    "share": 0.6640951056026306
+   },
+   "noself_perframe | recording car": {
+    "gt_boxes": 1540,
+    "covered": 1217,
+    "share": 0.7902597402597402
+   },
+   "noself_perframe@shared | other": {
+    "gt_boxes": 7907,
+    "covered": 5017,
+    "share": 0.6345010749968383
+   },
+   "noself_perframe@shared | recording car": {
+    "gt_boxes": 1540,
+    "covered": 1355,
+    "share": 0.8798701298701299
+   },
+   "noself_filter | other": {
+    "gt_boxes": 7907,
+    "covered": 4812,
+    "share": 0.6085746806627039
+   },
+   "noself_filter | recording car": {
+    "gt_boxes": 1540,
+    "covered": 1010,
+    "share": 0.6558441558441559
+   },
+   "noself_filter@shared | other": {
+    "gt_boxes": 7907,
+    "covered": 5610,
+    "share": 0.7094979132414316
+   },
+   "noself_filter@shared | recording car": {
+    "gt_boxes": 1540,
+    "covered": 1482,
+    "share": 0.9623376623376624
+   },
+   "self_alignoff | other": {
+    "gt_boxes": 7907,
+    "covered": 5694,
+    "share": 0.7201214114076135
+   },
+   "self_alignoff | recording car": {
+    "gt_boxes": 1540,
+    "covered": 1127,
+    "share": 0.7318181818181818
+   },
+   "self_alignoff@shared | other": {
+    "gt_boxes": 7907,
+    "covered": 5607,
+    "share": 0.7091185025926394
+   },
+   "self_alignoff@shared | recording car": {
+    "gt_boxes": 1540,
+    "covered": 997,
+    "share": 0.6474025974025974
+   },
+   "self_perframe | other": {
+    "gt_boxes": 7907,
+    "covered": 5249,
+    "share": 0.6638421651701024
+   },
+   "self_perframe | recording car": {
+    "gt_boxes": 1540,
+    "covered": 1127,
+    "share": 0.7318181818181818
+   },
+   "self_perframe@shared | other": {
+    "gt_boxes": 7907,
+    "covered": 5014,
+    "share": 0.6341216643480461
+   },
+   "self_perframe@shared | recording car": {
+    "gt_boxes": 1540,
+    "covered": 992,
+    "share": 0.6441558441558441
+   },
+   "self_filter | other": {
+    "gt_boxes": 7907,
+    "covered": 5023,
+    "share": 0.6352598962944227
+   },
+   "self_filter | recording car": {
+    "gt_boxes": 1540,
+    "covered": 1131,
+    "share": 0.7344155844155844
+   },
+   "self_filter@shared | other": {
+    "gt_boxes": 7907,
+    "covered": 5607,
+    "share": 0.7091185025926394
+   },
+   "self_filter@shared | recording car": {
+    "gt_boxes": 1540,
+    "covered": 997,
+    "share": 0.6474025974025974
+   }
+  },
+  "recording_car_boxes_nearest_world_box_offset_m_median_p90": {
+   "self_alignoff": [
+    0.39388855975888054,
+    1.6103716991536503
+   ],
+   "self_alignoff@shared": [
+    0.9218242461793704,
+    1.6589666819158322
+   ],
+   "self_perframe": [
+    0.39388855975888054,
+    1.6103716991536503
+   ],
+   "self_perframe@shared": [
+    0.9259264388245504,
+    1.6632245252974842
+   ],
+   "self_filter": [
+    0.3895698497755725,
+    1.6107545254502569
+   ],
+   "self_filter@shared": [
+    0.9218242461793704,
+    1.6589666819158322
+   ],
+   "noself_alignoff": [
+    0.19166005019265483,
+    0.4823785681323358
+   ],
+   "noself_alignoff@shared": [
+    0.19186590576442564,
+    0.48635031311234217
+   ],
+   "noself_perframe": [
+    0.2919789835084913,
+    1.8079875313295242
+   ],
+   "noself_perframe@shared": [
+    0.40563169199581983,
+    1.0991715287307133
+   ],
+   "noself_filter": [
+    0.434331444337274,
+    3.8642295692220054
+   ],
+   "noself_filter@shared": [
+    0.19186590576442564,
+    0.48635031311234217
+   ]
+  }
+ },
+ "coverage_split": {
+  "coverage": {
+   "noself_alignoff | other, labeled by both": {
+    "gt_boxes": 5290,
+    "covered": 3974,
+    "share": 0.7512287334593573
+   },
+   "noself_alignoff | recording car 1 (the other)": {
+    "gt_boxes": 772,
+    "covered": 762,
+    "share": 0.9870466321243523
+   },
+   "noself_alignoff | other, labeled by car 0 only": {
+    "gt_boxes": 853,
+    "covered": 615,
+    "share": 0.7209847596717468
+   },
+   "noself_alignoff | other, labeled by car 1 only": {
+    "gt_boxes": 1764,
+    "covered": 1107,
+    "share": 0.6275510204081632
+   },
+   "noself_alignoff | recording car 0 (the ego)": {
+    "gt_boxes": 768,
+    "covered": 721,
+    "share": 0.9388020833333334
+   },
+   "noself_alignoff@shared | other, labeled by both": {
+    "gt_boxes": 5290,
+    "covered": 3875,
+    "share": 0.7325141776937618
+   },
+   "noself_alignoff@shared | recording car 1 (the other)": {
+    "gt_boxes": 772,
+    "covered": 761,
+    "share": 0.9857512953367875
+   },
+   "noself_alignoff@shared | other, labeled by car 0 only": {
+    "gt_boxes": 853,
+    "covered": 612,
+    "share": 0.7174677608440797
+   },
+   "noself_alignoff@shared | other, labeled by car 1 only": {
+    "gt_boxes": 1764,
+    "covered": 1123,
+    "share": 0.6366213151927438
+   },
+   "noself_alignoff@shared | recording car 0 (the ego)": {
+    "gt_boxes": 768,
+    "covered": 721,
+    "share": 0.9388020833333334
+   },
+   "noself_filter | other, labeled by both": {
+    "gt_boxes": 5290,
+    "covered": 3994,
+    "share": 0.7550094517958412
+   },
+   "noself_filter | recording car 1 (the other)": {
+    "gt_boxes": 772,
+    "covered": 762,
+    "share": 0.9870466321243523
+   },
+   "noself_filter | other, labeled by car 0 only": {
+    "gt_boxes": 853,
+    "covered": 615,
+    "share": 0.7209847596717468
+   },
+   "noself_filter | other, labeled by car 1 only": {
+    "gt_boxes": 1764,
+    "covered": 203,
+    "share": 0.11507936507936507
+   },
+   "noself_filter | recording car 0 (the ego)": {
+    "gt_boxes": 768,
+    "covered": 248,
+    "share": 0.3229166666666667
+   },
+   "self_alignoff | other, labeled by both": {
+    "gt_boxes": 5290,
+    "covered": 3971,
+    "share": 0.7506616257088847
+   },
+   "self_alignoff | recording car 1 (the other)": {
+    "gt_boxes": 772,
+    "covered": 762,
+    "share": 0.9870466321243523
+   },
+   "self_alignoff | other, labeled by car 0 only": {
+    "gt_boxes": 853,
+    "covered": 615,
+    "share": 0.7209847596717468
+   },
+   "self_alignoff | other, labeled by car 1 only": {
+    "gt_boxes": 1764,
+    "covered": 1108,
+    "share": 0.6281179138321995
+   },
+   "self_alignoff | recording car 0 (the ego)": {
+    "gt_boxes": 768,
+    "covered": 365,
+    "share": 0.4752604166666667
+   },
+   "self_alignoff@shared | other, labeled by both": {
+    "gt_boxes": 5290,
+    "covered": 3872,
+    "share": 0.7319470699432892
+   },
+   "self_alignoff@shared | recording car 1 (the other)": {
+    "gt_boxes": 772,
+    "covered": 633,
+    "share": 0.8199481865284974
+   },
+   "self_alignoff@shared | other, labeled by car 0 only": {
+    "gt_boxes": 853,
+    "covered": 612,
+    "share": 0.7174677608440797
+   },
+   "self_alignoff@shared | other, labeled by car 1 only": {
+    "gt_boxes": 1764,
+    "covered": 1123,
+    "share": 0.6366213151927438
+   },
+   "self_alignoff@shared | recording car 0 (the ego)": {
+    "gt_boxes": 768,
+    "covered": 364,
+    "share": 0.4739583333333333
+   },
+   "self_filter | other, labeled by both": {
+    "gt_boxes": 5290,
+    "covered": 4071,
+    "share": 0.7695652173913043
+   },
+   "self_filter | recording car 1 (the other)": {
+    "gt_boxes": 772,
+    "covered": 767,
+    "share": 0.9935233160621761
+   },
+   "self_filter | other, labeled by car 0 only": {
+    "gt_boxes": 853,
+    "covered": 615,
+    "share": 0.7209847596717468
+   },
+   "self_filter | other, labeled by car 1 only": {
+    "gt_boxes": 1764,
+    "covered": 337,
+    "share": 0.19104308390022676
+   },
+   "self_filter | recording car 0 (the ego)": {
+    "gt_boxes": 768,
+    "covered": 364,
+    "share": 0.4739583333333333
+   }
+  },
+  "recording_car_boxes_nearest_world_box_offset_m_median_p90": {
+   "self_alignoff": [
+    0.39388855975888054,
+    1.6103716991536503
+   ],
+   "self_alignoff@shared": [
+    0.9218242461793704,
+    1.6589666819158322
+   ],
+   "self_filter": [
+    0.3895698497755725,
+    1.6107545254502569
+   ],
+   "noself_alignoff": [
+    0.19166005019265483,
+    0.4823785681323358
+   ],
+   "noself_alignoff@shared": [
+    0.19186590576442564,
+    0.48635031311234217
+   ],
+   "noself_filter": [
+    0.434331444337274,
+    3.8642295692220054
+   ]
+  }
+ }
+}

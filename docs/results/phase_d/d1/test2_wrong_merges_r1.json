@@ -1,0 +1,207 @@
+{
+ "total": {
+  "events": 2010,
+  "distinct": 1664,
+  "distinct: one label is the scored car itself": 1116,
+  "distinct: at least one label is a recording car (cav flag)": 1490,
+  "distinct: both labels are recording cars (cav flag)": 1486,
+  "same-object scale": 14,
+  "multi-link (artifact)": 329,
+  "label absent this frame": 3
+ },
+ "episodes": 132,
+ "per_scenario": {
+  "testoutput_CAV_data_2022-03-15-09-54-40_0": {
+   "cross_car_label_disagreement_p90_m": 1.96,
+   "linked_multi_groups": [],
+   "episodes": 0
+  },
+  "testoutput_CAV_data_2022-03-15-10-29-43_3": {
+   "cross_car_label_disagreement_p90_m": 3.81,
+   "linked_multi_groups": [],
+   "episodes": 0
+  },
+  "testoutput_CAV_data_2022-03-15-10-29-43_4": {
+   "cross_car_label_disagreement_p90_m": 0.77,
+   "linked_multi_groups": [],
+   "episodes": 0
+  },
+  "testoutput_CAV_data_2022-03-17-10-50-46_0": {
+   "cross_car_label_disagreement_p90_m": 3.0,
+   "linked_multi_groups": [],
+   "events": 31,
+   "distinct": 20,
+   "distinct: one label is the scored car itself": 0,
+   "distinct: at least one label is a recording car (cav flag)": 0,
+   "distinct: both labels are recording cars (cav flag)": 0,
+   "same-object scale": 11,
+   "episodes": 20
+  },
+  "testoutput_CAV_data_2022-03-17-10-50-46_1": {
+   "cross_car_label_disagreement_p90_m": 0.71,
+   "linked_multi_groups": [
+    [
+     "0:19",
+     "0:46"
+    ],
+    [
+     "0:29",
+     "0:31"
+    ]
+   ],
+   "events": 395,
+   "distinct": 374,
+   "distinct: one label is the scored car itself": 298,
+   "distinct: at least one label is a recording car (cav flag)": 298,
+   "distinct: both labels are recording cars (cav flag)": 298,
+   "multi-link (artifact)": 21,
+   "episodes": 30
+  },
+  "testoutput_CAV_data_2022-03-17-11-02-23_1": {
+   "cross_car_label_disagreement_p90_m": 2.3,
+   "linked_multi_groups": [
+    [
+     "0:39",
+     "0:40"
+    ],
+    [
+     "0:38",
+     "0:41"
+    ],
+    [
+     "0:42",
+     "0:53"
+    ],
+    [
+     "0:61",
+     "0:68"
+    ],
+    [
+     "0:104",
+     "0:105"
+    ]
+   ],
+   "events": 393,
+   "distinct": 82,
+   "distinct: one label is the scored car itself": 33,
+   "distinct: at least one label is a recording car (cav flag)": 35,
+   "distinct: both labels are recording cars (cav flag)": 31,
+   "multi-link (artifact)": 308,
+   "same-object scale": 3,
+   "episodes": 49
+  },
+  "testoutput_CAV_data_2022-03-17-11-02-23_2": {
+   "cross_car_label_disagreement_p90_m": 1.77,
+   "linked_multi_groups": [],
+   "events": 447,
+   "distinct": 444,
+   "distinct: one label is the scored car itself": 413,
+   "distinct: at least one label is a recording car (cav flag)": 413,
+   "distinct: both labels are recording cars (cav flag)": 413,
+   "label absent this frame": 3,
+   "episodes": 31
+  },
+  "testoutput_CAV_data_2022-03-17-11-51-42_0": {
+   "cross_car_label_disagreement_p90_m": 3.33,
+   "linked_multi_groups": [],
+   "episodes": 0
+  },
+  "testoutput_CAV_data_2022-03-21-09-35-07_7": {
+   "cross_car_label_disagreement_p90_m": 0.65,
+   "linked_multi_groups": [],
+   "events": 744,
+   "distinct": 744,
+   "distinct: one label is the scored car itself": 372,
+   "distinct: at least one label is a recording car (cav flag)": 744,
+   "distinct: both labels are recording cars (cav flag)": 744,
+   "episodes": 2
+  }
+ },
+ "distance_bins_m": {
+  "distinct 2-3": 170,
+  "distinct 3-5": 970,
+  "distinct 5-10": 524,
+  "same-object scale 2-3": 14
+ },
+ "range_from_scored_car_m": {
+  "distinct": {
+   "20-40": 103,
+   "0-20": 1524,
+   "40-60": 31,
+   "60-80": 6
+  },
+  "same-object scale": {
+   "0-20": 4,
+   "20-40": 4,
+   "40-60": 6
+  }
+ },
+ "pair_types": {
+  "distinct / other pair": 108,
+  "same-object scale / other pair": 11,
+  "distinct / unlinked car0/car1 pair": 1556,
+  "same-object scale / unlinked car0/car1 pair": 3
+ },
+ "distinct_examples": [
+  {
+   "scenario": "testoutput_CAV_data_2022-03-17-10-50-46_0",
+   "frame": 52,
+   "car": 1,
+   "gids": [
+    "0:8",
+    "0:9"
+   ],
+   "dist_m": 3.39,
+   "range_from_scored_car_m": 26.3,
+   "range_from_other_car_m": 34.1
+  },
+  {
+   "scenario": "testoutput_CAV_data_2022-03-17-10-50-46_0",
+   "frame": 55,
+   "car": 0,
+   "gids": [
+    "0:8",
+    "0:9"
+   ],
+   "dist_m": 3.43,
+   "range_from_scored_car_m": 38.1,
+   "range_from_other_car_m": 22.3
+  },
+  {
+   "scenario": "testoutput_CAV_data_2022-03-17-10-50-46_0",
+   "frame": 56,
+   "car": 0,
+   "gids": [
+    "0:6",
+    "0:9"
+   ],
+   "dist_m": 6.42,
+   "range_from_scored_car_m": 37.8,
+   "range_from_other_car_m": 20.5
+  },
+  {
+   "scenario": "testoutput_CAV_data_2022-03-17-10-50-46_0",
+   "frame": 56,
+   "car": 1,
+   "gids": [
+    "0:8",
+    "0:9"
+   ],
+   "dist_m": 3.11,
+   "range_from_scored_car_m": 20.9,
+   "range_from_other_car_m": 39.4
+  },
+  {
+   "scenario": "testoutput_CAV_data_2022-03-17-10-50-46_0",
+   "frame": 57,
+   "car": 0,
+   "gids": [
+    "0:6",
+    "0:9"
+   ],
+   "dist_m": 6.41,
+   "range_from_scored_car_m": 39.3,
+   "range_from_other_car_m": 19.3
+  }
+ ]
+}

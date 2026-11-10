@@ -70,6 +70,7 @@ struct Args {
     diag: String,
     split_diag: String,
     spawn_diag: String,
+    merge_diag: String,
     dump: String,
     no_sharing: bool,
     align: bool,
@@ -97,6 +98,7 @@ fn parse_args() -> Args {
         diag: String::new(),
         split_diag: String::new(),
         spawn_diag: String::new(),
+        merge_diag: String::new(),
         dump: String::new(),
         no_sharing: false,
         align: false,
@@ -146,6 +148,9 @@ fn parse_args() -> Args {
             // same car already follows, with the gate statistics of that
             // detection against the existing track.
             "--spawn-diag" => a.spawn_diag = val,
+            // Diagnostics only (with attribution.json): one JSON line per wrong merge
+            // (world object whose members are attributed to two or more labels).
+            "--merge-diag" => a.merge_diag = val,
             // Per frame: each car's world objects and the labels, in the odometry
             // frame, as JSON lines (for visualization). Does not change scoring.
             "--dump" => a.dump = val,
@@ -333,6 +338,7 @@ fn main() {
     // Per car, by obs id (parse_line numbers them from 1): the raw detection.
     let mut raw_dets: [Vec<Value>; 2] = [vec![Value::Null], vec![Value::Null]];
     let mut spawn_lines: Vec<String> = Vec::new();
+    let mut merge_lines: Vec<String> = Vec::new();
     let mut stats: Vec<CarStats> = (0..2).map(|_| CarStats::default()).collect();
     let mut detected_hist: VecDeque<BTreeSet<String>> = VecDeque::new();
     let mut ever_detected: [BTreeSet<String>; 2] = [BTreeSet::new(), BTreeSet::new()];
@@ -500,6 +506,17 @@ fn main() {
                             "x": p.x, "y": p.y, "z": p.z,
                             "xs": p.x - shift.x, "ys": p.y - shift.y, "zs": p.z - shift.z,
                             "coasting": !w.members.is_empty() && w.members.iter().all(|(k, _)| known[c].get(k).is_some_and(|i| i.coasting)),
+                            "labels": attribution.as_ref().map(|attr| {
+                                let mut v: BTreeSet<&str> = BTreeSet::new();
+                                for (k, _) in &w.members {
+                                    if let Some(i) = known[c].get(k) {
+                                        if let Some(g) = attr[i.src][i.obs as usize].as_deref() {
+                                            v.insert(g);
+                                        }
+                                    }
+                                }
+                                v.into_iter().collect::<Vec<_>>()
+                            }),
                             "raw": if w.members.len() == 1 {
                                 known[c].get(&w.members[0].0).map(|i| raw_dets[i.src][i.obs as usize].clone())
                             } else { None },
@@ -542,6 +559,15 @@ fn main() {
                     }
                     if labels.len() >= 2 {
                         st.wrong_merges += 1;
+                        if !args.merge_diag.is_empty() {
+                            let mem: Vec<Value> = w
+                                .members
+                                .iter()
+                                .filter_map(|(k, _)| known[c].get(k))
+                                .map(|i| json!({"src": i.src, "hits": i.hits, "gid": attr[i.src][i.obs as usize]}))
+                                .collect();
+                            merge_lines.push(json!({"frame": i, "car": c, "members": mem}).to_string());
+                        }
                     }
                     if !w.members.is_empty() && w.members.iter().all(|(k, _)| known[c].get(k).is_some_and(|i| i.coasting)) {
                         st.coasting_objects += 1;
@@ -836,6 +862,9 @@ fn main() {
     }
     if !args.split_diag.is_empty() {
         std::fs::write(&args.split_diag, split_lines.join("\n")).unwrap();
+    }
+    if !args.merge_diag.is_empty() {
+        std::fs::write(&args.merge_diag, merge_lines.join("\n")).unwrap();
     }
     if !args.spawn_diag.is_empty() {
         std::fs::write(&args.spawn_diag, spawn_lines.join("\n")).unwrap();

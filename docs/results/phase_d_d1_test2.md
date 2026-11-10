@@ -159,3 +159,108 @@ every method equals the library's functions to 1e-9 (asserted in the run).
   there is one; under every other combination it is absent or reversed.
 * The value of remembered objects: no metric here counts them.
 * Why GodView's far-range AP trails Late Fusion's (not analysed).
+
+## Explanation only: wrong merges and the far-range gap (test run 2, R1)
+
+Added after the run, to explain two numbers. **No setting was changed and
+nothing here was re-selected.** Any fix will be validated on V2X-Real, not on
+V2V4Real test. The replay got two diagnostic outputs for this (`--merge-diag`,
+and a `labels` field per world object in the dump); rerunning R1 and R3 with
+them reproduced the headline counts exactly (R1: 2,010 wrong merges, 860
+splits, 2,637 missed, 3,535 false-from-sharing object-frames; R3: 2,149,
+1,092, 2,356, 6,441). Scripts: `scripts/phase_d/explain_merges.py`,
+`scripts/phase_d/far_range_analysis.py`; outputs
+`docs/results/phase_d/d1/test2_wrong_merges_r1.json`,
+`test2_far_range.json`.
+
+### 1. The 2,010 wrong merges
+
+A wrong merge is a world object whose members' latest detections were
+attributed to two or more labels, counted per car and frame.
+
+| class | object-frames | share |
+|---|---|---|
+| counting artifact: one car 1 label linked by `ass_id` to several car 0 labels (re-numbered labels of one object) | 329 | 16.4% |
+| two labels at the scale of the cars' own disagreement (at most the scenario's 90th percentile, 2 to 3 m), cannot be told from one object labeled twice | 14 | 0.7% |
+| label absent in this frame | 3 | 0.1% |
+| **two distinct labels (2 to 10 m apart)** | **1,664** | **82.8%** |
+
+* **By scenario:** `09-35-07_7` 744 (37%, one label pair in both cars for the
+  whole scenario); `11-02-23_2` 447 (22%); `10-50-46_1` 395 (20%);
+  `11-02-23_1` 393 (20%); `10-50-46_0` 31 (1.5%); the other four scenarios 0.
+  The two scenarios with a multi-linked car 1 label (`10-50-46_1`,
+  `11-02-23_1`) hold 788 events; 329 of them are the artifact (21 and 308), the
+  other 459 are not. Three label pairs, each seen from both cars, make 72% of
+  all events (episodes of 372, 207 and 149 frames per car).
+* **Distance between the merged labels (distinct, 1,664):** 2 to 3 m: 170;
+  3 to 5 m: 970; 5 to 10 m: 524; none closer than 2 m.
+* **Range from the scored car (distinct):** 0 to 20 m: 1,524 (92%); 20 to
+  40 m: 103; 40 to 60 m: 31; 60 to 80 m: 6.
+* **What they are:** 1,116 of the 1,664 (67%; 56% of all 2,010) contain the
+  scored car itself, as the other car labels it (a label only the other car
+  has, within 2.5 m of the scored car): the other car's detection of this car
+  arrives in this car's world and is fused with a neighbour or with this car's
+  detection of the other car. The three dominant pairs are (a) a Van 3.9 m
+  from car 0 with car 1's label of car 0 (`09-35-07_7`, static); (b) the two
+  recording cars labeling each other, 2.5 to 15.6 m apart, one of them
+  moving (`11-02-23_2`); (c) the same, 7.6 m apart and static
+  (`10-50-46_1`).
+* **Verdict:** a counting artifact for 16%, not for the bulk. The rest are
+  real merges of distinct objects, mostly an unrecognized self-report. They
+  are allowed by the cross-car gate, which is dominated by the declared pose
+  sigma (1.27 m per axis per car, so a gate radius of up to about 8 m for
+  reports on different cars) and nothing in the node recognizes a report about
+  itself. The same count on val was 251, because val has no scenario where
+  the two cars see each other this closely; this was not tested further.
+  The "same object labeled twice" class is small (0.7%), so label noise does
+  not explain the count. Label positions in this breakdown use the current
+  frame's labels, while a member's latest detection can be older.
+
+### 2. The far-range gap (30 m and beyond)
+
+Ground-truth boxes with centroid 30 to 100 m from car 0: 8,575 (30 to 50 m)
+and 6,164 (50 to 100 m). "Covered" = a box of the method with bird's-eye IoU
+of at least 0.5.
+
+| method | covered, 30 to 50 m | covered, 50 to 100 m | boxes in range (of which cover a ground-truth box) 30 to 50 / 50 to 100 m |
+|---|---|---|---|
+| Late Fusion @0.2 | 6,736 (78.6%) | 5,044 (81.8%) | 11,785 (6,716) / 11,523 (5,043) |
+| Late Fusion @0.3 | 6,238 (72.7%) | 4,689 (76.1%) | 8,265 (6,219) / 7,235 (4,688) |
+| R1 GodView | 5,984 (69.8%) | 4,420 (71.7%) | 8,012 (5,980) / 7,103 (4,464) |
+| R3 (coasting kept) | 6,122 (71.4%) | 4,604 (74.7%) | 9,332 (6,121) / 9,288 (4,671) |
+
+R1 and Late Fusion @0.3 have nearly the same share of boxes that cover a
+ground-truth box (30 to 50 m: 74.6% against 75.2%; 50 to 100 m: 62.8% against
+64.8%). The gap is in recall.
+
+Why R1 does not cover the boxes Late Fusion @0.3 covers (1,648 box-frames
+over both ranges; first reason that applies):
+
+| reason | count | share |
+|---|---|---|
+| a box of R1 near the object but IoU below 0.5 | 1,138 | 69% |
+| detected, no R1 or R3 track (confirmation after 3 hits, gating, pruning) | 342 | 21% |
+| not detected by either car (this frame, or the previous for car 1) | 93 | 6% |
+| detected only below the 0.3 publish threshold | 53 | 3% |
+| **R3 covers it (fresh-only dropped it)** | **14** | **0.8%** |
+| **wrong merge near the box** | **8** | **0.5%** |
+
+**Neither wrong merges nor fresh-only drives the gap.** What does:
+
+* The localization cases (1,940 for R1 over both ranges, against all
+  Late-Fusion-covered or not): 97% would pass IoU 0.5 if the centre were
+  right, so the box shape is not the problem. The offset is mostly across the
+  box (median 0.84 m) rather than along it (0.32 m).
+* They are mostly slow or parked objects: 1,477 of 1,940 under 3 m/s. By
+  object speed, R1 covers more than Late Fusion @0.3 for objects over 10 m/s
+  (2,464 against 2,438 of 3,099) and from 3 to 10 m/s (1,453 against 1,431
+  of 2,089), and fewer under 3 m/s (6,375 against 6,882 of 9,232). So the
+  100 ms delay on fast objects is not the cause either.
+* 1,111 of the 1,940 (57%) are objects fused from both cars, 829 (43%) from
+  one car. The cause is not determined. A candidate: the ground truth is both
+  cars' labels, which disagree by 0.7 to 3.8 m (90th percentile, by
+  scenario), and GodView averages the two cars' reports where Late Fusion
+  keeps whichever box survives the NMS; this was not tested here.
+
+Not shown: the cause of the across-box offset, and whether the same happens
+on V2X-Real.

@@ -474,7 +474,8 @@ def main():
                 inputs += ["-i", a.audio]
                 for j, (k, t0) in enumerate(placed):
                     b = beats[k]
-                    s0, s1 = max(0.0, b["start"] - 0.06), b["end"] + 0.3
+                    s0 = b.get("audio_start", max(0.0, b["start"] - 0.06))
+                    s1 = b.get("audio_end", b["end"] + 0.3)
                     ms = int(t0 * 1000) - int((b["start"] - s0) * 1000)
                     chains.append(f"[2:a]atrim=start={s0:.3f}:end={s1:.3f},asetpts=PTS-STARTPTS,"
                                   f"afade=t=in:d=0.03,afade=t=out:st={s1 - s0 - 0.08:.3f}:d=0.08,"

@@ -86,31 +86,31 @@ In plain terms: on real recordings of two cars, sharing gives each car about a
 quarter more of what is around it, and the shared picture rarely misses a
 vehicle or shows one twice.
 
-**With relative alignment (run A).** The frozen settings plus alignment, run
-once on test2 and test3. Details are in the results under "Held-out runs with
-relative alignment"; the original table above is unchanged.
+**With relative alignment.** The frozen settings plus alignment, run once on
+test2 and test3. The first run hit a bug (below); this is the run after the
+fix. Details, including the first run, are in the results; the original
+table above is unchanged.
 
-| | Run A | Original held-out |
+| | With alignment, after the fix | Original held-out |
 |:--|:--|:--|
 | Vehicles both cars detected, fused into one | 93.3% | 93.6% |
-| Expected vehicles missed | 1.8% | 0.8% |
+| Expected vehicles missed | 0.8% | 0.8% |
 | Object-frames a car saw only through sharing | 22.8% | 22.7% |
-| ID changes per object | 1.77 | 1.42 |
-| Position NEES, objects both cars labeled | 0.27 | 0.25 |
+| ID changes per object | 1.56 | 1.42 |
+| Position NEES, objects both cars labeled | 0.24 | 0.25 |
 
-Alignment estimated an offset in 65% of car-frames, with a median relative
-offset of 0.39 m. In the two scenes where it ran almost every frame, results
-matched or improved (ID changes in one fell from 1.15 to 0.56 per object). In
-the other three scenes where it ran, misses and ID changes rose, and those
-are the scenes where it hit the bug described below. Run A used the code
-before the fix, so these numbers are not yet a fair test of alignment.
-
-Run B (a smaller pose uncertainty, chosen on the validation split by a rule
-committed before any validation replay) was not run: no candidate kept the
-merged rate within 2 points of the reference. That check also ran on the
-code before the fix, so it may change. test1 cannot be used to choose
-alignment settings at all: no frame has the 3 objects both cars see that
-alignment needs.
+In plain terms: on two cars, alignment does not improve the result. It
+estimated an offset in 65% of car-frames (median 0.40 m) and helped in some
+scenes (ID changes in one fell from 1.15 to 0.56 per object), but raised ID
+changes in another (0.50 to 1.71). A smaller pose uncertainty, chosen on the
+validation split by a rule committed before any validation replay, did not
+qualify (the best candidate merged 6 points fewer objects), so that run was
+not made. One likely reason it cannot help more with two agents: when only
+two cars disagree, there is no way to tell which one is wrong, so alignment
+can only split the difference. A third agent, or a roadside unit with a
+surveyed position, would give it something to anchor to; that is not tested.
+test1 cannot be used to choose alignment settings at all: no frame has the 3
+objects both cars see that alignment needs.
 
 ## Where it fails, and what is not proven
 
@@ -122,12 +122,12 @@ alignment needs.
   is the mean of the two cars' labels.
 - **Too cautious on held-out data.** Position NEES of 0.25 means GodView says
   it is less sure than it is: one fixed pose uncertainty cannot fit offsets
-  that vary about 4x between drives. Alignment is the attempt to fix this;
-  it has not yet been shown to fix it on real data.
+  that vary about 4x between drives. Alignment was the attempt to fix this;
+  with two cars it did not (above).
 - **Alignment and the label truth.** With two cars, alignment moves each car
   to the midpoint, which is also where the truth (the mean of the two cars'
   labels) sits. That flatters objects both cars labeled, and moved objects
-  only one car labeled further from their truth (NEES 0.11 to 0.27).
+  only one car labeled further from their truth (NEES 0.11 to 0.24 after the fix).
 - **Labels that flip front and back** between the two cars split those
   objects at the heading check; a real detector would mark such headings as
   uncertain instead.
@@ -159,7 +159,8 @@ alignment needs.
   was huge and the solve amplified rounding. Fixed by adding the floor in
   every direction and using a relative tolerance in the solve; a test now
   checks 2,000 three-object cases (it reproduced a shift of about 2e14 m
-  before the fix). Run A has not yet been repeated with the fix.
+  before the fix). After the fix the held-out run had 0 such shifts, and
+  misses returned from 1.8% to 0.8%.
 - **Three rare simulator failures** that also fail on code before this work
   are open with reproduction commands:
   [#2](https://github.com/Galanafai/Godview/issues/2),

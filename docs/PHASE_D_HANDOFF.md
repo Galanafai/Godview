@@ -475,3 +475,33 @@ model on train and val, committed, then one test run; variants: self reports off
 fix passes), ego views and shared world, alignment off; reported per class (vehicle, pedestrian, truck) as
 well as pooled. After D3, Phase D has two steps left: D4 (choose the demo moment by rule and export) and D5
 (render); no new mechanisms before the demo unless a gate fails.
+
+### D3 status (2026-11-10): preparation done, blocked on disk and a training budget
+
+* **Published checkpoints:** none found. The V2X-Real README and the QuantV2X README and baseline tutorial
+  describe training and inference only; no weights are linked. So the handoff's path applies: train
+  PointPillars no-fusion with the repository's own config (`opencood/hypes_yaml/point_pillar_late_fusion.yaml`:
+  3 classes vehicle / pedestrian / truck, batch 4, 150 epochs, range +-70.4 x +-40 m, score threshold 0.2,
+  NMS 0.15) and gate it against the paper's No Fusion mAP (about 28.2 at IoU 0.3 and 21.2 at 0.5,
+  vehicle-centric, within about 2 points).
+* **Environment:** `/workspace/tools/V2X-Real` (commit `2b8acd5`) with the existing Python 3.7, torch
+  1.12 cu113, spconv 2.3.6 environment; the Cython extension builds; imports and the loader work; the
+  A40 is idle. Training runs end to end (a bounded speed test on the val data used as a stand-in
+  "train" set: 179 iterations of batch 4 in 3 min 28 s, the first iterations slower than the last; nothing
+  from it is a result).
+* **Data needed (LiDAR-128 version, the same sensor as the val already downloaded):** train1 to train4 zips
+  11.92 + 10.82 + 10.40 + 8.18 = 41.3 GB and test 14.03 GB (SHA-1 on the Box pages:
+  train1 `9db0b923...`, train2 `e051cdbc...`, train3 `67880b0d...`, train4 `2c98486d...`, test
+  `4147b904...`); unpacked about twice that (val: 4.9 GB zip, about 9.5 GB of point clouds), so about 110 GB
+  against 83 GB free. A range crop would save under 10 percent (90 to 98 percent of points are in range).
+  The old V2V4Real zips and raw splits (about 25 GB) are the only large items to remove; deleting data was
+  not authorized, so nothing was deleted and nothing was downloaded.
+* **Training cost (estimate from the speed test):** about 1.2 to 1.5 iterations per second at batch 4; the
+  full train split is roughly 5,800 frame-sets (about 70 percent of the dataset's 33 thousand agent-frames over
+  4 agents), so about 1,450 iterations, roughly 16 to 20 minutes per epoch. The repository's 150 epochs
+  would be about 40 to 50 GPU hours; a 10 GPU-hour budget gives about 30 to 35 epochs. Whether that passes the
+  gate is not known.
+* **Decision needed (Galanafai):** (1) permission to delete the V2V4Real raw data and zips (about 25 GB, re-downloadable
+  from Box with the recorded hashes; D1's exports and summaries stay), or train on part of the train split
+  (train1 and train2 only fit in the current space), or add disk; (2) the training budget (epochs or GPU hours), with the
+  gate deciding whether the result is used.

@@ -37,6 +37,7 @@ struct Args {
     self_reports: bool,
     same_source: bool,
     compete: bool,
+    single: bool,
     self_size: [f64; 3],
     self_offset: [f64; 2],
     offset_filter: bool,
@@ -56,6 +57,7 @@ fn parse_args() -> Args {
         self_reports: false,
         same_source: false,
         compete: false,
+        single: false,
         self_size: [4.57, 2.10, 2.29],
         self_offset: [0.60, 0.12],
         offset_filter: false,
@@ -66,7 +68,7 @@ fn parse_args() -> Args {
     let mut i = 0;
     while i < v.len() {
         let flag = |name: &str| v[i] == name;
-        if flag("--fresh-only") || flag("--self-reports") || flag("--self-same-source-exact") || flag("--self-compete")
+        if flag("--fresh-only") || flag("--self-reports") || flag("--self-same-source-exact") || flag("--self-compete") || flag("--self-single")
             || flag("--offset-filter") || flag("--anchor-rsu") || flag("--align")
         {
             match v[i].as_str() {
@@ -74,6 +76,7 @@ fn parse_args() -> Args {
                 "--self-reports" => a.self_reports = true,
                 "--self-same-source-exact" => a.same_source = true,
                 "--self-compete" => a.compete = true,
+                "--self-single" => a.single = true,
                 "--offset-filter" => a.offset_filter = true,
                 "--anchor-rsu" => a.anchor_rsu = true,
                 _ => a.align = true,
@@ -191,6 +194,7 @@ fn main() {
     config.self_reports = args.self_reports;
     config.world.self_same_source_exact = args.same_source;
     config.world.self_compete = args.compete;
+    config.world.self_single_per_source = args.single;
     config.ego_view = true;
     config.offset_filter.enabled = args.offset_filter;
     config.world.align.enabled = args.align;

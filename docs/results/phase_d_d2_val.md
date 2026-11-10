@@ -106,3 +106,22 @@ cross-agent disagreement), so there is little offset to correct, and adding synt
 the data back into a simulation. **Alignment and anchoring stay off for V2X-Real from here on** (the
 code and the V2V4Real results remain as they are). Wrong-merge accounting and AP for D3 use the
 same scoring rules, per class as well as pooled.
+
+## The bounded self-report fix on V2X-Real val (labels plus noise)
+
+`WorldModelConfig::self_single_per_source` (off by default; `--self-single` in `v2x-replay`): a self
+object absorbs at most one report per source per frame, the one closest to its footprint, and only if
+it is also that source's nearest confirmed report of any class. Unit test with four agents where only a
+unit sees the neighbour (170 core tests, node tests, DST seeds 1 to 3 pass). Acceptance stated before
+the run (`docs/PHASE_D_HANDOFF.md`): agent-involving wrong merges at most 20, AP within 0.5 point.
+
+| self reports, alignment off | wrong merges | involving an agent | vehicle-view AP@0.5 | unit-view AP@0.5 |
+|---|---|---|---|---|
+| off | 13,744 | 10 | 33.0 | 23.7 |
+| on, loose rule (D2) | 14,209 | 474 | 33.0 | 23.9 |
+| **on, one report per source** | 13,756 | **21** | 33.1 | 23.8 |
+
+The fix removes 96 percent of the agent-involving merges (474 to 21) and leaves AP unchanged, but 21 is
+one above the stated bar of 20 and twice the self-off level. **By the rule as written the bar is not
+met, so D3 runs with self reports off.** (A near miss; re-enabling them for D3 would be one more
+variant of the same replay and is left to Galanafai.) Output: `docs/results/phase_d/d2/val_fix_eval.json`.

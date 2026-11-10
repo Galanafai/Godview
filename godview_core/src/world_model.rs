@@ -118,6 +118,13 @@ pub struct WorldModelConfig {
     /// footprint: the agent cannot see itself, so such a report is the agent's
     /// neighbour. Off by default.
     pub self_compete: bool,
+    /// A self object absorbs at most one report per source: the one closest to its
+    /// footprint, and only if no other confirmed (published) track of that source, of
+    /// any class, lies closer to the footprint. A unit that sees a neighbour but not
+    /// the agent itself can then no longer have the neighbour taken for the agent when
+    /// the unit's own track of the agent exists, and several neighbours are never all
+    /// absorbed. Off by default.
+    pub self_single_per_source: bool,
 }
 
 /// How a fused object's ID is chosen.
@@ -151,6 +158,7 @@ impl Default for WorldModelConfig {
             self_gate_sigma: 2.0,
             self_same_source_exact: false,
             self_compete: false,
+            self_single_per_source: false,
         }
     }
 }
@@ -584,6 +592,7 @@ impl WorldModel {
             .collect();
         let mut taken = vec![false; items.len()];
         let mut assigned: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        let mut candidates: Vec<(usize, usize, f64)> = Vec::new();
         if selfs.is_empty() {
             return SelfPlan { selfs, taken, assigned };
         }
@@ -613,9 +622,34 @@ impl WorldModel {
                         continue;
                     }
                 }
+                if self.config.self_single_per_source {
+                    candidates.push((s, j, e));
+                    continue;
+                }
                 taken[j] = true;
                 assigned.entry(s).or_default().push(j);
                 snap.assigned_to_self += 1;
+            }
+        }
+        if self.config.self_single_per_source {
+            // Per self object and source: the candidate closest to the footprint, if it is also
+            // the source's nearest report of any class (no box or class gate).
+            let mut by_pair: BTreeMap<(usize, AgentId), Vec<(f64, ReportKey, usize)>> = BTreeMap::new();
+            for (s, j, e) in candidates {
+                by_pair.entry((s, items[j].key.0)).or_default().push((e, items[j].key, j));
+            }
+            for ((s, src), mut v) in by_pair {
+                v.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                let (_, key_best, j) = v[0];
+                let nearest_any = (0..items.len())
+                    .filter(|i| items[*i].key.0 == src && items[*i].key.1 != SELF_TRACK)
+                    .filter_map(|i| self.footprint_excess(&items[s], &items[i]).map(|x| (x, items[i].key)))
+                    .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                if nearest_any.map_or(true, |(_, k)| k == key_best) {
+                    taken[j] = true;
+                    assigned.entry(s).or_default().push(j);
+                    snap.assigned_to_self += 1;
+                }
             }
         }
         SelfPlan { selfs, taken, assigned }
@@ -764,6 +798,12 @@ impl WorldModel {
         if c.class_id != s.class_id || !self.config.box_gate.passes(Some(sb), c.object_box.as_ref()) {
             return None;
         }
+        self.footprint_excess(s, c).filter(|e| *e <= self.config.self_gate_sigma)
+    }
+
+    /// The excess of [`WorldModel::self_excess`] without its class, box or distance gates.
+    pub(crate) fn footprint_excess(&self, s: &Prepared, c: &Prepared) -> Option<f64> {
+        let sb = s.object_box.as_ref()?;
         let at = Ecef(s.x.fixed_rows::<3>(0).into_owned());
         let g = at.to_geodetic();
         let r = ecef_from_enu_rotation(g.lat_deg, g.lon_deg);
@@ -788,8 +828,7 @@ impl WorldModel {
         let ea = out(d.dot(&along), sb.size[0] / 2.0, sd(&along));
         let ec = out(d.dot(&across), sb.size[1] / 2.0, sd(&across));
         let ez = out(d.z, sb.size[2] / 2.0, sd(&Vector3::z()));
-        let e = (ea * ea + ec * ec + ez * ez).sqrt();
-        (e <= self.config.self_gate_sigma).then_some(e)
+        Some((ea * ea + ec * ec + ez * ez).sqrt())
     }
 
     /// Whether two prepared reports may describe the same object.
@@ -1267,6 +1306,49 @@ mod tests {
         let mut c = base;
         fix_gauge(&mut c, id(1), &[id(9)]);
         assert_eq!(c[0].translation.x, 0.0);
+    }
+
+    #[test]
+    fn a_self_object_absorbs_at_most_one_report_per_source_the_nearest() {
+        // Four agents: 1 = the vehicle with the self report (pose variance 2), 2 = a second
+        // vehicle, 3 and 4 = units. A neighbouring vehicle N, 3.4 m aside, is seen only by unit 3
+        // (which also sees agent 1 on its footprint); unit 4 sees a pedestrian 0.5 m from the
+        // footprint and N, but not agent 1; agent 2 sees agent 1.
+        let selfr = self_report_var(1, Vector3::new(0.0, 0.0, 0.0), 2.0);
+        let u3_agent = boxed(report(3, 1, 1, Vector3::new(0.8, 0.2, 0.0), 2.0, 1000), 4.5, 0.0);
+        let u3_nbr = boxed(report(3, 2, 1, Vector3::new(0.0, 3.4, 0.0), 2.0, 1000), 4.5, 0.0);
+        let u4_nbr = boxed(report(4, 1, 1, Vector3::new(0.1, 3.5, 0.0), 2.0, 1000), 4.5, 0.0);
+        let mut u4_ped = boxed(report(4, 2, 1, Vector3::new(0.5, 0.0, 0.0), 2.0, 1000), 0.8, 0.0);
+        u4_ped.class_id = 2;
+        let v2_agent = boxed(report(2, 1, 1, Vector3::new(-0.6, 0.1, 0.0), 2.0, 1000), 4.5, 0.0);
+        let t = Timestamp::from_millis(1000);
+        let run = |single: bool| {
+            let m = WorldModel::new(WorldModelConfig {
+                self_reports: true,
+                self_same_source_exact: true,
+                self_compete: true,
+                self_single_per_source: single,
+                ..WorldModelConfig::default()
+            });
+            m.snapshot(&store(&[selfr, u3_agent, u3_nbr, u4_nbr, u4_ped, v2_agent]), t, &TrustView::default())
+        };
+        // Without the rule, the neighbour is absorbed with the agent's own detections (twice, from
+        // units 3 and 4: nothing of agent 1 sees it, so there is no rival).
+        let loose = run(false);
+        let abs = |s: &WorldSnapshot| s.objects.iter().find(|o| o.self_agent.is_some()).unwrap().members.clone();
+        let src_tracks = |m: &Vec<(ReportKey, (u32, u64))>| m.iter().map(|((a, tr), _)| (a.0[0], tr.0)).collect::<Vec<_>>();
+        assert!(src_tracks(&abs(&loose)).contains(&(3, 2)), "the neighbour is taken without the rule: {:?}", src_tracks(&abs(&loose)));
+        // With it: one report per source. Unit 3: its detection of agent 1 (nearest). Unit 4: its nearest
+        // report overall is the pedestrian, so its vehicle-class neighbour is not taken. Agent 2: its detection.
+        let strict = run(true);
+        let members = src_tracks(&abs(&strict));
+        assert!(members.contains(&(3, 1)) && !members.contains(&(3, 2)), "{members:?}");
+        assert!(!members.contains(&(4, 1)), "unit 4's nearest report is the pedestrian: {members:?}");
+        assert!(members.contains(&(2, 1)) && members.contains(&(1, SELF_TRACK.0)), "{members:?}");
+        assert_eq!(members.iter().filter(|(a, _)| *a == 3).count(), 1);
+        // The neighbour stays its own object with its two views.
+        let nbr = strict.objects.iter().find(|o| o.self_agent.is_none() && o.sources().len() == 2);
+        assert!(nbr.is_some(), "the neighbour keeps units 3 and 4's views");
     }
 
     #[test]

@@ -141,3 +141,46 @@ lidar-to-box-centre offset (0.6 m on V2X-Real; not measured on V2V4Real).
   of about 0.7 m was left inside the gate, not corrected.
 * The refinements were added after seeing the first val result, and they are
   evaluated on the same frames (they are not tuned: no parameter was changed).
+
+## Update: the self object's position fused from the self report and its assigned reports
+
+Design change (2026-11-10, as asked): a self object's identity still comes from the
+self report, but its state is now fused from the self report and the reports
+assigned to it, like any cluster (covariance intersection in key order); the no-merge
+rule is unchanged. It is behind the same flag (`self_reports`), so the numbers above
+(position from the self report alone) are the behaviour of the earlier commit
+`a17708f`. A unit test checks that a precise detection pulls the position while the
+id, `self_agent`, membership and the neighbour's separation hold. Tests: 160 core
+tests, node tests, DST seeds 1 to 3 (all 60 runs) pass.
+
+**The two refinements (same-source exactness, competition) were added after the first
+val run** (the one that showed the literal rule taking neighbours); they are on in
+the runs below and are the choice for V2X-Real.
+
+V2V4Real val, both trackers, sharing, alignment off, both refinements on
+(`selfrep_val_fused_runs.json`; script `scripts/phase_d/selfreport_val_fused.sh`):
+
+| tracker | dataset AP | standard AP | wrong merges | missed | recording-car boxes covered (IoU 0.5) | nearest world box to those boxes, median / p90 |
+|---|---|---|---|---|---|---|
+| committed, off | 50.23 / 29.80 | 67.58 / 46.20 | 251 | 78 | 97.3% | 0.19 / 0.47 m |
+| committed, self position from the self report alone | 38.38 / 18.19 | 50.72 / 25.32 | 243 | 74 | 43.7% (literal rule; refined 46.9% for the selected tracker) | 1.06 / 1.94 m (selected) |
+| **committed, self position fused** | 41.88 / 19.44 | 54.15 / 28.78 | 243 | 74 | **59.0%** | 0.96 / 1.58 m |
+| selected, off | 67.17 / 42.06 | 70.72 / 48.98 | 202 | 669 | 96.2% | 0.19 / 0.49 m |
+| selected, self position from the self report alone | 51.46 / 26.05 | 53.23 / 26.76 | 227 | 639 | 46.9% | 1.06 / 1.94 m |
+| **selected, self position fused** | 55.54 / 27.90 | 56.84 / 30.16 | 227 | 639 | **59.0%** | 0.96 / 1.58 m |
+
+Coverage of all other objects is unchanged (74.6% and 70.9%, equal to off). Wrong
+assignments stay at 81 of 3,183 and 40 of 2,934. Wrong merges, misses and matched
+are the same as with the self-report-only position (the fusion changes positions, not
+membership).
+
+**The expectation (coverage back toward 97%) is not met.** Fusing raises coverage
+of the recording cars' boxes from 44 to 47 percent to 59 percent and AP by 3.5 to 4.1
+points, but not most of the way back. The reason is measured: the fused position lies
+a median 0.34 of the way (10th to 90th percentile 0.04 to 0.56) from the self report
+to the other car's detection of it (1,236 frames with the detection more than 0.5 m
+from the self position). The two have comparable covariances: both carry the declared
+pose sigma (1.27 m per car), and the detection's own noise (0.1 to 0.3 m) is not
+enough to make it dominate the self report's 0.1 m, so covariance intersection
+weights them about equally. The truth for a recording car is the other car's label
+in car 0's pose frame, which a covariance-weighted fusion cannot know to prefer.

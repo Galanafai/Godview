@@ -125,7 +125,8 @@ pub struct NodeConfig {
     pub receive: ReceiveConfig,
     /// Publish a self report (the agent's own pose and footprint, see
     /// [`SelfState`]) and let the world model assign reports that fall on a
-    /// known agent's footprint to that agent. Off by default; sets
+    /// known agent's footprint to that agent, whose position is then fused from
+    /// the self report and those reports. Off by default; sets
     /// `world.self_reports`.
     pub self_reports: bool,
     /// Apply the consistency monitor's trust view in fusion.

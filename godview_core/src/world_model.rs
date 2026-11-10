@@ -94,11 +94,13 @@ pub struct WorldModelConfig {
     pub align: AlignConfig,
     /// Treat reports with the reserved track id [`SELF_TRACK`] as their
     /// source's own position and footprint (off by default). Each becomes its
-    /// own world object, named by the source, and any other report whose
+    /// own world object, named by the source, whose state is fused from the
+    /// self report and the reports assigned to it (covariance intersection, as
+    /// for any cluster), and any other report whose
     /// centre lies within `self_gate_sigma` combined standard deviations of
     /// a self footprint (same class, compatible box) is assigned to that
-    /// agent: listed as a member for provenance, never fused into it and never
-    /// clustered with another object.
+    /// agent: a member of that agent's object, never clustered with another
+    /// object.
     pub self_reports: bool,
     /// How many combined standard deviations (the two reports' position
     /// covariances added, taken along and across the self box and vertically)
@@ -187,7 +189,7 @@ pub struct WorldObject {
     /// Fused box, heading counterclockwise from local East at the object.
     pub object_box: Option<ObjectBox>,
     /// Set when this object is an agent's own position and footprint (its self
-    /// report); the other members are reports assigned to it, not fused.
+    /// report); the other members are reports assigned to it, fused into its state.
     pub self_agent: Option<AgentId>,
 }
 
@@ -497,13 +499,16 @@ impl WorldModel {
         }
         let mut objects = Vec::with_capacity(selfs.len());
         for s in &selfs {
+            // The identity is the self report's; the state is fused from the self
+            // report and its assigned reports like any cluster (covariance
+            // intersection in key order), so a precise detection pulls it.
             let key = items[*s].key;
-            if let Some(mut o) = fuse_cluster(items, &[*s], t, key) {
+            let mut members: Vec<usize> = std::iter::once(*s)
+                .chain(assigned.get(s).into_iter().flatten().copied())
+                .collect();
+            members.sort_by_key(|m| items[*m].key);
+            if let Some(mut o) = fuse_cluster(items, &members, t, key) {
                 o.self_agent = Some(key.0);
-                for j in assigned.get(s).into_iter().flatten() {
-                    o.members.push((items[*j].key, items[*j].version));
-                }
-                o.members.sort_by_key(|m| m.0);
                 objects.push(o);
             }
         }
@@ -959,6 +964,44 @@ mod tests {
         let off = WorldModel::default().snapshot(&st, t, &TrustView::default());
         assert_eq!(off.assigned_to_self, 0);
         assert!(off.objects.iter().all(|o| o.self_agent.is_none()));
+    }
+
+    #[test]
+    fn a_precise_detection_pulls_the_self_objects_position_but_not_its_identity() {
+        // The agent's self report carries its pose uncertainty (variance 4); a
+        // neighbouring agent's lidar detection of it is precise (variance 0.01),
+        // 1.2 m away. The fused position follows the detection; the object is
+        // still the agent's (id, self_agent) and keeps both members. A car 3.4 m
+        // aside, which the agent itself also sees, is neither pulled in nor merged.
+        let selfr = self_report_var(1, Vector3::new(0.0, 0.0, 0.0), 4.0);
+        let seen = boxed(report(2, 1, 1, Vector3::new(1.2, 0.0, 0.0), 0.01, 1000), 4.5, 0.0);
+        let nbr_own = boxed(report(1, 1, 1, Vector3::new(0.1, 3.5, 0.0), 4.0, 1000), 4.5, 0.0);
+        let nbr_other = boxed(report(3, 1, 1, Vector3::new(0.0, 3.4, 0.0), 0.01, 1000), 4.5, 0.0);
+        let t = Timestamp::from_millis(1000);
+        // Both refinements on, as run on V2X-Real.
+        let model = WorldModel::new(WorldModelConfig {
+            self_reports: true,
+            self_same_source_exact: true,
+            self_compete: true,
+            ..WorldModelConfig::default()
+        });
+        let snap = model.snapshot(&store(&[selfr, seen, nbr_own, nbr_other]), t, &TrustView::default());
+        let me = snap.objects.iter().find(|o| o.self_agent.is_some()).expect("self object");
+        assert_eq!(me.id, (AgentId([1; 32]), SELF_TRACK));
+        let sources: Vec<u8> = me.members.iter().map(|((a, _), _)| a.0[0]).collect();
+        assert_eq!(sources, vec![1, 2]);
+        let enu = site().from_ecef(&me.position());
+        assert!((enu.x - 1.2).abs() < 0.1 && enu.y.abs() < 0.1, "pulled to the precise detection: {enu:?}");
+        // The neighbour stays its own object with its two views, untouched by the self object.
+        assert_eq!(snap.objects.len(), 2);
+        let other = snap.objects.iter().find(|o| o.self_agent.is_none()).unwrap();
+        assert_eq!(other.sources().len(), 2);
+        let nb = site().from_ecef(&other.position());
+        assert!((nb - Vector3::new(0.0, 3.45, 0.0)).norm() < 0.2, "{nb:?}");
+        // With the detection absent the self object sits at the self report.
+        let alone = model.snapshot(&store(&[selfr]), t, &TrustView::default());
+        let at = site().from_ecef(&alone.objects[0].position());
+        assert!(at.norm() < 1e-3, "{at:?}");
     }
 
     #[test]

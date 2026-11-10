@@ -337,3 +337,11 @@ The self-report feature is validated on V2V4Real val only
 (`docs/results/phase_d_selfreport_val.md`); V2X-Real is its real test, and
 the choice of which variant (literal, or with the two refinements) to run there is
 made in the step 2 plan before any V2X-Real run.
+
+Decision (2026-11-10): V2X-Real runs use self reports with **both refinements**
+(same-source exactness and competition); they were added after the first V2V4Real
+val run, and the self object's position is fused from the self report and its
+assigned reports. On V2V4Real val that fused version covers 59 percent of the
+recording cars' ground-truth boxes against 97 percent without self reports
+(`docs/results/phase_d_selfreport_val.md`), which did not meet the expectation
+that coverage would return toward 97 percent, so D2 step 2 was held for review.
